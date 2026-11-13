@@ -21,7 +21,7 @@ from .common import BaseNode,STATE,SENSOR,run,topic
 from soarm_station.dashboard_data import resources,render_motors,validate_motor_record
 from soarm_station.graph_observer import GraphObserver
 
-ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js'))
+ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
 async def resolved(f,timeout=5):

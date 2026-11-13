@@ -5,7 +5,7 @@ Authenticated JSON contracts for resource descriptors, cached motor telemetry an
 
 ## Static assets
 
-Public GET `/assets/{file}` serves only explicit `.js`/`.css` files in `web/`: `app.js`, `graph.js`, `transport.js`, `styles.css`, `camera-layout.js`. No directory traversal or generic filesystem exposure. `/` remains public. APIs, media and WebSockets remain authenticated.
+Public GET `/assets/{file}` serves only explicit `.js`/`.css` files in `web/`: `app.js`, `graph.js`, `transport.js`, `styles.css`, `camera-layout.js`, `payload-model.js`. No directory traversal or generic filesystem exposure. `/` remains public. APIs, media and WebSockets remain authenticated.
 
 ## GET /api/status (additive)
 
@@ -93,3 +93,9 @@ Sampling counters include the terminating message; a custom oversized message ca
 ```
 
 There are 1..16 endpoints. Position is metres; quaternion order is XYZW. POSITION_ONLY and STRICT_POSE are the existing supported orientation modes. STRICT_POSE requires an orientation. Mixed joint/Cartesian bodies, malformed/nonfinite vectors and Cartesian STREAM reject. Registered-model/frame/IK/path limits and permission/operation checks remain authoritative. No Cartesian jog or continuous Cartesian-path feature is added.
+
+## Reloading the dashboard process
+
+Static JS/CSS changes are read from disk on each request; reload the browser to load a new module. A change to the Python asset allowlist needs the dashboard process to load the new code. In a service launch using `respawn:=true`, gracefully terminate only the `dashboard_node` child after confirming no active operation/control authority; launch recreates it after the three-second respawn delay. This does not replace `lerobot_node` or its native worker. Verify their PID/runtime boot and permission/write count before and after.
+
+Use the actual dashboard child in the service cgroup, identified by its full executable path; do not use a stale PID. Dashboard HTTP/WebSocket sessions reconnect. A full service restart is unnecessary for a dashboard-only route/module update. If foreground launch has `respawn:=false`, it does not recreate the node automatically.

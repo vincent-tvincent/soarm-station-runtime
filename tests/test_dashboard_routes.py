@@ -16,6 +16,7 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
     token='t'*32
     root=tmp_path/'web';root.mkdir();(root/'index.html').write_text('Dashboard')
     (root/'app.js').write_text('export const application=true;')
+    (root/'payload-model.js').write_text('export const payload=true;')
     (tmp_path/'secrets.env').write_text('private')
     monkeypatch.setenv('SOARM_STATION_ROOT',str(tmp_path))
     config={'device_id':'test','arms':[{'id':'arm1','backend':'mock','joints':[{'name':'joint','min_rad':-1.,'max_rad':1.,'velocity_rad_s':1.}]}],'cameras':[],'profiles':{}}
@@ -31,7 +32,8 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
         async with TestClient(TestServer(DashboardNode.create_app(owner,token))) as client:
             for path in ('/api/status','/api/resources','/api/graph','/api/v1/ros/graph'):
                 async with client.get(path) as response:assert response.status==401
-            async with client.get('/assets/app.js') as response:assert response.status==200 and 'javascript' in response.content_type
+            for name in ('app.js','payload-model.js'):
+                async with client.get('/assets/'+name) as response:assert response.status==200 and 'javascript' in response.content_type
             for path in ('/assets/secrets.env','/assets/unknown.js','/assets/%2e%2e%2fsecrets.env'):
                 async with client.get(path) as response:assert response.status==404
             headers={'Authorization':'Bearer '+token}
