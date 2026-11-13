@@ -202,6 +202,9 @@ class FixturePolicy:
     def close(self):pass
 
 def load_session(profile):
+    if profile.get('backend')=='local' and profile.get('_artifact'):
+        from .policy_native import load_managed_local
+        return load_managed_local(profile)
     if profile.get('backend')=='fixture':return FixturePolicy(profile)
     return RemotePolicy(profile) if profile.get('backend')=='remote' else LocalPolicy(profile)
 

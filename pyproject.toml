@@ -6,7 +6,7 @@ name = "soarm-station-runtime"
 version = "0.1.0"
 description = "Configurable Linux ROS 2 and LeRobot workstation"
 requires-python = ">=3.12"
-dependencies = ["PyYAML>=6,<7", "aiohttp>=3.12,<4", "numpy>=2,<3", "opencv-python-headless>=4.10,<6", "cryptography>=41"]
+dependencies = ["PyYAML>=6,<7", "ruamel.yaml>=0.18.16,<0.19", "aiohttp>=3.12,<4", "numpy>=2,<3", "opencv-python-headless>=4.10,<6", "cryptography>=41"]
 [project.scripts]
 soarm-station-worker = "soarm_station.worker:main"
 soarm-station-collector = "soarm_station.collector:main"

@@ -81,6 +81,15 @@ def load(path):
     if type(topics)!=int or not 1<=topics<=2:raise ValueError('At most two graph topics may be sampled concurrently')
     if isinstance(duration,bool) or not isinstance(duration,(int,float)) or not math.isfinite(duration) or not .1<=duration<=10:
         raise ValueError('Graph sampling duration must be in [0.1,10]')
+    management=c.setdefault('policy_management',{})
+    if not isinstance(management,dict):raise ValueError('policy_management must be a mapping')
+    root=Path(__file__).resolve().parents[2]
+    defaults={'source_config':root/'config/model-sources.yaml','profiles_dir':root/'local/policy-profiles',
+        'cache_db':root/'local/policy-management.sqlite3','run_dir':root/'local/policy-runs'}
+    if management.get('profile_store') and not management.get('profiles_dir'):management['profiles_dir']=management['profile_store']
+    for key,default in defaults.items():
+        value=Path(management.get(key,default)).expanduser()
+        management[key]=str((value if value.is_absolute() else path.parent/value).resolve())
     c['_path']=str(path)
     c['_revision']=hashlib.sha256(json.dumps(c,sort_keys=True).encode()).hexdigest()
     return c

@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import ssl
@@ -23,9 +24,11 @@ from soarm_station.web_access import dashboard_access_middleware
 from soarm_station.web_streams import stream_camera_frames
 from soarm_station.manual_http import ManualRoutes
 from soarm_station.leader_gateway import LeaderHostRegistry
+from soarm_station.policy_manager import PolicyManager
+from soarm_station.policy_http import mount_policy_routes
 from soarm_station.ipc import Client
 
-ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','fk-view.js'))
+ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
 async def resolved(f,timeout=5):
@@ -38,6 +41,7 @@ class DashboardNode(BaseNode):
     def __init__(self):
         super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
         self.motor_records={};self.motor_record_errors={};self.public_resources=resources(self.config)
+        self.policy_manager=PolicyManager(self.config,resources=lambda:self.public_resources,bridge=Client(self.config['socket']))
         self.graph_observer=GraphObserver(self,self.config.get('graph_observer',{}));self.graph_observer.start()
         group=ReentrantCallbackGroup()
         self.permission_client=self.create_client(SetControlPermission,'/soarm_station/lerobot/set_permission',callback_group=group)
@@ -94,6 +98,7 @@ class DashboardNode(BaseNode):
             return await asyncio.to_thread(call)
         self.leader_registry=LeaderHostRegistry(self.state,conditional_hold)
         self.leader_registry.register_routes(app)
+        if getattr(self,'policy_manager',None) is not None:mount_policy_routes(app,self.policy_manager)
         return app
     async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_STATION_ROOT'])/'web/index.html').read_text(),content_type='text/html')
     def motor_health(self,message):
@@ -115,15 +120,22 @@ class DashboardNode(BaseNode):
         root=(Path(os.environ['SOARM_STATION_ROOT'])/'web').resolve();path=(root/name).resolve()
         if path.parent!=root or not path.is_file():raise web.HTTPNotFound()
         return web.FileResponse(path,headers={'Cache-Control':'no-cache'})
-    async def api_resources(self,request):return web.json_response(self.public_resources)
+    def resource_view(self):
+        value=copy.deepcopy(self.public_resources)
+        if getattr(self,'policy_manager',None) is not None:
+            prepared=self.policy_manager.public_runtime_profiles()
+            value['profiles']=[p for p in value['profiles'] if not p['id'].startswith('pm_')]+prepared
+            for arm in value['arms']:arm['profile_ids']=[p['id'] for p in value['profiles'] if p.get('arm_id')==arm['id']]
+        return value
+    async def api_resources(self,request):return web.json_response(await asyncio.to_thread(self.resource_view))
     async def graph_status(self,request):return web.json_response(self.graph_observer.snapshot(),headers={'Cache-Control':'no-store'})
     async def graph_sample(self,request):
         body=await request.json()
         if not isinstance(body,dict):raise ValueError('JSON object required')
         return web.json_response(self.graph_observer.sample(body))
-    def state(self):return {'schema_version':1,'resources':self.public_resources,
+    def state(self):return {'schema_version':1,'resources':self.resource_view(),
         'motor_status':render_motors(self.config,dict(self.motor_records),dict(self.joints),dict(self.states),time.time_ns(),dict(self.motor_record_errors)),'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
-    async def status(self,r):return web.json_response(self.state())
+    async def status(self,r):return web.json_response(await asyncio.to_thread(self.state))
     async def history(self,r):
         q=QueryHistory.Request();q.arm_id=r.query.get('arm','');q.after_sequence=int(r.query.get('after',0));q.page_size=min(500,int(r.query.get('limit',100)))
         return web.json_response(asdict(await resolved(self.history_client.call_async(q))))
@@ -199,6 +211,7 @@ class DashboardNode(BaseNode):
             await ws.close()
         return ws
     def destroy_node(self):
+        self.policy_manager.close()
         self.graph_observer.close()
         self.stopping=True;self.loop.call_soon_threadsafe(self.loop.stop);self.thread.join(timeout=4);super().destroy_node()
 def main():run(DashboardNode)

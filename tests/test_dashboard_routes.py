@@ -23,7 +23,7 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
     async def unused(request):raise AssertionError('Actuation route was not requested')
     owner=types.SimpleNamespace(config=config,public_resources=resources(config),motor_records={},motor_record_errors={},states={},inference={},joints={},images={},upload={},events=[],workflows={},decisions=[])
     for name in ('permission','hold','stream_input','operate','operation_status','start_workflow','history','image','control','camera_stream'):setattr(owner,name,unused)
-    for name in ('index','asset','api_resources','graph_status','graph_sample','state','status','camera_stream'):
+    for name in ('index','asset','api_resources','graph_status','graph_sample','resource_view','state','status','camera_stream'):
         setattr(owner,name,types.MethodType(getattr(DashboardNode,name),owner))
     owner.images={'forward':(b'\xff\xd8camera',1)};owner.stopping=False
     owner.graph_observer=types.SimpleNamespace(snapshot=lambda:{'schema_version':1,'nodes':[],'topics':[],'services':[],'actions':[],'edges':[]},

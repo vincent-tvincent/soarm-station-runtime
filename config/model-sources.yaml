@@ -1,0 +1,7 @@
+schema_version: 1
+roots:
+  - id: project
+    label: Project policies
+    path: ../local/models
+    enabled: true
+    allow_upload: true

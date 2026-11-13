@@ -3,6 +3,7 @@ import json
 import socket
 import struct
 import threading
+from .policy_common import PolicyError
 MAX_BYTES=1048576
 def receive(sock):
     def exact(n):
@@ -27,7 +28,9 @@ class Client:
                 if self.sock is None:
                     self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(2);self.sock.connect(self.path)
                 send(self.sock,{'op':op,**kwargs});r=receive(self.sock)
-                if not r['ok']: raise ValueError(r['error'])
+                if not r['ok']:
+                    if r.get('code'):raise PolicyError(r['code'],r['error'],r.get('status',400),r.get('details'))
+                    raise ValueError(r['error'])
                 return r['data']
             except (OSError,EOFError):
                 if self.sock: self.sock.close()

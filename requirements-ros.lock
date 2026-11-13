@@ -11,3 +11,6 @@ opencv-python-headless==5.0.0.93
 propcache==0.5.4
 uv==0.13.8
 yarl==1.25.1
+
+ruamel.yaml==0.18.16
+ruamel.yaml.clib==0.2.15; python_version < "3.14"

@@ -29,7 +29,7 @@ class ArmController:
         self.semantic_revision=0;self.semantic_record=None;self.last_input_error=''
         self.last_frame_sequence=None;self.last_frame_window_remaining_ms=None;self.rejected_frames=0;self.hold_context={}
         self.limits=config.get('operation_limits',{})
-        self.model=None;self.model_state='IDLE';self.model_reason=''
+        self.policy_preparation=None;self.model=None;self.model_state='IDLE';self.model_reason=''
         self.tracking_wait={};self.tracking_anchor={};self.tracking_outside_since=None
         self.stats={'lead_limited_ticks':0,'tracking_wait_ticks':0}
         self.completed={}; self.accepted={}; self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='policy-'+self.id)
@@ -193,6 +193,7 @@ class ArmController:
             if request.get('runtime_boot_id')!=self.boot or request.get('controller_session')!=self.session:
                 raise ValueError('Runtime/session mismatch')
             kind=request['operation_type'];mode=request['mode']
+            if kind=='MODEL' and self.policy_preparation:raise ValueError('Native policy preparation is in progress')
             if kind not in ('DIRECT','TRAJECTORY','MODEL') or mode not in ('INLINE','STREAM'):raise ValueError('Unsupported operation')
             constraints=request.get('constraints',{})
             if constraints.get('required_clearance_m',0)>0 or constraints.get('cartesian_path',False):

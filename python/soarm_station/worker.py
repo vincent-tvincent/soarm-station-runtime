@@ -9,17 +9,21 @@ from .control import ArmController,uid
 from .camera import Camera
 from .ipc import receive,send
 from .hardware import DeviceLock
+from .policy_runtime import PolicyRuntime
+from .policy_common import PolicyError
 
 class Runtime:
     def __init__(self,c):
         self.config=c;self.boot=uid()
         self.cameras={x['id']:Camera(x,c['frame_dir'],c['lock_dir']) for x in c['cameras']}
         self.arms={x['id']:ArmController(x,c,self.boot,self.cameras) for x in c['arms']}
+        self.policy_runtime=PolicyRuntime(self)
         self.recovery_stop=threading.Event()
         self.recovery=threading.Thread(target=self.recover,daemon=True)
     def start(self):
         self.recovery.start()
         for x in [*self.arms.values(),*self.cameras.values()]: x.start()
+        self.policy_runtime.start()
     def recover(self):
         from .hardware import make_arm
         while not self.recovery_stop.wait(2.):
@@ -35,17 +39,23 @@ class Runtime:
                         arm.hold_pending=False;arm.hold_event.set()
                     arm.thread=threading.Thread(target=arm.run,daemon=True,name='arm-'+arm.id);arm.start()
     def close(self):
+        self.policy_runtime.close()
         self.recovery_stop.set();self.recovery.join(timeout=3)
         for x in self.arms.values(): x.close()
         for x in self.cameras.values(): x.close()
     def call(self,r):
         op=r['op']
+        if op=='policy_capabilities':return {'runtime_boot_id':self.boot,'local_prepare':True,'remote_inspect':True}
+        if op=='policy_runtime':return self.policy_runtime.snapshot()
+        if op=='policy_job':return self.policy_runtime.job(r['job_id'])
+        if op=='policy_inspect':return self.policy_runtime.inspect(r['execution'],r.get('settings'))
+        if op=='policy_prepare':return self.policy_runtime.prepare(**{k:r[k] for k in ('document','profile_revision','runtime_profile','mode','source_revision') if k in r})
         if op=='snapshot': return {'runtime_boot_id':self.boot,'config_revision':self.config['_revision'],
             'arms':{n:a.snapshot() for n,a in self.arms.items()},'cameras':{n:a.snapshot() for n,a in self.cameras.items()}}
         if r.get('arm_id') not in self.arms: raise ValueError('Unknown arm resource')
         a=self.arms[r['arm_id']]
         if op=='permission': return a.set_permission(r['enable'],r['principal'],r['controller_session'])
-        if op=='begin': return a.begin(r['request'])
+        if op=='begin': return self.policy_runtime.begin(a,r['request'])
         if op=='input': return a.input(r['frame'])
         if op=='hold': return a.hold()
         if op=='hold_owned': return a.hold_owned(r['controller_session'],r['principal'],r.get('operation_id'))
@@ -70,6 +80,7 @@ def main():
                 try:
                     r=receive(self.request)
                     try: response={'ok':True,'data':runtime.call(r)}
+                    except PolicyError as exc: response={'ok':False,'error':exc.message,'code':exc.code,'status':exc.status,'details':exc.details}
                     except Exception as exc: response={'ok':False,'error':str(exc)}
                     send(self.request,response)
                 except (OSError,EOFError,ValueError): return

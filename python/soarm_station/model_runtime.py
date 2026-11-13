@@ -14,6 +14,16 @@ class ModelSupervisor:
         self.pending=None;self.active=None;self.due=0.;self.moving=False;self.held_token=None
         self.prepared=None;self.last_prepare=-1e30;self.pending_ready=0.
         self.loads=0;self.resets=0;self.actions=0;self.wait_ticks=0;self.holds=0
+    def install_prepared(self,profile,session):
+        """Install an idle paused session; caller owns the arm lock and drained old work."""
+        if self.owner.op is not None and self.owner.op.get('operation_type')=='MODEL':
+            raise ValueError('Cannot replace an active MODEL session')
+        self.session=session;self.profile_key=hashlib.sha256(json.dumps(profile,sort_keys=True).encode()).hexdigest()
+        self.token=None;self.job=None;self.pending=None;self.active=None;self.prepared=None
+        self.needs_reset=True;self.failed_operation_id=None;self.session_operation_id=None
+        self.current_profile=profile;self.current_key=self.profile_key;self.moving=False;self.held_token=None
+        self.loads+=1
+
     def invalidate(self):
         self.token=None;self.pending=None;self.active=None;self.prepared=None;self.moving=False;self.held_token=None
         if self.session is not None:self.session.pause()

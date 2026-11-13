@@ -1,0 +1,16 @@
+# Schema-valid draft. Select a real catalog entry/revision and its exact trained
+# bindings before preparation; this example is not a ready trained policy.
+schema_version: 1
+id: my_policy
+name: My saved policy
+execution:
+  kind: local
+  device: cpu
+model:
+  source_id: project
+  relative_path: your-checkpoint
+bindings:
+  arm: arm1
+  cameras:
+    observation.images.front: forward
+extensions: {}
