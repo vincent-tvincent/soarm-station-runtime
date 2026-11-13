@@ -119,6 +119,19 @@ class ArmController:
                 return {'accepted':True,'controller_session':self.session,'permission':True}
             self.permission=True;self.principal=principal;self.phase='IDLE';self.error=''
             return {'accepted':True,'controller_session':self.session,'permission':True}
+    def hold_owned(self,session,principal,operation_id=None,reason='SOURCE_STOP'):
+        """Late cleanup cannot stop a different owner or a replacement operation."""
+        with self.lock:
+            if session!=self.session or not principal or principal!=self.principal:
+                return {'success':False,'message':'Owner changed; no hold issued'}
+            current=self.op['operation_id'] if self.op else None
+            if current!=operation_id:
+                return {'success':False,'message':'Operation changed; no hold issued'}
+            if not self.permission and not self.op and not self.hold_pending:
+                return {'success':True,'message':'Already stopped'}
+            self._hold(reason)
+        confirmed=self.hold_event.wait(1.5)
+        return {'success':confirmed and self.phase!='FAULT','message':self.error or reason}
     def _target(self,body):
         q=body.get('positions',{})
         names={j['name'] for j in self.config['joints']}

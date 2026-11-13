@@ -21,8 +21,11 @@ from soarm_station.dashboard_data import resources,render_motors,validate_motor_
 from soarm_station.graph_observer import GraphObserver
 from soarm_station.web_access import dashboard_access_middleware
 from soarm_station.web_streams import stream_camera_frames
+from soarm_station.manual_http import ManualRoutes
+from soarm_station.leader_gateway import LeaderHostRegistry
+from soarm_station.ipc import Client
 
-ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js'))
+ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','fk-view.js'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
 async def resolved(f,timeout=5):
@@ -82,6 +85,15 @@ class DashboardNode(BaseNode):
         app.router.add_get('/api/resources',self.api_resources)
         app.router.add_get('/api/graph',self.graph_status);app.router.add_get('/api/v1/ros/graph',self.graph_status)
         app.router.add_post('/api/graph/sample',self.graph_sample);app.router.add_post('/api/v1/ros/sample',self.graph_sample)
+        ManualRoutes(self.config).mount(app)
+        async def conditional_hold(arm,session,principal,operation_id=None):
+            def call():
+                client=Client(self.config['socket'])
+                try:return client.call('hold_owned',arm_id=arm,controller_session=session,principal=principal,operation_id=operation_id)
+                finally:client.close()
+            return await asyncio.to_thread(call)
+        self.leader_registry=LeaderHostRegistry(self.state,conditional_hold)
+        self.leader_registry.register_routes(app)
         return app
     async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_STATION_ROOT'])/'web/index.html').read_text(),content_type='text/html')
     def motor_health(self,message):
@@ -182,7 +194,8 @@ class DashboardNode(BaseNode):
             if not ws.closed:await ws.send_json({'type':'error','reason':str(exc)[:512]})
         finally:
             if h:h.cancel_goal_async()
-            if arm:self.hold_client.call_async(Hold.Request(arm_id=arm))
+            # Action cancellation is bound to that operation in the native owner.
+            # A late socket close must not issue an unscoped hold on its replacement.
             await ws.close()
         return ws
     def destroy_node(self):

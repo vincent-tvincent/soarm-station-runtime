@@ -13,8 +13,8 @@
         <a class="brand" href="#operations">SOARM / STATION</a>
         <nav aria-label="Workspace">
           <button class="nav-item active" data-page="operations">
-            01 Operations</button
-          ><button class="nav-item" data-page="graph">02 ROS graph</button>
+            Operations</button
+          ><button class="nav-item" data-page="graph">ROS graph</button>
         </nav>
         <div class="connection">
           <span id="environment"></span><span id="connection">Connecting…</span
@@ -28,7 +28,7 @@
           <h1 id="page-title">Robot operations</h1>
           <div class="title-rule"></div>
         </div>
-        <span id="page-series">CONTROL / 01</span>
+        <span id="page-series">CONTROL</span>
       </div>
       <main id="operations" class="page">
         <div class="arm-toolbar">
@@ -54,14 +54,14 @@
             ><small>ms</small>
           </div>
           <div>
-            <span id="upload-label">History upload</span
+            <span id="upload-label">Telemetry upload</span
             ><strong id="queued">—</strong><small>records queued</small>
           </div>
         </div>
         <div class="operations-workspace">
           <section class="observation">
             <div class="section-heading">
-              <h2><b>01</b> Observation</h2>
+              <h2>Observation</h2>
               <div
                 class="segmented compact"
                 role="group"
@@ -85,7 +85,7 @@
           </section>
           <aside class="operation-panel">
             <div class="section-heading">
-              <h2><b>02</b> Operator panel</h2>
+              <h2>Operator panel</h2>
             </div>
             <div class="panel-tabs" role="tablist" aria-label="Operator panel">
               <button
@@ -187,25 +187,7 @@
                 role="tabpanel"
                 aria-labelledby="tab-manual"
                 hidden
-              >
-                <div class="small-heading">
-                  Joint targets <span>radians / gripper %</span>
-                </div>
-                <div id="manual-joints" class="manual-joints">
-                  <p class="muted">
-                    Select an arm to load its limits and current position.
-                  </p>
-                </div>
-                <div class="button-row">
-                  <button id="reset-targets">Use measured pose</button
-                  ><button id="start-manual" class="primary" disabled>
-                    Start manual stream
-                  </button>
-                </div>
-                <p id="manual-note" class="detail-note">
-                  Targets stay local until you start the stream.
-                </p>
-              </section>
+              ></section>
               <section
                 id="panel-payload"
                 role="tabpanel"

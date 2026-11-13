@@ -1,5 +1,6 @@
 """Public dashboard descriptors and cached motor telemetry; no device access."""
 import math
+from .motor_issues import project_motor_issues,validate_motor_issues,motor_issue_for
 
 
 def finite(value):
@@ -61,7 +62,7 @@ def health_rows(config,calibration,torque,voltage,temp,goals=None,source='measur
     return rows
 
 
-def motor_snapshot(snapshot):
+def motor_snapshot(snapshot,arm_config=None):
     """Wire-only projection of existing owner data, excluding command envelopes."""
     health=snapshot.get('health',{})
     return {'arm_id':snapshot['arm_id'],'health_time_ns':snapshot.get('health_time_ns',0),
@@ -69,7 +70,8 @@ def motor_snapshot(snapshot):
         'positions':{n:finite(v) for n,v in snapshot.get('positions',{}).items()},'gripper':finite(snapshot.get('gripper')),
         'position_time_ns':snapshot.get('time_ns',0),
         'reference_positions':{n:finite(v) for n,v in snapshot['reference_positions'].items()} if snapshot.get('reference_positions') is not None else None,
-        'reference_gripper':finite(snapshot.get('reference_gripper'))}
+        'reference_gripper':finite(snapshot.get('reference_gripper')),
+        'motion_issues':project_motor_issues(snapshot,arm_config=arm_config)}
 
 
 def stamp_ns(message):
@@ -111,7 +113,8 @@ def validate_motor_record(record,arm):
             **{key:number(row.get(key)) for key in ('goal_position','temperature_c','voltage_v','current_a')}})
     return {'arm_id':arm['id'],'health_time_ns':timestamp('health_time_ns'),'position_time_ns':timestamp('position_time_ns'),
         'health_source':source,'motors':checked,'positions':positions('positions'),'gripper':number(record.get('gripper')),
-        'reference_positions':positions('reference_positions',True),'reference_gripper':number(record.get('reference_gripper'))}
+        'reference_positions':positions('reference_positions',True),'reference_gripper':number(record.get('reference_gripper')),
+        'motion_issues':validate_motor_issues(record.get('motion_issues'),definitions.keys())}
 
 
 def render_motors(config,records,joints,states,wall_ns,errors=None):
@@ -142,6 +145,8 @@ def render_motors(config,records,joints,states,wall_ns,errors=None):
                 'torque_enabled':r.get('torque_enabled') if isinstance(r.get('torque_enabled'),bool) else None,
                 'temperature_c':finite(r.get('temperature_c')),'voltage_v':finite(r.get('voltage_v')),'current_a':finite(r.get('current_a')),
                 'source_state':('stale' if position_age is not None and position_age>500 and health_ns else state) if r else 'unavailable'}
+            issue_fresh=bool(gripper_ns) and 0<=(wall_ns-gripper_ns)/1e6<=500 and not error and not stale
+            row['motion_issue']=motor_issue_for(record.get('motion_issues'),name,fresh=issue_fresh)
             row['unavailable_fields']=[k for k in ('id','position','goal_position','reference_position','torque_enabled','temperature_c','voltage_v','current_a') if row[k] is None]
             rows.append(row)
         if state!='unavailable' and any(row['source_state']=='stale' for row in rows):state='stale'

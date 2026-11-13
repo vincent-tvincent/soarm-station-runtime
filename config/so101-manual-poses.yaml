@@ -1,0 +1,15 @@
+# Established SO-101 Home from the previous controller; radians, jaw preserved.
+# Merge under one explicitly selected arm. This is not a new physical validation.
+manual_control:
+  poses:
+    home:
+      positions:
+        shoulder_pan: 0.0
+        shoulder_lift: -0.8726646259971648
+        elbow_flex: 1.1344640137963142
+        wrist_flex: 0.0
+        wrist_roll: 0.0
+      gripper: preserve
+  wrist_roll_reference_rad: 0.0
+  operator_tool_rpy: [0.0, 0.0, 3.141592653589793]
+  solve_budget_ms: 40.0

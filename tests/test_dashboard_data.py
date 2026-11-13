@@ -130,3 +130,53 @@ def test_bad_motor_metadata_rejects_at_configuration_load(tmp_path,bad):
     c=config();c['arms'][0]['joints'][0].update(bad)
     path=tmp_path/'config.yaml';path.write_text(yaml.safe_dump(c))
     with pytest.raises(ValueError):load(path)
+
+
+def issue_snapshot(c,*,sample_ns=10_000_000_000,health_ns=9_900_000_000):
+    arm=c['arms'][0];names=[j['name'] for j in arm['joints']]+['gripper']
+    rows=health_rows(arm,{},dict.fromkeys(names,1),dict.fromkeys(names,12.),dict.fromkeys(names,30.),source='simulated')
+    q={j['name']:0. for j in arm['joints']}
+    return {'arm_id':'arm1','phase':'ACTIVE','error':'','age_ms':5.,'sequence':10,
+        'time_ns':sample_ns,'health_time_ns':health_ns,'positions':q,'reference_positions':dict(q),
+        'gripper':40.,'reference_gripper':40.,'health':{'source':'simulated','motors':rows},
+        'stats':{'tracking_state':'FOLLOWING','limited_actuators':[]},'hold_context':{}}
+
+
+def test_motor_issue_projection_survives_validated_wire_and_rendering_without_blanket_faults():
+    c=config();snapshot=issue_snapshot(c);snapshot.update(phase='HOLD',error='TRACKING_STALLED: shoulder_pan')
+    wire=motor_snapshot(snapshot,c['arms'][0]);checked=validate_motor_record(wire,c['arms'][0])
+    result=render_motors(c,{'arm1':checked},{},{},10_050_000_000)['arm1']
+    marked={m['name']:m['motion_issue'] for m in result['motors']}
+    assert marked['shoulder_pan']['state']=='stall' and marked['shoulder_pan']['active'] is True
+    assert not any(v['active'] for k,v in marked.items() if k!='shoulder_pan')
+    recovered=validate_motor_record(motor_snapshot(issue_snapshot(c),c['arms'][0]),c['arms'][0])
+    row=render_motors(c,{'arm1':recovered},{},{},10_050_000_000)['arm1']['motors'][0]
+    assert row['motion_issue']['state']=='clear' and set(row['motion_issue']['clear_kinds'])=={'stall','fault'}
+
+
+def test_new_joint_state_cannot_refresh_an_old_motor_issue_clear_record():
+    c=config();wire=validate_motor_record(motor_snapshot(issue_snapshot(c),c['arms'][0]),c['arms'][0])
+    joint={'header':{'stamp':{'sec':12,'nanosec':0}},'name':['shoulder_pan'],'position':[.2]}
+    row=render_motors(c,{'arm1':wire},{'arm1':joint},{},12_000_000_000)['arm1']['motors'][0]
+    assert row['position']==.2 and row['position_age_ms']==0
+    assert row['motion_issue']['state']=='unknown' and row['motion_issue']['clear_kinds']==[]
+
+
+@pytest.mark.parametrize('current_state,wall_ns,health_ns',[
+    ({},10_200_000_000,7_600_000_000),
+    ({'arm1':{'phase':'FAULT'}},10_050_000_000,9_900_000_000),
+])
+def test_stale_health_or_current_fault_suppresses_cached_clear_even_with_fresh_positions(current_state,wall_ns,health_ns):
+    c=config();native=issue_snapshot(c,health_ns=health_ns)
+    wire=validate_motor_record(motor_snapshot(native,c['arms'][0]),c['arms'][0])
+    assert 'fault' in wire['motion_issues']['by_name']['shoulder_pan']['clear_kinds']
+    row=render_motors(c,{'arm1':wire},{},current_state,wall_ns)['arm1']['motors'][0]
+    assert row['position_age_ms']<=500 and row['source_state']=='stale'
+    assert row['motion_issue']['clear_kinds']==[] and row['motion_issue']['state']=='unknown'
+
+
+def test_invalid_motor_issue_projection_is_rejected_by_wire_validation():
+    c=config();wire=motor_snapshot(issue_snapshot(c),c['arms'][0])
+    wire['motion_issues']['by_name']['shoulder_pan']['feedback_fresh']=False
+    with pytest.raises(ValueError,match='Stale motor issue cannot clear'):
+        validate_motor_record(wire,c['arms'][0])

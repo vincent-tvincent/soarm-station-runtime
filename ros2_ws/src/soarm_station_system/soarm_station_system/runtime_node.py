@@ -67,7 +67,7 @@ class RuntimeNode(BaseNode):
             d=DiagnosticStatus();d.name=n;d.hardware_id=n;d.message=s['error'] or s['phase'];d.level=DiagnosticStatus.OK if m.feedback_valid else DiagnosticStatus.ERROR
             d.values=[KeyValue(key=k,value=str(v)) for k,v in {**s['health'],'input_rejected':self.rejected.get(n,0)}.items() if k!='motors'];health.status.append(d)
             health.status.append(DiagnosticStatus(name=n+'/motors',hardware_id=n+'/motors',message='cached motor telemetry',
-                values=[KeyValue(key='status',value=json.dumps(motor_snapshot({**s,'arm_id':n}),allow_nan=False,separators=(',',':')))]))
+                values=[KeyValue(key='status',value=json.dumps(motor_snapshot({**s,'arm_id':n},next(a for a in self.config['arms'] if a['id']==n)),allow_nan=False,separators=(',',':')))]))
             self.inference[n].publish(DiagnosticArray(header=health.header,status=[DiagnosticStatus(name=n+'/policy',message=s.get('model_state',s['operation_type']),values=[KeyValue(key='reason',value=s.get('model_reason',''))])]))
         self.health.publish(health)
     def publish_cameras(self):
@@ -111,7 +111,8 @@ class RuntimeNode(BaseNode):
             feedback=client.call('begin',arm_id=arm,request=request);operation=feedback['operation_id'];result.operation_id=operation
             while not self.stop.is_set():
                 if handle.is_cancel_requested:
-                    client.call('hold',arm_id=arm);handle.canceled();result.result_code='CANCELED';return result
+                    client.call('hold_owned',arm_id=arm,controller_session=request['controller_session'],principal=request['principal'],operation_id=operation)
+                    handle.canceled();result.result_code='CANCELED';return result
                 r=client.call('result',arm_id=arm,operation_id=operation)
                 if r:
                     for k,v in r.items():setattr(result,k,v)

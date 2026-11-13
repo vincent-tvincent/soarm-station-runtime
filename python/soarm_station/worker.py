@@ -48,6 +48,7 @@ class Runtime:
         if op=='begin': return a.begin(r['request'])
         if op=='input': return a.input(r['frame'])
         if op=='hold': return a.hold()
+        if op=='hold_owned': return a.hold_owned(r['controller_session'],r['principal'],r.get('operation_id'))
         if op=='feedback': return a.feedback()
         if op=='result':
             value=a.completed.get(r['operation_id'])

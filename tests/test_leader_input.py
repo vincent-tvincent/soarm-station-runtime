@@ -1,0 +1,186 @@
+"""No hardware/ROS/network: injected OS inventory, bus and websocket contracts."""
+import asyncio
+import copy
+import json
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config
+from soarm_station.leader_gateway import LeaderHostRegistry
+
+
+@pytest.fixture
+def host_config(tmp_path):
+    calibration={name:{'id':i,'drive_mode':0,'homing_offset':0,'range_min':0,'range_max':4095}
+                 for i,name in enumerate(['leader_pan','leader_lift','jaw'],1)}
+    path=tmp_path/'calibration.json';path.write_text(json.dumps(calibration))
+    profile={'id':'leader','label':'Test configured leader','match':{'serial':'UNIT-TEST-SERIAL'},
+             'calibration':str(path),'joint_map':{'leader_pan':'pan','leader_lift':'lift'},'gripper_source':'jaw'}
+    return {'host_id':'test-host','label':'Test host','leaders':[profile],'lock_dir':str(tmp_path/'locks')}
+
+
+def ports():
+    return [{'port':'/dev/unit-test-not-opened','serial':'UNIT-TEST-SERIAL','vid':1,'pid':2,'description':'Unit-test serial'},
+            {'port':'/dev/unconfigured-not-opened','serial':'OTHER','vid':3,'pid':4,'description':'Unconfigured serial'}]
+
+
+def test_discovery_only_advertises_actual_enumeration_and_configuration(host_config):
+    rows=discover(host_config,ports)
+    assert len(rows)==2 and rows[0]['configured'] and not rows[1]['configured']
+    assert rows[0]['id']=='profile-leader' and rows[0]['joint_names']==['pan','lift']
+    assert discover(host_config,lambda:[])==[]
+    duplicate=copy.deepcopy(host_config);duplicate['leaders'].append(copy.deepcopy(duplicate['leaders'][0]))
+    assert not discover(duplicate,ports)[0]['configured']
+
+
+def test_missing_calibration_is_unconfigured_not_autocalibrated(host_config):
+    host_config['leaders'][0]['calibration']='/nonexistent/unit-test-calibration.json'
+    assert not discover(host_config,ports)[0]['configured']
+
+
+class FakeBus:
+    def __init__(self,port,calibration,profile):
+        self.expected=calibration;self.events=[]
+    def connect(self):self.events.append('connect')
+    def read_calibration(self):self.events.append('read_calibration');return copy.deepcopy(self.expected)
+    def sync_read(self,register):self.events.append(('read',register));return {'leader_pan':90.,'leader_lift':-30.,'jaw':50.}
+    def disconnect(self,disable_torque=True):self.events.append(('disconnect',disable_torque))
+    def write(self,*args,**kwargs):raise AssertionError('A motor write must never be called')
+    def sync_write(self,*args,**kwargs):raise AssertionError('A motor write must never be called')
+    def write_calibration(self,*args,**kwargs):raise AssertionError('Recalibration must never be called')
+    def enable_torque(self,*args,**kwargs):raise AssertionError('Arming must never be called')
+    def disable_torque(self,*args,**kwargs):raise AssertionError('Torque changes must never be called')
+
+
+def test_reader_has_no_configure_calibrate_or_torque_writes(host_config):
+    reader=ReadOnlyLeader(host_config['leaders'][0],ports()[0]['port'],FakeBus,host_config['lock_dir'])
+    reader.connect();bus=reader.bus
+    sample=reader.sample()
+    assert sample['body']['positions']['pan']==pytest.approx(1.5707963267948966)
+    assert sample['body']['gripper']==50 and sample['body']['gripper_unit']=='percent'
+    assert sample['started_ns']<=sample['completed_ns']
+    with pytest.raises(PermissionError):bus.write_calibration({})
+    reader.close()
+    assert bus.events==['connect','read_calibration',('read','Present_Position'),('disconnect',False)]
+
+
+def test_reader_rejects_mismatched_calibration_without_writes(host_config):
+    class Mismatched(FakeBus):
+        def read_calibration(self):
+            value=super().read_calibration();value['leader_pan']['homing_offset']=1;return value
+    reader=ReadOnlyLeader(host_config['leaders'][0],ports()[0]['port'],Mismatched,host_config['lock_dir'])
+    with pytest.raises(ValueError,match='Calibration mismatch'):reader.connect()
+    assert reader.bus is None and reader.lock_file is None
+
+
+class Request:
+    def __init__(self,body,host='test-host'):self.body=body;self.match_info={'host_id':host}
+    async def json(self):return self.body
+
+
+class Socket:
+    closed=False
+    def __init__(self):self.sent=[]
+    async def send_json(self,body):self.sent.append(body)
+
+
+def registry_fixture(host_config):
+    state={'arms':{'follower':{'permission':True,'feedback_valid':True,'runtime_boot_id':'boot',
+                             'controller_session':'controller','operation_id':''}},
+           'resources':{'arms':[{'id':'follower','joints':[{'name':'pan'},{'name':'lift'}]}]}}
+    held=[]
+    async def hold(arm,session,operator,operation):held.append((arm,session,operator,operation));return {'success':True}
+    registry=LeaderHostRegistry(lambda:state,hold)
+    registry.hosts['test-host']={'id':'test-host','label':'Test host','devices':discover(host_config,ports),
+        'ws':Socket(),'state':'IDLE','active':None,'last_seen':time.monotonic()}
+    body={'device_id':'profile-leader','arm_id':'follower','operator_session_id':'operator',
+          'runtime_boot_id':'boot','controller_session':'controller','hz':100}
+    return registry,state,held,body
+
+
+def test_start_requires_explicit_permission_and_resource_mapping(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        state['arms']['follower']['permission']=False
+        with pytest.raises(ValueError,match='permission'):await registry.start_route(Request(body))
+        state['arms']['follower']['permission']=True
+        response=await registry.start_route(Request(body));result=json.loads(response.text)
+        assert result['accepted'] and result['state']=='STARTING' and not held
+        command=registry.hosts['test-host']['ws'].sent[0]
+        assert command['type']=='start' and command['joint_names']==['pan','lift']
+        assert not any('permission' in message.get('type','') for message in registry.hosts['test-host']['ws'].sent)
+        assert registry.snapshot()['hosts'][0]['latest_pose'] is None
+    asyncio.run(check())
+
+
+def test_stop_and_heartbeat_cannot_take_over_unrelated_sessions(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config);host=registry.hosts['test-host']
+        assert not (await registry.stop_host(host,'missing','operator'))['accepted'] and not held
+        result=json.loads((await registry.start_route(Request(body))).text);run_id=result['run_id']
+        with pytest.raises(ValueError,match='session'):await registry.stop_host(host,run_id,'different-operator')
+        with pytest.raises(ValueError,match='match'):await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'other'}))
+        active=host['active'];active['operation_id']='owned-operation';state['arms']['follower']['operation_id']='unrelated-operation'
+        assert not (await registry._hold_current(active))['success'] and not held
+        state['arms']['follower']['operation_id']='owned-operation'
+        assert (await registry._hold_current(active))['success'] and held==[('follower','controller','operator','owned-operation')]
+        active['last_browser']=time.monotonic()-3
+        with pytest.raises(ValueError,match='expired'):await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'operator'}))
+    asyncio.run(check())
+
+
+def test_bad_browser_shapes_raise_validation_errors(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        with pytest.raises(ValueError):await registry.start_route(Request([]))
+        with pytest.raises(ValueError):await registry.start_route(Request({**body,'arm_id':[]}))
+        with pytest.raises(ValueError):await registry.heartbeat_route(Request(None))
+        with pytest.raises(ValueError):await registry.stop_route(Request('all'))
+        assert not held
+    asyncio.run(check())
+
+
+def test_native_bridge_samples_only_after_grant_and_never_enables_permission(host_config):
+    async def check():
+        command_sent=asyncio.Event();log=[]
+        class Control:
+            closed=False
+            def __init__(self):self.queue=asyncio.Queue();self.sent=[]
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):self.closed=True
+            def __aiter__(self):return self
+            async def __anext__(self):return await self.queue.get()
+            async def send_json(self,value):
+                self.sent.append(value)
+                if value.get('operation_type'):
+                    grant={'stream_ready':True,'operation_id':'op','window_id':'original-pi-window','window_valid_for_ms':250}
+                    log.append('grant_sent')
+                    for data in [{'type':'grant','grant':grant},{'type':'state','state':{'phase':'ACTIVE','operation_id':'op'}}]:
+                        self.queue.put_nowait(SimpleNamespace(type=SimpleNamespace(value=1),data=json.dumps(data)))
+                elif value.get('frame_kind')=='COMMAND':command_sent.set()
+        control=Control()
+        class Session:
+            def ws_connect(self,url,**kwargs):assert url.endswith('/ws/control');return control
+            def post(self,*args,**kwargs):raise AssertionError('Bridge must never enable permission')
+        class Sampler:
+            def __init__(self,*args):log.append('sampler_created')
+            async def start(self):log.append('reader_started')
+            async def sample(self):
+                assert 'grant_sent' in log;log.append('sample')
+                t=time.monotonic_ns();return {'body':{'positions':{'pan':.1,'lift':-.1},'gripper':50.,'gripper_unit':'percent'},'started_ns':t,'completed_ns':t}
+            async def close(self):log.append('reader_closed')
+        bridge=InputHostBridge(host_config,'https://gateway.invalid',None,sampler_factory=Sampler,enumerate_ports=ports)
+        bridge.session=Session();bridge.registry=Socket();bridge.advertisement();assert not log
+        request={'run_id':'run','device_id':'profile-leader','arm_id':'follower','operator_session_id':'operator',
+                 'runtime_boot_id':'boot','controller_session':'session','joint_names':['pan','lift'],'hz':100}
+        bridge.active=request;bridge.task=asyncio.create_task(bridge.operate(request))
+        await asyncio.wait_for(command_sent.wait(),1)
+        await bridge.stop('run')
+        commands=[m for m in control.sent if m.get('frame_kind')=='COMMAND']
+        assert commands and commands[0]['window_id']=='original-pi-window'
+        assert 'reader_closed' in log and bridge.active is None
+        assert bridge.headers=={} # trusted-network bridge does not demand a token
+    asyncio.run(check())

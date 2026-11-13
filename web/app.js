@@ -9,6 +9,7 @@ import {
 } from "./payload-model.js";
 import { StationClient } from "./transport.js";
 import { GraphExplorer } from "./graph.js";
+import { ManualPanel } from "./manual-panel.js";
 import { fitRect, packEqualCameras } from "./camera-layout.js";
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => {
@@ -36,10 +37,7 @@ let snapshot = {},
   cameraIds = [],
   cameraFrames = new Map(),
   pipPositions = new Map(),
-  manualTarget = null,
-  manualDraftDirty = false,
-  startingManual = false,
-  manualStartVersion = 0,
+  manual,
   noticeTimer,
   graph,
   connected = false,
@@ -84,8 +82,6 @@ function connection(info) {
   $("disconnect").disabled = info.state === "connecting";
   $("disconnect").textContent = connected ? "Disconnect" : "Reconnect";
   if (info.state === "disconnected") {
-    ++manualStartVersion;
-    manualDraftDirty = false;
     cameraIds = [];
     cameraFrames.clear();
     arrangeCameras();
@@ -119,7 +115,7 @@ function profileList() {
 function updateControls() {
   const a = armState(),
     busy =
-      startingManual ||
+      a.operation_id ||
       (operation &&
         !["done", "ended", "error", "idle", "result", "closed"].includes(
           operation.state,
@@ -131,23 +127,14 @@ function updateControls() {
     a.permission ||
     !!busy;
   $("hold").disabled = !connected || !selectedArm;
-  $("start-manual").disabled =
-    !connected ||
-    !selectedArm ||
-    armConfig().read_only ||
-    !!busy ||
-    !manualTarget ||
-    !a.feedback_valid;
   $("run-payload").disabled =
     !connected ||
     !selectedArm ||
     !a.permission ||
     !!busy ||
     ($("operation-type").value === "MODEL" && !$("profile-select").value);
-  $("start-manual").textContent = startingManual
-    ? "Starting…"
-    : "Start manual stream";
   $("arm-select").disabled = !!busy;
+  manual?.updateControls();
   $("send-update").disabled =
     !busy ||
     operation?.type !== $("operation-type").value ||
@@ -195,7 +182,8 @@ function setPage(value) {
   $("operations").hidden = page !== "operations";
   $("graph").hidden = page !== "graph";
   text("page-title", page === "graph" ? "ROS graph" : "Robot operations");
-  text("page-series", page === "graph" ? "OBSERVABILITY / 02" : "CONTROL / 01");
+  text("page-series", page === "graph" ? "OBSERVABILITY" : "CONTROL");
+  manual?.setVisible(page === "operations" && activeTab === "manual");
   graph?.setVisible(page === "graph");
   if (page === "graph" && connected) graph.refresh();
 }
@@ -214,12 +202,14 @@ for (const tab of document.querySelectorAll("[data-tab]"))
     });
     for (const n of ["status", "manual", "payload"])
       $("panel-" + n).hidden = n !== activeTab;
+    manual?.setVisible(
+      activeTab === "manual" && $("app").dataset.view === "operations",
+    );
   };
 $("arm-select").onchange = () => {
   selectedArm = $("arm-select").value;
   selectedMotor = "";
-  manualTarget = null;
-  renderManual();
+
   loadExample();
   renderState(snapshot);
 };
@@ -232,8 +222,8 @@ $("enable-control").onclick = () =>
   });
 $("hold").onclick = () =>
   safely(async () => {
-    ++manualStartVersion;
-    await client.hold(selectedArm);
+    if (manual) await manual.stop();
+    else await client.hold(selectedArm);
     notice("Hold requested. Support torque is preserved.");
   });
 function renderState(state) {
@@ -277,12 +267,14 @@ function renderState(state) {
   text("queued", state.upload?.queued?.toLocaleString() ?? "—");
   text(
     "upload-label",
-    state.upload?.error
-      ? "History upload · awaiting collector"
-      : "History upload",
+    state.upload?.error === "Collector endpoint not configured"
+      ? "Telemetry · collector not configured"
+      : state.upload?.error
+        ? "Telemetry · upload pending"
+        : "Telemetry upload",
   );
   renderMotors();
-  if (selectedArm && !manualTarget) renderManual();
+  manual?.update({ snapshot, resources, arm: selectedArm, connected });
   const ids = (resources.cameras || state.cameras || []).map((c) =>
     typeof c === "string" ? c : c.id,
   );
@@ -452,140 +444,8 @@ function renderMotors() {
       "Positions in radians; gripper in %. Select a motor for its target and reported faults.",
     );
 }
-function renderManual() {
-  manualDraftDirty = false;
-  const cfg = armConfig(),
-    p = joints(),
-    grip = armState().gripper_percent;
-  $("manual-joints").replaceChildren();
-  if (
-    !selectedArm ||
-    !cfg.joints?.length ||
-    !cfg.joints.every((j) => Number.isFinite(p[j.name])) ||
-    (cfg.gripper && !Number.isFinite(grip))
-  ) {
-    $("manual-joints").innerHTML =
-      '<p class="detail-note">Waiting for joint limits and complete measured feedback, including the gripper.</p>';
-    manualTarget = null;
-    return;
-  }
-  manualTarget = {
-    positions: { ...p },
-    gripper: Number(grip),
-    gripper_unit: "percent",
-  };
-  const controls = [
-    ...cfg.joints.map((j) => ({
-      name: j.name,
-      min: j.min ?? j.min_rad,
-      max: j.max ?? j.max_rad,
-      value: p[j.name],
-      unit: "rad",
-    })),
-    ...(cfg.gripper
-      ? [
-          {
-            name: cfg.gripper.name || "gripper",
-            min: 0,
-            max: 100,
-            value: grip,
-            unit: "%",
-          },
-        ]
-      : []),
-  ];
-  for (const j of controls) {
-    const row = document.createElement("div");
-    row.className = "manual-joint";
-    const label = document.createElement("label");
-    label.className = "joint-label";
-    label.textContent = j.name;
-    const numeric = document.createElement("input");
-    Object.assign(numeric, {
-      type: "number",
-      min: String(j.min),
-      max: String(j.max),
-      step: j.unit === "%" ? "0.5" : "0.005",
-      value: number(j.value, j.unit === "%" ? 1 : 3),
-    });
-    numeric.setAttribute("aria-label", j.name + " target " + j.unit);
-    const slider = document.createElement("input");
-    Object.assign(slider, {
-      type: "range",
-      min: String(j.min),
-      max: String(j.max),
-      step: numeric.step,
-      value: String(j.value),
-    });
-    slider.setAttribute("aria-label", j.name + " slider");
-    const update = (source) => {
-      const v = Number(source.value);
-      if (!Number.isFinite(v) || v < j.min || v > j.max) return;
-      numeric.value = String(v);
-      slider.value = String(v);
-      manualDraftDirty = true;
-      if (j.unit === "%") manualTarget.gripper = v;
-      else manualTarget.positions[j.name] = v;
-      if (
-        client.currentOperation?.type === "DIRECT" &&
-        client.currentOperation?.mode === "STREAM"
-      )
-        client.setManualTarget({
-          ...manualTarget,
-          positions: { ...manualTarget.positions },
-        });
-    };
-    numeric.oninput = () => update(numeric);
-    slider.oninput = () => update(slider);
-    label.append(numeric);
-    const ends = document.createElement("div");
-    ends.className = "range-endpoints";
-    ends.innerHTML = `<span>${number(j.min, 1)} ${j.unit}</span><span>${number(j.max, 1)} ${j.unit}</span>`;
-    row.append(label, slider, ends);
-    $("manual-joints").append(row);
-  }
-  updateControls();
-}
-$("reset-targets").onclick = () => {
-  renderManual();
-  if (
-    manualTarget &&
-    client.currentOperation?.type === "DIRECT" &&
-    client.currentOperation?.mode === "STREAM"
-  )
-    client.setManualTarget(manualTarget);
-};
-$("start-manual").onclick = () =>
-  safely(async () => {
-    if (startingManual) return;
-    const arm = selectedArm,
-      version = ++manualStartVersion;
-    startingManual = true;
-    updateControls();
-    try {
-      if (!manualDraftDirty) renderManual();
-      const staged = manualDraftDirty ? structuredClone(manualTarget) : null;
-      if (!armState().permission) await client.enable(arm);
-      if (version !== manualStartVersion) {
-        if (connected) await client.hold(arm);
-        return;
-      }
-      await client.startManual(arm);
-      if (version !== manualStartVersion) {
-        await client.hold(arm);
-        return;
-      }
-      if (staged) client.setManualTarget(staged);
-      text(
-        "manual-note",
-        "Manual stream is active. Changing a target sends it to the selected arm.",
-      );
-    } finally {
-      startingManual = false;
-      updateControls();
-    }
-  });
 function operationChanged(event) {
+  manual?.updateOperation(event);
   operation = event;
   if (
     ["result", "closed"].includes(event.event) ||
@@ -603,9 +463,7 @@ function operationChanged(event) {
     ].includes(event.state)
   ) {
     operation = null;
-    manualDraftDirty = false;
     $("stream-actions").hidden = true;
-    text("manual-note", "Stream is not active. Targets remain local.");
   } else $("stream-actions").hidden = event.mode !== "STREAM";
   text(
     "active-operation",
@@ -1747,6 +1605,12 @@ new ResizeObserver(layoutCameraFrames).observe($("camera-stage"));
 graph = new GraphExplorer({
   request: (path, body) => client.request(path, body),
   onError: showError,
+});
+manual = new ManualPanel({
+  element: $("panel-manual"),
+  client,
+  onError: showError,
+  onNotice: notice,
 });
 loadExample();
 drawHistory();

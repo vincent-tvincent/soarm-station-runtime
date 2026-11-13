@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+LEADER_INPUT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export PYTHONPATH="$LEADER_INPUT_ROOT/python${PYTHONPATH:+:$PYTHONPATH}"
+if [[ -n "${SOARM_STATION_INPUT_PYTHON:-}" ]]; then
+  LEADER_INPUT_PYTHON=$SOARM_STATION_INPUT_PYTHON
+elif [[ -x "$LEADER_INPUT_ROOT/.venv/bin/python" ]]; then
+  LEADER_INPUT_PYTHON="$LEADER_INPUT_ROOT/.venv/bin/python"
+else
+  LEADER_INPUT_PYTHON=python3
+fi
+exec "$LEADER_INPUT_PYTHON" -m soarm_station.leader_input "$@"

@@ -12,6 +12,7 @@ import io
 import json
 import math
 import mimetypes
+import sys
 from pathlib import Path
 import time
 import uuid
@@ -20,7 +21,7 @@ from aiohttp import web
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST, PORT = "127.0.0.1", 8767
-ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js"}
+ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js", "manual-panel.js", "fk-view.js"}
 
 
 class Preview:
@@ -319,6 +320,20 @@ def build_app(preview):
             web.get("/api/operations/{id}",preview.operation_status),web.post("/api/operations/{id}/cancel",preview.cancel),web.post("/api/stream",preview.stream),web.post("/api/workflows",preview.workflow),
             web.get("/api/cameras/{id}.jpg",preview.image),web.get("/ws/camera/{id}",preview.camera_socket),web.get("/ws/control",preview.control_socket)]
     app.add_routes(routes)
+    # The same pure kinematics as production, with explicitly simulated measurements.
+    sys.path.insert(0, str(ROOT / 'python'))
+    from soarm_station.manual_http import ManualRoutes
+    arms=[]
+    for descriptor in preview.data['resources']['arms']:
+        arm=copy.deepcopy(descriptor)
+        arm['urdf']=str(ROOT/'models/so101/so101.urdf')
+        arm['tcp_frame']='gripper_frame_link'
+        arm['joints']=[{**j,'min_rad':j.get('min',j.get('min_rad')),'max_rad':j.get('max',j.get('max_rad')),'velocity_rad_s':j.get('velocity_limit',1.5)} for j in arm['joints']]
+        arm['manual_control']={'poses':{'home':{'positions':dict(zip(['shoulder_pan','shoulder_lift','elbow_flex','wrist_flex','wrist_roll'],[0.,math.radians(-50),math.radians(65),0.,0.])), 'gripper':None}}}
+        arms.append(arm)
+    ManualRoutes({'arms':arms}).mount(app)
+    async def input_hosts(_): return preview.response({'hosts':[]})
+    app.router.add_get('/api/input-hosts',input_hosts)
     return app
 
 

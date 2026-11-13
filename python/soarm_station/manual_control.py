@@ -1,0 +1,370 @@
+"""Device-free manual FK/IK target generation. Authority stays with DIRECT.
+
+Only stdlib and NumPy are required. Every call uses request-local solver state;
+this module never opens a device, publishes a command, or grants permission.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+import math
+from pathlib import Path
+import time
+import xml.etree.ElementTree as ET
+
+import numpy as np
+
+
+SPEEDS = (
+    (0.015, math.radians(10), 10.),
+    (0.040, math.radians(25), 30.),
+    (0.080, math.radians(45), 60.),
+    (0.120, math.radians(70), 90.),
+    (0.160, math.radians(100), 120.),
+)
+KEYS = {'x': ['KeyJ', 'KeyK'], 'y': ['KeyL', 'KeyH'], 'z': ['KeyF', 'KeyD'],
+        'elevation': ['KeyI', 'KeyU'], 'roll': ['KeyG', 'KeyS'],
+        'gripper': ['BracketLeft', 'BracketRight']}
+ALIASES = {**{c.lower(): 'Key'+c.upper() for c in 'jklhfdiugs'},
+           '[': 'BracketLeft', ']': 'BracketRight', 'Shift': 'ShiftLeft'}
+
+
+class ManualUnavailable(ValueError):
+    """The configured model or requested preset is unavailable."""
+
+
+def _finite(value, label):
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.number)) or not math.isfinite(value):
+        raise ValueError(label+' must be finite')
+    return float(value)
+
+
+def _vector(value, size, label):
+    a = np.asarray(value, dtype=float)
+    if a.shape != (size,) or not np.all(np.isfinite(a)):
+        raise ValueError(label+f' must contain {size} finite numbers')
+    return a
+
+
+def _wrap(value):
+    return (value+math.pi) % (2*math.pi)-math.pi
+
+
+def _rotation(axis, angle):
+    x, y, z = axis
+    k = np.array([[0., -z, y], [z, 0., -x], [-y, x, 0.]])
+    return np.eye(3)+math.sin(angle)*k+(1-math.cos(angle))*(k@k)
+
+
+def _rpy(values):
+    r, p, y = values
+    return _rotation(np.array([0., 0., 1.]), y) @ _rotation(np.array([0., 1., 0.]), p) @ _rotation(np.array([1., 0., 0.]), r)
+
+
+def _origin(element):
+    origin = element.find('origin')
+    result = np.eye(4)
+    if origin is not None:
+        result[:3, 3] = _vector([float(x) for x in origin.get('xyz', '0 0 0').split()], 3, 'URDF xyz')
+        result[:3, :3] = _rpy(_vector([float(x) for x in origin.get('rpy', '0 0 0').split()], 3, 'URDF rpy'))
+    return result
+
+
+def _semantics(rotation, reference=None):
+    z, x = rotation[:, 2], rotation[:, 0]
+    candidates = ([reference] if reference is not None else []) + list(np.eye(3))
+    for axis in candidates:
+        zero = axis-np.dot(axis, z)*z
+        if np.linalg.norm(zero) > 1e-8:
+            zero = zero/np.linalg.norm(zero)
+            break
+    elevation = math.asin(float(np.clip(z[2], -1., 1.)))
+    roll = math.atan2(float(np.dot(np.cross(zero, x), z)), float(np.dot(zero, x)))
+    return np.array([elevation, roll]), math.atan2(float(z[1]), float(z[0]))
+
+
+def keyboard_rates(keys, level=2, shift=False, yaw_rad=0., position_only=False):
+    """Map browser KeyboardEvent.code (or letter aliases) to explicit SI rates."""
+    if type(level) is not int or not 1 <= level <= 5:
+        raise ValueError('level must be an integer in [1,5]')
+    if type(shift) is not bool or type(position_only) is not bool:
+        raise ValueError('shift and position_only must be booleans')
+    if not isinstance(keys, (list, tuple, set, frozenset)) or len(keys) > 32 or any(not isinstance(k, str) for k in keys):
+        raise ValueError('keys must be a bounded list of keyboard codes')
+    held = {ALIASES.get(k, k) for k in keys}
+    effective = 5 if shift or held.intersection({'ShiftLeft', 'ShiftRight'}) else level
+    linear, angular, jaw = SPEEDS[effective-1]
+    delta = lambda name: int(KEYS[name][1] in held)-int(KEYS[name][0] in held)
+    direction = np.array([delta(k) for k in ('x', 'y', 'z')], dtype=float)
+    length = np.linalg.norm(direction)
+    if length > 1: direction /= length
+    direction = _rotation(np.array([0., 0., 1.]), _finite(yaw_rad, 'yaw_rad')) @ direction
+    return {'translation_m_s': (direction*linear).tolist(),
+            'elevation_rad_s': 0. if position_only else delta('elevation')*angular,
+            'roll_rad_s': 0. if position_only else delta('roll')*angular,
+            'gripper_percent_s': delta('gripper')*jaw,
+            'level': effective, 'selected_level': level}
+
+
+class ManualControl:
+    def __init__(self, arm_config):
+        self.config = copy.deepcopy(arm_config)
+        self.settings = self.config.get('manual_control', {})
+        self.names = tuple(j['name'] for j in self.config['joints'])
+        if not self.names or len(set(self.names)) != len(self.names):
+            raise ValueError('Unique configured body joints required')
+        self.lower = np.array([_finite(j['min_rad'], 'min_rad') for j in self.config['joints']])
+        self.upper = np.array([_finite(j['max_rad'], 'max_rad') for j in self.config['joints']])
+        self.velocity = np.array([_finite(j['velocity_rad_s'], 'velocity_rad_s') for j in self.config['joints']])
+        if np.any(self.lower >= self.upper) or np.any(self.velocity <= 0):
+            raise ValueError('Invalid configured joint bounds/velocity')
+        mapping = self.config.get('urdf_joint_names', list(self.names))
+        if isinstance(mapping, dict): mapping = [mapping[n] for n in self.names]
+        if len(mapping) != len(self.names) or len(set(mapping)) != len(mapping):
+            raise ValueError('URDF joint mapping must be one-to-one')
+        self.mapping = tuple(mapping)
+        self.frame = self.config.get('base_frame')
+        self.tcp = self.config.get('tcp_frame', 'gripper_frame_link')
+        self.operator_rotation = _rpy(_vector(self.settings.get('operator_tool_rpy', [0., 0., math.pi]), 3, 'operator_tool_rpy'))
+        self.budget = min(.1, max(.001, _finite(self.settings.get('solve_budget_ms', 40.), 'solve_budget_ms')/1000))
+        self.model_error = None
+        self.chain = []
+        self.branch = None
+        self.model_base = None
+        self.model_sha256 = None
+        try: self._load_model()
+        except (OSError, ET.ParseError, ValueError) as exc: self.model_error = str(exc)
+
+    def _load_model(self):
+        path = self.config.get('urdf')
+        if not path: raise ManualUnavailable('No configured URDF')
+        data = Path(path).read_bytes()
+        if len(data) > 4*1024*1024: raise ValueError('URDF exceeds 4 MiB')
+        self.model_sha256 = hashlib.sha256(data).hexdigest()
+        robot = ET.fromstring(data)
+        links = {link.get('name') for link in robot.findall('link')}
+        children = {}
+        joints = {}
+        for element in robot.findall('joint'):
+            name, kind = element.get('name'), element.get('type')
+            parent, child = element.find('parent'), element.find('child')
+            if not name or name in joints or parent is None or child is None:
+                raise ValueError('Invalid or duplicate URDF joint')
+            parent, child = parent.get('link'), child.get('link')
+            if parent not in links or child not in links or child in children:
+                raise ValueError('Invalid or multiply parented URDF link')
+            axis_element = element.find('axis')
+            axis = _vector([float(x) for x in (axis_element.get('xyz', '1 0 0') if axis_element is not None else '1 0 0').split()], 3, 'joint axis')
+            if kind != 'fixed':
+                if np.linalg.norm(axis) < 1e-10: raise ValueError('Zero movable joint axis')
+                axis /= np.linalg.norm(axis)
+            joint = {'name': name, 'kind': kind, 'parent': parent, 'child': child, 'origin': _origin(element), 'axis': axis, 'mimic': element.find('mimic') is not None}
+            joints[name] = joint; children[child] = joint
+        if self.tcp not in links: raise ManualUnavailable('Configured TCP link is absent from URDF')
+        chain, visited, link = [], set(), self.tcp
+        while link in children:
+            if link in visited: raise ValueError('Cyclic URDF chain')
+            visited.add(link); joint = children[link]; chain.append(joint); link = joint['parent']
+        self.model_base = link
+        chain.reverse()
+        moving = [j['name'] for j in chain if j['kind'] != 'fixed']
+        if set(moving) != set(self.mapping):
+            raise ManualUnavailable('TCP chain movable joints do not match configured body joints')
+        for joint in chain:
+            if joint['kind'] not in ('fixed', 'revolute', 'continuous') or joint['mimic']:
+                raise ManualUnavailable('Only fixed and independent rotational TCP-chain joints are supported')
+        self.chain = chain
+        jaw = joints.get(self.config.get('gripper', {}).get('urdf_joint_name', self.config.get('gripper', {}).get('name', 'gripper')))
+        self.branch = jaw if jaw and jaw['name'] not in moving else None
+        if not self.frame: self.frame = self.model_base
+
+    def _q(self, positions, bounded=False):
+        if not isinstance(positions, dict) or set(positions) != set(self.names):
+            raise ValueError('Exactly the configured body joint names are required')
+        result = np.array([_finite(positions[n], n) for n in self.names])
+        if bounded and (np.any(result < self.lower-1e-10) or np.any(result > self.upper+1e-10)):
+            raise ValueError('Joint target outside configured limits')
+        return result
+
+    @staticmethod
+    def _gripper(value):
+        value = _finite(value, 'gripper_percent')
+        if not 0 <= value <= 100: raise ValueError('Gripper percentage must be in [0,100]')
+        return value
+
+    def _forward(self, q):
+        if self.model_error: raise ManualUnavailable(self.model_error)
+        values = dict(zip(self.mapping, q))
+        transform = np.eye(4); frames = {self.model_base: transform.copy()}; origins = {}; axes = {}
+        for joint in self.chain:
+            transform = transform @ joint['origin']
+            if joint['kind'] != 'fixed':
+                origins[joint['name']] = transform[:3, 3].copy()
+                axes[joint['name']] = transform[:3, :3] @ joint['axis']
+                rotation = np.eye(4); rotation[:3, :3] = _rotation(joint['axis'], values[joint['name']])
+                transform = transform @ rotation
+            frames[joint['child']] = transform.copy()
+        return transform, origins, axes, frames
+
+    def fk(self, positions_rad, gripper_percent):
+        """Measured positions may be outside target bounds; FK still reports them."""
+        q = self._q(positions_rad); g = self._gripper(gripper_percent)
+        pose, origins, axes, frames = self._forward(q)
+        semantics, azimuth = _semantics(pose[:3, :3] @ self.operator_rotation)
+        points = []; segments = []; previous_name = 'base'; previous = np.zeros(3)
+        reverse = dict(zip(self.mapping, self.names))
+        for joint in self.chain:
+            if joint['kind'] == 'fixed': continue
+            name = reverse[joint['name']]; point = origins[joint['name']]
+            points.append({'name': name, 'urdf_name': joint['name'], 'role': 'joint', 'position_m': point.tolist(), 'axis_base': axes[joint['name']].tolist(), 'position_rad': float(q[self.names.index(name)])})
+            segments.append({'from': previous_name, 'to': name, 'start_m': previous.tolist(), 'end_m': point.tolist()})
+            previous_name, previous = name, point
+        segments.append({'from': previous_name, 'to': 'tcp', 'start_m': previous.tolist(), 'end_m': pose[:3, 3].tolist()})
+        if self.branch and self.branch['parent'] in frames:
+            parent = frames[self.branch['parent']]; jaw = parent @ self.branch['origin']
+            name = self.config.get('gripper', {}).get('name', 'gripper')
+            points.append({'name': name, 'urdf_name': self.branch['name'], 'role': 'gripper', 'position_m': jaw[:3, 3].tolist(), 'axis_base': (jaw[:3, :3] @ self.branch['axis']).tolist(), 'position_rad': None})
+            segments.append({'from': previous_name, 'to': name, 'start_m': parent[:3, 3].tolist(), 'end_m': jaw[:3, 3].tolist()})
+        return {'frame_id': self.frame, 'model_base_frame': self.model_base, 'tcp_frame': self.tcp,
+                'units': {'position': 'm', 'joint': 'rad', 'gripper': 'percent'},
+                'position_m': pose[:3, 3].tolist(), 'rotation_matrix': pose[:3, :3].tolist(),
+                'elevation_rad': float(semantics[0]), 'tool_roll_rad': float(semantics[1]), 'azimuth_rad': azimuth,
+                'joints': points, 'segments': segments, 'tcp': {'position_m': pose[:3, 3].tolist(), 'frame': self.tcp}, 'gripper_percent': g}
+
+    def describe(self):
+        poses = {}
+        for name in ('home', 'fold'):
+            try:
+                self._pose(name)
+                poses[name] = {'available': True}
+            except ValueError as exc: poses[name] = {'available': False, 'reason': str(exc)}
+        try: reference = self._roll_reference()
+        except ValueError: reference = None
+        return {'available': self.model_error is None, 'reason': self.model_error,
+                'frame_id': self.frame, 'model_base_frame': self.model_base, 'tcp_frame': self.tcp,
+                'model_sha256': self.model_sha256, 'joint_names': list(self.names),
+                'keymap': copy.deepcopy(KEYS), 'default_level': 2, 'max_dt_s': .1,
+                'speed_levels': [{'level': i+1, 'translation_m_s': s[0], 'orientation_rad_s': s[1], 'gripper_percent_s': s[2]} for i, s in enumerate(SPEEDS)],
+                'position_only': True, 'poses': poses, 'presets': {name: value['available'] for name, value in poses.items()}, 'wrist_roll_reference_rad': reference,
+                'roll_presets_rad': None if reference is None else {'minus_90': reference-math.pi/2, 'reference': reference, 'plus_90': reference+math.pi/2},
+                'geometry_is_collision_check': False}
+
+    def _solve(self, q0, target_position, target_semantics, orientation_rows, free, lower, upper, reference, deadline, p_tol, a_tol):
+        q = q0.copy(); best = None; angular_scale = .06
+        def evaluate(values):
+            pose, origins, axes, _ = self._forward(values)
+            semantics, _ = _semantics(pose[:3, :3] @ self.operator_rotation, reference)
+            pe = target_position-pose[:3, 3]
+            ae = np.array([_wrap(target_semantics[i]-semantics[i]) for i in orientation_rows])
+            error = np.concatenate((pe, ae*angular_scale))
+            return pose, origins, axes, semantics, pe, ae, error
+        for _ in range(24):
+            if time.perf_counter() >= deadline: break
+            pose, origins, axes, semantics, pe, ae, error = evaluate(q)
+            best = {'position_m': float(np.linalg.norm(pe)), 'orientation_rad': float(np.max(np.abs(ae))) if len(ae) else 0.}
+            if best['position_m'] <= p_tol and best['orientation_rad'] <= a_tol: return q, best
+            jac = np.empty((len(error), len(free)))
+            rotation = pose[:3, :3] @ self.operator_rotation
+            for column, index in enumerate(free):
+                axis = axes[self.mapping[index]]
+                jac[:3, column] = np.cross(axis, pose[:3, 3]-origins[self.mapping[index]])
+                if orientation_rows:
+                    perturbed, _ = _semantics(_rotation(axis, 1e-6) @ rotation, reference)
+                    jac[3:, column] = [_wrap(perturbed[i]-semantics[i])/1e-6*angular_scale for i in orientation_rows]
+            if not len(free): break
+            delta = jac.T @ np.linalg.solve(jac @ jac.T + 1e-6*np.eye(len(error)), error)
+            improved = False
+            for scale in (1., .5, .25, .125):
+                candidate = q.copy(); candidate[free] = np.clip(q[free]+scale*delta, lower[free], upper[free])
+                if np.linalg.norm(evaluate(candidate)[-1]) < np.linalg.norm(error)-1e-12:
+                    q = candidate; improved = True; break
+            if not improved: break
+        return None, best
+
+    def step(self, positions_rad, gripper_percent, *, keys, dt_s, level=2, shift=False, position_only=False, reference_positions=None, reference_gripper=None):
+        """Return one incremental target; caller rejects obsolete responses before DIRECT."""
+        self._q(positions_rad)  # Retain measured-state validation even when an admitted reference is supplied.
+        self._gripper(gripper_percent)
+        q0 = self._q(reference_positions if reference_positions is not None else positions_rad, bounded=True)
+        g0 = self._gripper(reference_gripper if reference_gripper is not None else gripper_percent)
+        dt = _finite(dt_s, 'dt_s')
+        if dt < 0: raise ValueError('dt_s must be nonnegative')
+        dt = min(dt, .1)  # No accumulated catch-up movement after a delayed browser tick.
+        rates = keyboard_rates(keys, level, shift, self.settings.get('control_frame_yaw_rad', 0.), position_only)
+        pose, _, _, _ = self._forward(q0)
+        rotation = pose[:3, :3] @ self.operator_rotation
+        reference = np.eye(3)[int(np.argmin(np.abs(rotation[:, 2])))]
+        semantics, _ = _semantics(rotation, reference)
+        translation = np.array(rates['translation_m_s'])*dt
+        angles = np.array([rates['elevation_rad_s'], rates['roll_rad_s']])*dt
+        jaw_velocity = min(abs(rates['gripper_percent_s']), self.config.get('gripper', {}).get('velocity_percent_s', 100.))
+        jaw_delta = math.copysign(jaw_velocity*dt, rates['gripper_percent_s']) if rates['gripper_percent_s'] else 0.
+        jaw = float(np.clip(g0+jaw_delta, 0., 100.))
+        result = q0; residuals = {'position_m': 0., 'orientation_rad': 0.}; fraction = 1.
+        requested = np.linalg.norm(translation) > 0 or np.linalg.norm(angles) > 0
+        if requested:
+            deadline = time.perf_counter()+self.budget
+            free = list(range(len(q0)))
+            roll_joint = self.settings.get('wrist_roll_joint', 'wrist_roll')
+            roll_input = rates['roll_rad_s'] != 0.
+            if not roll_input and roll_joint in self.names: free.remove(self.names.index(roll_joint))
+            rows = [] if position_only else [0, 1] if roll_input else [0]
+            lower = np.maximum(self.lower, q0-self.velocity*dt); upper = np.minimum(self.upper, q0+self.velocity*dt)
+            result = None
+            for fraction in (1., .5, .25, .125, .0625, .03125, .015625):
+                target_semantics = semantics+angles*fraction
+                if abs(target_semantics[0]) > math.pi/2: continue
+                p_tol = min(.00015, max(.000001, np.linalg.norm(translation)*fraction*.08))
+                a_tol = min(.002, max(.00001, np.linalg.norm(angles)*fraction*.08))
+                result, residuals = self._solve(q0, pose[:3, 3]+translation*fraction, target_semantics, rows, free, lower, upper, reference, deadline, p_tol, a_tol)
+                if result is not None: break
+                if time.perf_counter() >= deadline: break
+        status = 'OK' if requested or jaw_delta else 'IDLE'
+        reason = ''
+        if result is None:
+            result = q0; fraction = 0.; status = 'PARTIAL' if jaw != g0 else 'BLOCKED'
+            reason = 'No converged incremental IK target within configured bounds and computation budget'
+        positions = dict(zip(self.names, map(float, result)))
+        target = {'positions': positions, 'gripper': jaw, 'gripper_unit': 'percent'}
+        return {'status': status, 'reason': reason, 'target': target, 'geometry': self.fk(positions, jaw),
+                'residuals': residuals, 'step_fraction': fraction, 'dt_s': dt, 'level': rates['level']}
+
+    def _pose(self, name):
+        if name not in ('home', 'fold'): raise ValueError('Unknown named pose')
+        pose = self.settings.get('poses', {}).get(name)
+        if not isinstance(pose, dict) or not isinstance(pose.get('positions'), dict):
+            raise ManualUnavailable('No configured '+name+' pose')
+        self._q(pose['positions'], bounded=True)
+        if pose.get('gripper') not in (None, 'preserve'): self._gripper(pose['gripper'])
+        return pose
+
+    def preset(self, name, positions_rad, gripper_percent, preserve_wrist=False):
+        self._q(positions_rad); jaw = self._gripper(gripper_percent)
+        if type(preserve_wrist) is not bool: raise ValueError('preserve_wrist must be boolean')
+        pose = self._pose(name); positions = dict(pose['positions'])
+        wrist = self.settings.get('wrist_roll_joint', 'wrist_roll')
+        if preserve_wrist and wrist in positions: positions[wrist] = positions_rad[wrist]
+        self._q(positions, bounded=True)
+        if pose.get('gripper') not in (None, 'preserve'): jaw = self._gripper(pose['gripper'])
+        target = {'positions': positions, 'gripper': jaw, 'gripper_unit': 'percent'}
+        return {'status': 'OK', 'name': name, 'target': target,
+                'geometry': self.fk(positions, jaw) if self.model_error is None else None}
+
+    def _roll_reference(self):
+        value = self.settings.get('wrist_roll_reference_rad')
+        if value is None:
+            wrist = self.settings.get('wrist_roll_joint', 'wrist_roll')
+            value = self._pose('home')['positions'].get(wrist)
+        if value is None: raise ManualUnavailable('No configured wrist-roll reference')
+        return _finite(value, 'wrist_roll_reference_rad')
+
+    def roll_preset(self, name, positions_rad, gripper_percent):
+        offsets = {'minus_90': -math.pi/2, 'reference': 0., 'plus_90': math.pi/2}
+        if name not in offsets: raise ValueError('Unknown roll preset')
+        positions = dict(positions_rad); self._q(positions)
+        wrist = self.settings.get('wrist_roll_joint', 'wrist_roll')
+        if wrist not in positions: raise ManualUnavailable('Configured wrist-roll joint is absent')
+        positions[wrist] = self._roll_reference()+offsets[name]
+        self._q(positions, bounded=True); jaw = self._gripper(gripper_percent)
+        return {'status': 'OK', 'name': name, 'target': {'positions': positions, 'gripper': jaw, 'gripper_unit': 'percent'},
+                'geometry': self.fk(positions, jaw) if self.model_error is None else None}
