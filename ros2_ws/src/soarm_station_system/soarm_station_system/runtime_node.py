@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from soarm_station_interfaces.msg import OperationStatus,OperationInput
 from soarm_station_interfaces.action import ExecuteOperation
 from soarm_station_interfaces.srv import SetControlPermission,Hold
 from soarm_station.ipc import Client
+from soarm_station.dashboard_data import motor_snapshot
 from .common import BaseNode,STATE,SENSOR,run,stamp_ns,topic
 from .conversion import request_from_goal,frame_to_dict
 
@@ -63,7 +65,9 @@ class RuntimeNode(BaseNode):
             m.feedback_valid=bool(s['positions']) and s['age_ms']<150 and time.monotonic()-getattr(self,'received_snapshot',0)<.15;m.sample_sequence=s['sequence'];m.measured_hz=float(s['measured_hz'])
             m.gripper_percent=float(s['gripper']);m.fault=s['error'][:512];self.status[n].publish(m)
             d=DiagnosticStatus();d.name=n;d.hardware_id=n;d.message=s['error'] or s['phase'];d.level=DiagnosticStatus.OK if m.feedback_valid else DiagnosticStatus.ERROR
-            d.values=[KeyValue(key=k,value=str(v)) for k,v in {**s['health'],'input_rejected':self.rejected.get(n,0)}.items()];health.status.append(d)
+            d.values=[KeyValue(key=k,value=str(v)) for k,v in {**s['health'],'input_rejected':self.rejected.get(n,0)}.items() if k!='motors'];health.status.append(d)
+            health.status.append(DiagnosticStatus(name=n+'/motors',hardware_id=n+'/motors',message='cached motor telemetry',
+                values=[KeyValue(key='status',value=json.dumps(motor_snapshot({**s,'arm_id':n}),allow_nan=False,separators=(',',':')))]))
             self.inference[n].publish(DiagnosticArray(header=health.header,status=[DiagnosticStatus(name=n+'/policy',message=s.get('model_state',s['operation_type']),values=[KeyValue(key='reason',value=s.get('model_reason',''))])]))
         self.health.publish(health)
     def publish_cameras(self):

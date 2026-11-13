@@ -20,7 +20,7 @@ class ArmController:
         self.lock=threading.RLock(); self.stop=threading.Event()
         self.backend=make_arm(config); self.permission=False; self.principal=''
         self.phase='IDLE'; self.error=''; self.q={}; self.gripper=0.; self.sample_time=0.; self.sample_ns=0
-        self.sample_sequence=0; self.health_data={'torque':'UNKNOWN'}; self.op=None
+        self.sample_sequence=0; self.health_data={'torque':'UNKNOWN'}; self.health_time_ns=0; self.op=None
         self.windows={}; self.last_sequence=-1; self.last_input=''; self.last_applied=''; self.generation=0
         self.target=None; self.path=None; self.last_write=0.; self.hold_pending=False; self.hold_event=threading.Event()
         self.commanded_q=None;self.commanded_gripper=None
@@ -50,7 +50,7 @@ class ArmController:
                     self.q=q; self.gripper=g; self.sample_time=now(); self.sample_ns=stamp; self.sample_sequence+=1
                     if tick-last_tick>.3 and self.op: self._hold('CONTROL_GAP')
                     if tick>=next_health:
-                        self.health_data=self.backend.health();next_health=tick+1
+                        self.health_data=self.backend.health();self.health_time_ns=time.time_ns();next_health=tick+1
                     if self.hold_pending:
                         self._finish_hold()
                     self._tick(now(),min(.03,max(.001,tick-last_tick)))
@@ -91,7 +91,7 @@ class ArmController:
             else:
                 # A completed timed path already ends at its approved final goal.
                 # Preserve its support torque instead of replacing it with a lagged measurement.
-                self.health_data.update(self.backend.health())
+                self.health_data.update(self.backend.health());self.health_time_ns=time.time_ns()
                 if self.health_data.get('torque')!='ON':raise RuntimeError('Torque lost before completion confirmation')
         if self.pending_result_id is not None:
             self.result_ready.add(self.pending_result_id);self.pending_result_id=None
@@ -416,6 +416,7 @@ class ArmController:
                 'hold_context':dict(self.hold_context),'last_input_error':self.last_input_error,'rejected_frames':self.rejected_frames,
                 'operation_deadline_remaining_s':None if self.op is None or self.op['deadline'] is None else self.op['deadline']-now(),
                 'source_liveness_age_ms':None if self.op is None else (now()-self.op['last_live'])*1000,
-                'health':dict(self.health_data),'model_state':self.model_state,'model_reason':self.model_reason,'stats':dict(self.stats),'measured_hz':(len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0}
+                'health':dict(self.health_data),'health_time_ns':self.health_time_ns,
+                'reference_positions':dict(self.commanded_q) if self.commanded_q is not None else None,'reference_gripper':self.commanded_gripper,'model_state':self.model_state,'model_reason':self.model_reason,'stats':dict(self.stats),'measured_hz':(len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0}
     def close(self):
         self.hold('SHUTDOWN');self.stop.set();self.thread.join(timeout=3);self.pool.shutdown(wait=False,cancel_futures=True)

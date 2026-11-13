@@ -77,6 +77,16 @@ def goal_from_dict(d,principal):
     g.operation.requested_constraints.max_operation_duration_ms=0 if duration is None else int(duration*1000)
     g.input.mode=d['mode'];g.input.producer_role='R06'
     kind={'DIRECT':'DIRECT_JOINT_TARGET','TRAJECTORY':'JOINT_TRAJECTORY','MODEL':'MODEL_TASK'}[d['operation_type']]
+    requested=d.get('payload_kind',kind)
+    cartesian=bool(d.get('cartesian')) or requested=='CARTESIAN_TARGET'
+    if cartesian:
+        if d['operation_type']!='TRAJECTORY':raise ValueError('Cartesian targets require TRAJECTORY')
+        if d['mode']!='INLINE':raise ValueError('Cartesian STREAM is not supported')
+        if d.get('points') or d.get('model_steps'):raise ValueError('Mixed Cartesian and other inline payloads')
+        kind='CARTESIAN_TARGET'
+    elif requested!=kind:raise ValueError('Payload kind does not match operation type')
+    if d['mode']=='STREAM' and any(d.get(key) for key in ('points','cartesian','model_steps')):
+        raise ValueError('STREAM contains inline payload')
     if d['mode']=='STREAM':g.input.stream_topic='/soarm_station/lerobot/command_stream';g.input.stream_payload_kind=kind
     else:
         g.input.inline_sequence.payload_kind=kind
@@ -90,6 +100,30 @@ def goal_from_dict(d,principal):
             from soarm_station_interfaces.msg import ModelTaskStep
             steps=d.get('model_steps') or [{'instruction':d.get('instruction',''),'duration_s':duration}]
             g.input.inline_sequence.model_steps=[ModelTaskStep(instruction=step.get('instruction',''),max_duration_ms=0 if step.get('duration_s') is None else int(step['duration_s']*1000)) for step in steps]
+        elif cartesian:
+            import math
+            from soarm_station_interfaces.msg import CartesianTarget
+            targets=d.get('cartesian',[])
+            if not isinstance(targets,list) or not 1<=len(targets)<=16:raise ValueError('Expected 1..16 Cartesian targets')
+            def vector(values,length,label):
+                if not isinstance(values,(list,tuple)) or len(values)!=length or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) for v in values):
+                    raise ValueError('Invalid Cartesian '+label)
+                return [float(v) for v in values]
+            for target in targets:
+                if not isinstance(target,dict):raise ValueError('Cartesian target must be an object')
+                frame=target.get('frame_id','')
+                if not isinstance(frame,str) or not frame or len(frame.encode())>128:raise ValueError('Explicit Cartesian frame_id required')
+                orientation_mode=target.get('orientation_mode','POSITION_ONLY')
+                if orientation_mode not in ('POSITION_ONLY','STRICT_POSE'):raise ValueError('Unsupported Cartesian orientation mode')
+                position=vector(target.get('position'),3,'position')
+                orientation=vector(target.get('orientation',[0.,0.,0.,1.] if orientation_mode=='POSITION_ONLY' else None),4,'orientation')
+                duration=target.get('duration_s')
+                if isinstance(duration,bool) or not isinstance(duration,(int,float)) or not math.isfinite(duration) or not 1<=duration*1000<2**32:
+                    raise ValueError('Positive Cartesian duration within uint32 milliseconds required')
+                m=CartesianTarget();m.frame_id=frame;m.orientation_mode=orientation_mode;m.duration_ms=int(duration*1000)
+                m.position.x,m.position.y,m.position.z=position
+                m.orientation.x,m.orientation.y,m.orientation.z,m.orientation.w=orientation
+                g.input.inline_sequence.cartesian_steps.append(m)
         else:
             from trajectory_msgs.msg import JointTrajectoryPoint
             if not 1<=len(d.get('points',[]))<=256:raise ValueError('Expected 1..256 trajectory points')

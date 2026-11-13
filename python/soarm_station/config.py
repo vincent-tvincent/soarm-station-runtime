@@ -27,6 +27,13 @@ def load(path):
             raise ValueError('Unsupported arm backend: ' + a['backend'])
         if not a.get('joints') or len({j['name'] for j in a['joints']}) != len(a['joints']):
             raise ValueError('An explicit unique joint list is required')
+        metadata=[*a['joints'],a.get('gripper',{})]
+        motor_ids=[item['motor_id'] for item in metadata if item.get('motor_id') is not None]
+        if any(type(value)!=int or not 1<=value<=253 for value in motor_ids) or len(set(motor_ids))!=len(motor_ids):
+            raise ValueError('Configured motor IDs must be unique integers in [1,253] per arm')
+        for item in [a,*metadata]:
+            if 'label' in item and (not isinstance(item['label'],str) or not 1<=len(item['label'])<=128):
+                raise ValueError('Resource labels require 1..128 characters')
         for j in a['joints']:
             for k in ('min_rad', 'max_rad', 'velocity_rad_s'):
                 if not math.isfinite(j[k]): raise ValueError('Nonfinite joint limit')
@@ -63,6 +70,17 @@ def load(path):
         if profile.get('bundle'):profile['bundle']=str((path.parent/Path(profile['bundle']).expanduser()).resolve())
     if c.get('collector',{}).get('ca'):
         c['collector']['ca']=str((path.parent/Path(c['collector']['ca']).expanduser()).resolve())
+    graph=c.get('graph_observer',{})
+    if not isinstance(graph,dict):raise ValueError('graph_observer must be a mapping')
+    refresh=graph.get('refresh_s',2.)
+    if isinstance(refresh,bool) or not isinstance(refresh,(int,float)) or not math.isfinite(refresh) or not .2<=refresh<=30:
+        raise ValueError('Graph refresh_s must be in [0.2,30]')
+    sampling=graph.get('sampling',{})
+    if not isinstance(sampling,dict) or type(sampling.get('enabled',True))!=bool:raise ValueError('Invalid graph sampling settings')
+    topics=sampling.get('max_topics',2);duration=sampling.get('max_duration_s',10.)
+    if type(topics)!=int or not 1<=topics<=2:raise ValueError('At most two graph topics may be sampled concurrently')
+    if isinstance(duration,bool) or not isinstance(duration,(int,float)) or not math.isfinite(duration) or not .1<=duration<=10:
+        raise ValueError('Graph sampling duration must be in [0.1,10]')
     c['_path']=str(path)
     c['_revision']=hashlib.sha256(json.dumps(c,sort_keys=True).encode()).hexdigest()
     return c

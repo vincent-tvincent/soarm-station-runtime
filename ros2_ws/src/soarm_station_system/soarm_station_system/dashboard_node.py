@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import json
 import os
 import ssl
 import threading
@@ -17,6 +18,10 @@ from soarm_station_interfaces.srv import SetControlPermission,Hold,QueryHistory
 from soarm_station_interfaces.action import ExecuteOperation,ExecuteWorkflow
 from .conversion import goal_from_dict,stream_from_dict
 from .common import BaseNode,STATE,SENSOR,run,topic
+from soarm_station.dashboard_data import resources,render_motors,validate_motor_record
+from soarm_station.graph_observer import GraphObserver
+
+ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
 async def resolved(f,timeout=5):
@@ -28,6 +33,8 @@ async def resolved(f,timeout=5):
 class DashboardNode(BaseNode):
     def __init__(self):
         super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
+        self.motor_records={};self.motor_record_errors={};self.public_resources=resources(self.config)
+        self.graph_observer=GraphObserver(self,self.config.get('graph_observer',{}));self.graph_observer.start()
         group=ReentrantCallbackGroup()
         self.permission_client=self.create_client(SetControlPermission,'/soarm_station/lerobot/set_permission',callback_group=group)
         self.hold_client=self.create_client(Hold,'/soarm_station/lerobot/hold',callback_group=group)
@@ -45,6 +52,7 @@ class DashboardNode(BaseNode):
         self.create_subscription(UploadStatus,'/soarm_station/telemetry/upload_status',lambda m:setattr(self,'upload',asdict(m)),STATE)
         self.create_subscription(WorkflowDecision,'/soarm_station/workflow/decision',lambda m:self.decisions.append(asdict(m)) or self.decisions.__delitem__(slice(None,-50)),STATE)
         self.create_subscription(WorkflowStatus,'/soarm_station/workflow/status',lambda m:self.workflows.__setitem__(m.arm_id,asdict(m)),STATE)
+        self.create_subscription(DiagnosticArray,'/soarm_station/health',self.motor_health,STATE)
         self.loop=asyncio.new_event_loop();self.thread=threading.Thread(target=self.serve,daemon=True);self.thread.start()
     def event(self,m):self.events.append(asdict(m));self.events=self.events[-100:]
     def serve(self):
@@ -57,10 +65,17 @@ class DashboardNode(BaseNode):
     async def start_web(self):
         cfg=self.config['web'];token=os.environ.get(cfg.get('token_env','SOARM_STATION_TOKEN'),'')
         if len(token)<24:raise ValueError('Set an operator token of at least 24 characters')
+        app=self.create_app(token)
+        self.runner=web.AppRunner(app,access_log=None);await self.runner.setup()
+        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        parent=Path(self.config['_path']).parent
+        context.load_cert_chain(parent/cfg['cert'],parent/cfg['key'])
+        await web.TCPSite(self.runner,cfg.get('host','0.0.0.0'),cfg.get('port',8443),ssl_context=context).start()
+    def create_app(self,token):
         @web.middleware
         async def auth(request,handler):
             # Static login page contains no state or credentials. Every API/media route authenticates.
-            if request.path=='/':return await handler(request)
+            if request.path=='/' or request.path.startswith('/assets/'):return await handler(request)
             supplied=request.headers.get('Authorization','')
             if request.path.startswith('/ws/') and not supplied:
                 protocols=request.headers.get('Sec-WebSocket-Protocol','').split(',')
@@ -76,13 +91,39 @@ class DashboardNode(BaseNode):
         app.router.add_post('/api/stream',self.stream_input);app.router.add_post('/api/operate',self.operate);app.router.add_get('/api/operations/{id}',self.operation_status)
         app.router.add_post('/api/workflows',self.start_workflow);app.router.add_get('/api/cameras/{id}.jpg',self.image)
         app.router.add_get('/ws/control',self.control);app.router.add_get('/ws/camera/{id}',self.camera_stream)
-        self.runner=web.AppRunner(app,access_log=None);await self.runner.setup()
-        context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        parent=Path(self.config['_path']).parent
-        context.load_cert_chain(parent/cfg['cert'],parent/cfg['key'])
-        await web.TCPSite(self.runner,cfg.get('host','0.0.0.0'),cfg.get('port',8443),ssl_context=context).start()
+        app.router.add_get('/assets/{file}',self.asset)
+        app.router.add_get('/api/resources',self.api_resources)
+        app.router.add_get('/api/graph',self.graph_status);app.router.add_get('/api/v1/ros/graph',self.graph_status)
+        app.router.add_post('/api/graph/sample',self.graph_sample);app.router.add_post('/api/v1/ros/sample',self.graph_sample)
+        return app
     async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_STATION_ROOT'])/'web/index.html').read_text(),content_type='text/html')
-    def state(self):return {'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
+    def motor_health(self,message):
+        expected={a['id']+'/motors':a for a in self.config['arms']}
+        for status in message.status:
+            arm=expected.get(status.name)
+            if arm is None:continue
+            try:
+                values=[value.value for value in status.values if value.key=='status']
+                if len(values)!=1 or len(values[0])>131072:raise ValueError('Invalid motor telemetry envelope')
+                record=validate_motor_record(json.loads(values[0]),arm)
+            except (ValueError,TypeError,OverflowError) as exc:
+                self.motor_record_errors[arm['id']]='Rejected malformed motor telemetry: '+str(exc)[:128]
+                continue
+            self.motor_records[arm['id']]=record;self.motor_record_errors.pop(arm['id'],None)
+    async def asset(self,request):
+        name=request.match_info['file']
+        if name not in ASSET_NAMES:raise web.HTTPNotFound()
+        root=(Path(os.environ['SOARM_STATION_ROOT'])/'web').resolve();path=(root/name).resolve()
+        if path.parent!=root or not path.is_file():raise web.HTTPNotFound()
+        return web.FileResponse(path,headers={'Cache-Control':'no-cache'})
+    async def api_resources(self,request):return web.json_response(self.public_resources)
+    async def graph_status(self,request):return web.json_response(self.graph_observer.snapshot(),headers={'Cache-Control':'no-store'})
+    async def graph_sample(self,request):
+        body=await request.json()
+        if not isinstance(body,dict):raise ValueError('JSON object required')
+        return web.json_response(self.graph_observer.sample(body))
+    def state(self):return {'schema_version':1,'resources':self.public_resources,
+        'motor_status':render_motors(self.config,dict(self.motor_records),dict(self.joints),dict(self.states),time.time_ns(),dict(self.motor_record_errors)),'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
     async def status(self,r):return web.json_response(self.state())
     async def history(self,r):
         q=QueryHistory.Request();q.arm_id=r.query.get('arm','');q.after_sequence=int(r.query.get('after',0));q.page_size=min(500,int(r.query.get('limit',100)))
@@ -121,7 +162,7 @@ class DashboardNode(BaseNode):
         b,t=self.images[n]
         return web.Response(body=b,content_type='image/jpeg',headers={'X-Source-Time-Ns':str(t),'Cache-Control':'no-store'})
     async def camera_stream(self,r):
-        n=r.match_info['id'];ws=web.WebSocketResponse(max_msg_size=1024,heartbeat=10);await ws.prepare(r);last=0
+        n=r.match_info['id'];ws=web.WebSocketResponse(protocols=['soarm_station'],max_msg_size=1024,heartbeat=10);await ws.prepare(r);last=0
         try:
             while not ws.closed and not self.stopping:
                 frame=self.images.get(n)
@@ -164,5 +205,6 @@ class DashboardNode(BaseNode):
             await ws.close()
         return ws
     def destroy_node(self):
+        self.graph_observer.close()
         self.stopping=True;self.loop.call_soon_threadsafe(self.loop.stop);self.thread.join(timeout=4);super().destroy_node()
 def main():run(DashboardNode)

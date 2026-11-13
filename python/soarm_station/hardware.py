@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import time
+from .dashboard_data import health_rows
 
 class DeviceLock:
     def __init__(self, directory, identity):
@@ -25,7 +26,10 @@ class MockArm:
     def connect(self): pass
     def read(self): return dict(self.q), self.gripper
     def health(self):
-        return {'torque':'ON' if self.torque else 'OFF','voltage_v':12.,'temperature_c':25.,'writes':self.writes}
+        names=[j['name'] for j in self.config['joints']]+[self.config.get('gripper',{}).get('name','gripper')]
+        goals={n:math.degrees(v) for n,v in self.q.items()};goals[names[-1]]=self.gripper
+        rows=health_rows(self.config,{},dict.fromkeys(names,int(self.torque)),dict.fromkeys(names,12.),dict.fromkeys(names,25.),goals,source='simulated')
+        return {'torque':'ON' if self.torque else 'OFF','voltage_v':12.,'temperature_c':25.,'writes':self.writes,'source':'simulated','motors':rows}
     def send(self,q,gripper):
         self.q=dict(q); self.gripper=gripper; self.writes+=1; self.torque=True
     def hold(self):
@@ -39,7 +43,7 @@ class LeRobotArm:
     def connect(self):
         from lerobot.motors import Motor, MotorCalibration, MotorNormMode, SerialMotorsBus
         c=self.config
-        calibration=json.loads(Path(c['calibration']).read_text())
+        calibration=json.loads(Path(c['calibration']).read_text());self.calibration=calibration
         body=[j['name'] for j in c['joints']]
         self.gripper_name=c.get('gripper',{}).get('name','gripper')
         motors={n:Motor(calibration[n]['id'],'sts3215',MotorNormMode.DEGREES) for n in body}
@@ -64,7 +68,8 @@ class LeRobotArm:
         return {'torque':'ON' if all(torque.values()) else 'OFF' if not any(torque.values()) else 'MIXED',
                 'voltage_v':min(voltage.values())/10,'temperature_c':max(temp.values()),'writes':self.writes,
                 'goal_positions_rad':{j['name']:math.radians(goals[j['name']]) for j in self.config['joints']},
-                'goal_gripper_percent':goals[self.gripper_name]}
+                'goal_gripper_percent':goals[self.gripper_name],'source':'measured',
+                'motors':health_rows(self.config,self.calibration,torque,{n:v/10 for n,v in voltage.items()},temp,goals)}
     def send(self,q,gripper):
         action={n:math.degrees(v) for n,v in q.items()}
         action[self.gripper_name]=gripper
@@ -144,10 +149,12 @@ class ReadOnlySO101:
         gripper=(raw-c['range_min'])/(c['range_max']-c['range_min'])*100
         return q,gripper
     def health(self):
-        cs=list(self.calibration.values());torque=[self._read(c['id'],40,1) for c in cs]
-        return {'torque':'ON' if all(torque) else 'OFF' if not any(torque) else 'MIXED',
-            'voltage_v':min(self._read(c['id'],62,1) for c in cs)/10,
-            'temperature_c':max(self._read(c['id'],63,1) for c in cs),'writes':0,'read_only':True}
+        torque={n:self._read(c['id'],40,1) for n,c in self.calibration.items()}
+        voltage={n:self._read(c['id'],62,1)/10 for n,c in self.calibration.items()}
+        temp={n:self._read(c['id'],63,1) for n,c in self.calibration.items()}
+        return {'torque':'ON' if all(torque.values()) else 'OFF' if not any(torque.values()) else 'MIXED',
+            'voltage_v':min(voltage.values()),'temperature_c':max(temp.values()),'writes':0,'read_only':True,
+            'source':'measured','motors':health_rows(self.config,self.calibration,torque,voltage,temp)}
     def send(self,q,gripper):raise PermissionError('Read-only monitoring profile; use a supervised writable backend for motion')
     def close(self):
         if self.serial is not None:self.serial.close()

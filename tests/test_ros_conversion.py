@@ -57,3 +57,30 @@ def test_initial_native_integer_samples_publish_as_ros_float64():
     RuntimeNode.publish_status(node)
     status=next(message for message in messages if isinstance(message,OperationStatus))
     assert status.measured_hz==0. and status.gripper_percent==0. and status.feedback_valid
+
+
+@pytest.mark.parametrize('mode',['POSITION_ONLY','STRICT_POSE'])
+def test_cartesian_inline_json_roundtrip_uses_existing_ros_payload(mode):
+    data=envelope('TRAJECTORY','INLINE')|{'payload_kind':'CARTESIAN_TARGET','cartesian':[
+        {'frame_id':'arm1_base','position':[.1,.2,.3],'orientation_mode':mode,'orientation':[0.,0.,0.,1.],'duration_s':1.25}]}
+    goal=goal_from_dict(data,'owner');request=request_from_goal(goal)
+    assert goal.input.inline_sequence.payload_kind=='CARTESIAN_TARGET'
+    assert request['payload_kind']=='CARTESIAN_TARGET'
+    assert request['cartesian']==data['cartesian']
+    assert not goal.input.inline_sequence.joint_trajectory.points
+
+
+@pytest.mark.parametrize('patch',[
+    {'mode':'STREAM'}, {'points':[{'positions':{'joint':0.},'time_s':1.}]},
+    {'operation_type':'DIRECT'},
+    {'cartesian':[{'frame_id':'base','position':[float('nan'),0.,0.],'duration_s':1.}]},
+    {'cartesian':[{'frame_id':'base','position':[0.,0.],'duration_s':1.}]},
+    {'cartesian':[{'frame_id':'base','position':[0.,0.,0.],'orientation_mode':'TOOL_AXIS','duration_s':1.}]},
+    {'cartesian':[{'frame_id':'base','position':[0.,0.,0.],'orientation_mode':'STRICT_POSE','duration_s':1.}]},
+    {'cartesian':[{'frame_id':'base','position':[0.,0.,0.],'duration_s':0.}]},
+])
+def test_cartesian_json_rejects_mixed_stream_and_malformed_inputs(patch):
+    data=envelope('TRAJECTORY','INLINE')|{'payload_kind':'CARTESIAN_TARGET','cartesian':[
+        {'frame_id':'base','position':[.1,.2,.3],'duration_s':1.}]}
+    data.update(patch)
+    with pytest.raises(ValueError):goal_from_dict(data,'owner')
