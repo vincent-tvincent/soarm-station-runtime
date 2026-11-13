@@ -1,116 +1,102 @@
-# SOARM Linux workstation
+# SOARM runtime
 
-A configuration-driven ROS 2 application for **n cameras and m independent arms**. SO-101 is the first real arm adapter; mock adapters support development without devices. Other robot families require an adapter, not a new application architecture. Coordinated multi-arm motion is not enabled.
+SOARM is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, an authenticated web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
 
-The Pi deployment is `/home/pipi/so-101/ros_system`. This repository is independent of `../training`, has no configured Git remote, and has not been pushed. Initial implementation was produced with Codex assistance.
+The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SOARM training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
 
-## Foreground debugging — no service required
+## Requirements
 
-See the [detailed startup and debugging guide](docs/startup-and-debug.md) for installation, mock/native profiles, ROS CLI inspection, single-node debugging and optional service deployment. After one-time bootstrap/private initialization, in Bash:
+The tested installation uses Ubuntu 26.04 aarch64, ROS 2 Lyrical and system Python 3.14. The bootstrap creates a separate Python 3.12 environment for LeRobot 0.7.0 and CPU PyTorch 2.11.0. Other Linux/ROS combinations require validation; see [installation coverage](docs/reproducibility-2026-11-13.md).
+
+Install these prerequisites before running the bootstrap:
+
+- ROS 2, including the ROS CLI, SROS2, standard message packages, TF and `robot_state_publisher`.
+- Colcon, CMake, a C/C++ compiler, Python venv support, and distribution Python YAML/NumPy packages.
+- Network access to download Python packages and the native Python runtime.
+
+Use Bash for the commands below. Keep the complete repository: its Python core, ROS workspace, configuration and web assets are used together.
+
+## Quick start: mock devices
+
+Clone or extract the runtime repository, then run these commands from its root:
 
 ```bash
+export ROS_DISTRO=lyrical
+scripts/bootstrap
+.venv/bin/python scripts/init-local --name localhost
+scripts/init-security
+
 source /opt/ros/lyrical/setup.bash
 source ros2_ws/install/setup.bash
-ros2 launch soarm_system system.launch.py config:="$PWD/config/mock.yaml" log_level:=debug respawn:=false
+ros2 launch soarm_system system.launch.py \
+  config:="$PWD/config/mock.yaml" log_level:=info respawn:=false
 ```
 
-For the Pi hardware, select `config:="$PWD/local/pi-writable.yaml"`. Stop an existing service before running a foreground graph. Ctrl-C stops the launch; control permission starts OFF. Complete launch prepares its child environments without `scripts/run` or venv activation. The full repository and initialized local credentials are required.
+This starts one mock arm and one mock camera without opening physical devices. Open `https://localhost:8443/`, trust the generated certificate at `local/tls/cert.pem`, and enter the `SOARM_TOKEN` value from `local/secrets.env`. Press Ctrl-C in the launch terminal to stop the graph.
 
-## Optional deployed service
+No systemd service or manual venv activation is required. The launch file selects the ROS and native interpreters and prepares child-process environments. Motion permission starts disabled.
+
+For multiple mock resources, select `config/multi_mock.yaml`. For detailed installation, debugging and shutdown instructions, see [Startup and debugging](docs/startup-and-debug.md).
+
+## Configure a deployment
+
+Create a host profile under the ignored `local/` directory:
 
 ```bash
+cp config/mock.yaml local/robot.yaml
+# Edit local/robot.yaml for the target devices and application settings.
+ros2 launch soarm_system system.launch.py config:="$PWD/local/robot.yaml"
+```
+
+The copied profile initially uses mock devices. Hardware deployment requires adapter settings, stable device paths, calibration, joint limits and any model or measured transform assets. Each arm and camera has an explicit unique ID. Resource counts come from configuration; no default physical arm is selected. Relative paths resolve against the YAML file's directory.
+
+For remote dashboard access, initialize the certificate with the hostname used by clients, for example `.venv/bin/python scripts/init-local --name robot.example.net`, before first launch. Initialization preserves existing credentials. Tokens, private keys, calibration, datasets and generated environments are excluded from Git.
+
+The runtime uses authenticated DDS on domain 71 with localhost discovery. Remote operators normally use HTTPS/WebSocket. See the [runtime reference](docs/runtime-reference.md) for resource configuration, control contracts, model deployment and telemetry.
+
+## Development
+
+For foreground debugging, pass `log_level:=debug respawn:=false`. Prepare a second terminal for ROS CLI inspection:
+
+```bash
+source scripts/setup.bash config/mock.yaml
+ros2 node list --no-daemon --spin-time 5
+ros2 topic echo /soarm/arms/arm1/joint_states --once \
+  --qos-reliability best_effort
+scripts/test
+```
+
+The [debugging guide](docs/startup-and-debug.md) also covers individual `ros2 run` commands, interpreter selection, rebuilds and IDE debugging.
+
+| Path | Purpose |
+| --- | --- |
+| `python/soarm/` | Device ownership, control, policy execution, IPC and persistence. |
+| `ros2_ws/src/soarm_system/` | ROS node adapters and launch entry point. |
+| `ros2_ws/src/soarm_interfaces/` | Messages, services and actions. |
+| `config/` | Tracked mock and policy-server examples. |
+| `scripts/` | Bootstrap, local initialization, startup and development commands. |
+| `web/` | Dashboard assets. |
+| `tests/` | Core and ROS integration checks. |
+| `local/` | Ignored host configuration, credentials and runtime data. |
+
+## Optional service deployment
+
+After configuring a deployment profile, install a user systemd service with an explicit absolute config path:
+
+```bash
+scripts/install-service "$PWD/local/robot.yaml"
 systemctl --user status soarm.service
 journalctl --user -u soarm.service -f
-# Explicit foreground launch after stopping the service:
-systemctl --user stop soarm.service
-scripts/run local/pi-writable.yaml
 ```
 
-The dashboard is **https://ubuntu-pi.tail521c60.ts.net:8443/**. Its development certificate is at `local/tls/cert.pem`; trust that certificate on the operator device. Enter the operator token stored on this host in `local/secrets.env`. Private credentials, calibration and device paths are ignored by Git. Do not copy the entire secret file to an operator computer.
+The installer enables and starts the service. Stop it before launching the foreground graph with the same resources. Service startup invokes `scripts/run`, which enables application-node respawn. Direct `ros2 launch` defaults to no respawn for debugging. See [service management](docs/startup-and-debug.md#optional-systemd-service) for update, logout and removal behavior.
 
-The active Pi profile is **`local/pi-writable.yaml`**, using the native LeRobot motor bus. The user subsequently approved live native connection and controlled motion. Real joint/gripper, coordinated trajectory, streamed input, disconnect, expiry and restart tests passed under the declared coarse accuracy profile; see [physical qualification](docs/physical-motion-validation-2026-11-12.md). Motion permission remains disabled after startup/hold. The arm is currently holding its compact pose with all six torques ON. `local/pi.yaml` remains the strict read-only fallback.
+## Documentation and current scope
 
-## Environments and installation
+- [Startup and debugging](docs/startup-and-debug.md): first installation, foreground launch, ROS CLI, single-node runs and service management.
+- [Architecture](docs/architecture.md): process ownership, node responsibilities and timing.
+- [Runtime reference](docs/runtime-reference.md): configuration, interfaces, operations, policy bundles and telemetry.
+- [Installation evidence](docs/reproducibility-2026-11-13.md) and [foreground validation](docs/foreground-validation-2026-11-13.md): tested environments and verification limits.
+- [Physical validation](docs/physical-motion-validation-2026-11-12.md): measured behavior of the qualified SO-101 deployment.
 
-The committed bootstrap was verified from clean local Git checkouts with new environments on the existing supported Pi OS/ROS stack. See [the reproducibility evidence and its limits](docs/reproducibility-2026-11-13.md). This does not establish a clean-OS or cross-distribution installation guarantee.
-
-ROS Lyrical on Ubuntu 26.04 uses distribution Python 3.14. `.venv` uses that Python with system site packages. `.runtime-venv` uses Python 3.12 and LeRobot 0.7.0 / CPU PyTorch 2.11.0. A permission-restricted Unix socket keeps the Python/native ABIs separate. Motor and camera devices have one owner; per-arm threads prevent another arm or camera from blocking control.
-
-On another compatible Linux host, install ROS 2, colcon, Python venv support and the distribution's NumPy/YAML dependencies, then:
-
-```bash
-scripts/bootstrap
-.venv/bin/python scripts/init-local --name YOUR_HOSTNAME
-scripts/init-security
-scripts/run config/multi_mock.yaml
-```
-
-The lock files reproduce the tested Linux CPU environments. GPU training belongs in the training repository's separate GPU environment. Choose a ROS distribution whose Python ABI matches the host; set `ROS_DISTRO` when the ROS installation is not Lyrical. Runtime defaults require authenticated DDS on domain 71. `TZ=UTC` applies only to launched processes because Fast DDS 3.6.2 parses policy UTC validity dates using local `mktime`; the host timezone is unchanged.
-
-## Configuration and resource model
-
-Start with `config/mock.yaml` or `config/multi_mock.yaml`; create a host profile under `local/`. Every arm and camera has a unique ID. An arm declares its backend, named joints, radian bounds/velocity limits, calibration, base/TCP/model, and separate gripper-percent convention. A camera declares its capture identity, resolution/FPS and optional measured intrinsics. No camera count or arm default is inferred. Duplicate physical paths are rejected. Shared serial buses need a bus-level adapter; two owners may not open the same bus.
-
-Each arm publishes `/soarm/arms/ID/joint_states`, `lerobot/status` and `lerobot/inference_status`. Camera streams are `/soarm/camera/ID/image_raw`, `image_raw/compressed` and `camera_info`. Joint names are canonical inside their resource-scoped topic; TF link names use `ID/` prefixes. CameraInfo with K[0] = 0 explicitly means uncalibrated. Configure only measured fixed transforms; the installation does not guess extrinsics.
-
-The original fixed three-camera/single-arm plan was generalized to resource-scoped IDL. The generic Hold service replaces the reference plan's unscoped Trigger service with an explicit arm selector. Motor health uses typed telemetry fields and a standard DiagnosticArray, preserving physical units without claiming calibrated joint effort. See `docs/architecture.md`.
-
-## Continuous operation update
-
-The November13 continuity revision is documented in [the dated report](docs/continuous-operation-2026-11-13.md). Healthy STREAM operations now have no total lifetime deadline unless explicitly requested or capped by the deployment profile. Normal INLINE completion retains the same operator/controller permission and final command reference; each new motion still requires an explicit new operation. Stateless HTTPS callers explicitly hold/disable when their sequence is finished. Control-WebSocket disconnect, END/cancel, actual source expiry, fault and restart still revoke. The UI displays an enabled idle grant as waiting for a new operation.
-
-Streamed trajectory replacements start from the admitted commanded reference, not lagging measured pose; a settled endpoint remains active for later updates. This is replacement of a bounded position/time path, not queued rolling-chunk scheduling. MODEL/TRAJECTORY stream commands require a positive monotonic `semantic_revision`; retries preserve revision+input_id+body and only the current revision can retry. Retired revisions never execute again. DIRECT JSON producers remain latest-only and need no new field. All ROS participants must rebuild for the new message fields. Reload/update clients that explicitly hardcoded120s; explicit durations remain honored.
-
-Joint/body trajectories preserve an existing gripper grasp reference. Expected gripper contact/compliance does not freeze body advancement or force a half-second stall revocation. Velocity/lead limits remain; optional no-progress policies are actuator/mode-specific and default off. Native model weights remain resident across task resets; ACTION/WAIT/HOLD/FAULT appears in inference diagnostics and dashboard status, with real owner hold before native acknowledgement. Unconditioned ACT profiles allow empty instructions. Cached actions retain original source time and native cadence/eligibility; increasing a generic TTL is not the mechanism.
-
-Per-arm `operation_limits` may configure `max_inline_duration_s` (3600), `max_path_duration_s` (3600), `default_model_step_duration_s` (30), `max_model_step_duration_s` (3600), `settle_timeout_s` (2), and optional `max_stream_duration_s` (null by default). These finite work limits are independent of continuous session lifetime. `tracking_timeout_s` is optional per joint/gripper, either a positive number or a mapping for DIRECT/TRAJECTORY/MODEL; null disables that optional inferred-stall policy. Existing source/torque/device-fault guards still apply.
-
-## Operations and remote control
-
-`/soarm/lerobot/operate` is a typed ExecuteOperation action. Each arm admits one operation: DIRECT named joint targets, TRAJECTORY timed joint points / supported Cartesian endpoints, or MODEL registered local/native-remote policy. INLINE carries bounded inputs; STREAM accepts typed COMMAND/HEARTBEAT/END messages after READY. End/cancel/expiry invalidates pending work; natural INLINE completion preserves the healthy owner grant. Held streams do not resume on reconnection. Gripper percent is separate from ROS radians.
-
-Timed-path completion uses each joint's `goal_tolerance_rad` (default 0.03 rad). The qualified Pi elbow profile declares 0.07 rad because its unchanged stock gains leave about 3.2 degrees of physical following error; this is coarse control, not precision positioning. The limiter advances from prior commanded state with a default `max_target_lead_rad` of 0.12 rad.
-
-The stream uses host-issued 250 ms windows, increasing sequence numbers and current boot/session/operation identities. DIRECT targets expire independently of heartbeats. First pickup requires arm/gripper alignment. Sparse path/task input IDs are idempotent; retries never reactivate a superseded task. A 100 Hz per-arm loop owns final velocity/lead-bounded writes. Policy action timing remains its trained cadence. Inline operations are finite and do not require heartbeats unless their profile enables that requirement; streamed operations require source liveness.
-
-The browser provides joint sliders and hold controls. A non-ROS native operator can use:
-
-```bash
-# SOARM_TOKEN must be provisioned only to this authorized operator.
-python -m soarm.operator --url https://ROBOT_HOST:8443 --ca robot-cert.pem \
-  --arm arm1 --leader local/leader.yaml --hz 100
-```
-
-The leader YAML is a native LeRobot teleoperator configuration with explicit degree units. Without `--leader`, newline JSON targets are read from stdin **after a window arrives**. The optional `--hold-measured` mode is an explicit diagnostic input, not a leader emulator. Keep control/state and camera sockets separate. The API authenticates bearer headers; browsers use the `soarm` WebSocket subprotocol plus token, never query-string credentials.
-
-Authenticated routes: GET `/api/status`, `/api/history`, `/api/cameras/ID.jpg`; POST `/api/permission`, `/api/hold`, `/api/operate`, `/api/stream`, `/api/workflows`; GET `/api/operations/REQUEST_ID`; WSS `/ws/control` and `/ws/camera/ID`. Operation feedback is private to authenticated API/action clients. No command topic, window or operator token enters bags or telemetry.
-
-## Training exports and inference
-
-Collect/review/train in `../training` with production stopped and its automatic restart disabled for the handoff. Both repositories use the same physical-device lock convention. Production consumes an exported bundle containing weights, saved processors, named state/action mappings, units, camera mapping, action FPS, calibration revision, hashes and evaluation metadata. Bind that bundle to a named `profiles` entry; clients choose a registered ID rather than a path or URL.
-
-Local inference loads LeRobot checkpoints/processors. Native remote inference uses released RemoteClient/RemoteInferenceEngine and Zenoh, with caller-owned capture of targets before guarded dispatch. `scripts/serve-policy CONFIG` starts the native server on its chosen compute host. Use `config/policy-server.example.yaml`; default examples bind loopback. Configure protected Zenoh connectivity explicitly for another host. Each native deployment owns one model/session. The ACT synthetic export and native server/client were tested; no useful SmolVLA policy or physical manipulation success is claimed.
-
-Cartesian endpoints use LeRobot/Placo, bounded solve time, explicit base frame, joint limits, independent FK residuals and timed joint paths. Position-only and strict-pose tasks are supported. Tool-axis tasks, continuous Cartesian-path guarantees, requested positive collision clearance, derivative trajectories and coordinated multi-arm planning reject explicitly. The supplied SO101 model is for kinematics/TF and omits meshes/collision geometry.
-
-## Monitoring and course evidence
-
-Telemetry commits to SQLite before publication. The monitoring run and expected schedule persist across restart; missed periods become invalid gap records rather than fresh copies of current data. The outbox retains exact `(device_id, runtime_boot_id, sequence)` keys until an HTTPS collector acknowledges durable commit. Storage is bounded; unacknowledged records are not silently deleted. Parked encoder drift and feedback availability produce visible decisions and durably acknowledged incidents with debounce.
-
-Deploy `scripts/run-collector` on a **separate server**, then set `collector.url`, CA trust and its dedicated token in the robot's local configuration. The installation tested a separate loopback collector process and exact retry/deduplication; an external wireless collector endpoint is not configured. Pi data continues to queue. Browser access alone does not establish wireless device-to-server receipt.
-
-Optional ROS evidence recording is enabled in `recording.enabled`. Its allowlist includes measured state, images/CameraInfo, TF and events; command streams/action internals are excluded. Bags are not LeRobot training datasets. Replay must use an isolated graph without physical devices.
-
-`soarm-release keygen/sign/verify` provides Ed25519 signed archive manifests and rejects altered signatures/digests. Signing keys stay under ignored `local/`; do not deploy an update before verification. DDS participants require the local CA credentials; private-key compromise is a trusted-host compromise, not solved by a ROS namespace.
-
-## Verification and status
-
-```bash
-scripts/test
-.venv/bin/python scripts/qualify-monitor.py --config local/pi.yaml --seconds 20 --output local/rates.json
-# Mock only; stop production, run multi_mock profile, then:
-set -a; source local/secrets.env; set +a
-.venv/bin/python scripts/integration-check.py --ca local/tls/cert.pem
-```
-
-See `docs/validation-2026-11-12.md` for measured results and outstanding physical/course evidence. Native controlled physical operation has now been qualified as documented above. Formal 72-hour qualification, actual current measurement, full VLA training and task-level manipulation validation remain outstanding.
+The application supports independent arm operation, position/time trajectories and registered local or native remote policies. It does not provide coordinated multi-arm planning, collision checking, force control or guaranteed continuous Cartesian paths. A successful startup or software integration test does not establish learned manipulation success. Deployment-specific addresses and profiles are documented separately in [the reference Pi deployment](docs/deployments/pi.md).
