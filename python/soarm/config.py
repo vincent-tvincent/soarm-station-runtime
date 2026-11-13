@@ -32,6 +32,14 @@ def load(path):
                 if not math.isfinite(j[k]): raise ValueError('Nonfinite joint limit')
             if j['min_rad'] >= j['max_rad'] or j['velocity_rad_s'] <= 0:
                 raise ValueError('Invalid joint limit')
+            tolerance=j.get('goal_tolerance_rad',.03)
+            if not math.isfinite(tolerance) or not 0<tolerance<=j['max_rad']-j['min_rad']:
+                raise ValueError('Invalid joint goal tolerance')
+        lead=a.get('max_target_lead_rad',.12)
+        if not math.isfinite(lead) or lead<=0:raise ValueError('Invalid target lead')
+        gripper_tolerance=a.get('gripper',{}).get('goal_tolerance_percent',3.)
+        if not math.isfinite(gripper_tolerance) or not 0<gripper_tolerance<=100:
+            raise ValueError('Invalid gripper goal tolerance')
         for k in ('calibration', 'urdf'):
             if a.get(k): a[k] = str((path.parent / Path(a[k]).expanduser()).resolve())
     for k in ('database','socket','frame_dir','lock_dir'):

@@ -16,7 +16,7 @@ scripts/run local/pi.yaml
 
 The dashboard is **https://ubuntu-pi.tail521c60.ts.net:8443/**. Its development certificate is at `local/tls/cert.pem`; trust that certificate on the operator device. Enter the operator token stored on this host in `local/secrets.env`. Private credentials, calibration and device paths are ignored by Git. Do not copy the entire secret file to an operator computer.
 
-The installed Pi profile uses the strict **read-only** serial adapter. It reads real encoders, voltage, temperature and torque state, but rejects motion permission and cannot emit motor writes. The writable LeRobot bus adapter and all control paths are implemented and mock-tested; live native connection/actuation was not approved during installation. Switching the profile's `read_only` field to false is a deliberate supervised deployment change, not an action performed by this setup.
+The active Pi profile is **`local/pi-writable.yaml`**, using the native LeRobot motor bus. The user subsequently approved live native connection and controlled motion. Real joint/gripper, coordinated trajectory, streamed input, disconnect, expiry and restart tests passed under the declared coarse accuracy profile; see [physical qualification](docs/physical-motion-validation-2026-11-12.md). Motion permission remains disabled after startup/hold. The arm is currently holding its compact pose with all six torques ON. `local/pi.yaml` remains the strict read-only fallback.
 
 ## Environments and installation
 
@@ -44,6 +44,8 @@ The original fixed three-camera/single-arm plan was generalized to resource-scop
 ## Operations and remote control
 
 `/soarm/lerobot/operate` is a typed ExecuteOperation action. Each arm admits one operation: DIRECT named joint targets, TRAJECTORY timed joint points / supported Cartesian endpoints, or MODEL registered local/native-remote policy. INLINE carries bounded inputs; STREAM accepts typed COMMAND/HEARTBEAT/END messages after READY. End/cancel/expiry invalidates pending work. Held streams do not resume on reconnection. Gripper percent is separate from ROS radians.
+
+Timed-path completion uses each joint's `goal_tolerance_rad` (default 0.03 rad). The qualified Pi elbow profile declares 0.07 rad because its unchanged stock gains leave about 3.2 degrees of physical following error; this is coarse control, not precision positioning. The limiter advances from prior commanded state with a default `max_target_lead_rad` of 0.12 rad.
 
 The stream uses host-issued 250 ms windows, increasing sequence numbers and current boot/session/operation identities. DIRECT targets expire independently of heartbeats. First pickup requires arm/gripper alignment. Sparse path/task input IDs are idempotent; retries never reactivate a superseded task. A 100 Hz per-arm loop owns final velocity/lead-bounded writes. Policy action timing remains its trained cadence. Inline operations are finite and do not require heartbeats unless their profile enables that requirement; streamed operations require source liveness.
 
@@ -87,4 +89,4 @@ set -a; source local/secrets.env; set +a
 .venv/bin/python scripts/integration-check.py --ca local/tls/cert.pem
 ```
 
-See `docs/validation-2026-11-12.md` for measured results and outstanding physical/course evidence. No 72-hour qualification, actual current measurement, full VLA training or supervised physical operation test has been completed by this installation.
+See `docs/validation-2026-11-12.md` for measured results and outstanding physical/course evidence. Native controlled physical operation has now been qualified as documented above. Formal 72-hour qualification, actual current measurement, full VLA training and task-level manipulation validation remain outstanding.

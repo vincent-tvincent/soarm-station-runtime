@@ -23,6 +23,9 @@ class ArmController:
         self.sample_sequence=0; self.health_data={'torque':'UNKNOWN'}; self.op=None
         self.windows={}; self.last_sequence=-1; self.last_input=''; self.last_applied=''; self.generation=0
         self.target=None; self.path=None; self.last_write=0.; self.hold_pending=False; self.hold_event=threading.Event()
+        self.commanded_q=None;self.commanded_gripper=None
+        self.hold_retarget=True
+        self.pending_result_id=None;self.result_ready=set()
         self.completed={}; self.accepted={}; self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='policy-'+self.id)
         self.job=None; self.plan_job=None; self.policy=None; self.policy_name=''; self.tick_times=deque(maxlen=10000)
         self.thread=threading.Thread(target=self.run,daemon=True,name='arm-'+self.id)
@@ -43,10 +46,7 @@ class ArmController:
                     if tick>=next_health:
                         self.health_data=self.backend.health();next_health=tick+1
                     if self.hold_pending:
-                        # No goal write into a disarmed motor. Never torque off a raised arm.
-                        if self.last_write and self.health_data.get('torque')=='ON':
-                            self.backend.send(self.q,self.gripper)
-                        self.hold_pending=False;self.hold_event.set()
+                        self._finish_hold()
                     self._tick(now(),min(.03,max(.001,tick-last_tick)))
                     self.tick_times.append(tick); last_tick=tick
                 deadline+=1/self.system['control_hz']
@@ -54,21 +54,42 @@ class ArmController:
                 self.stop.wait(max(0,deadline-now()))
         except Exception as exc:
             with self.lock:
-                self._hold('HARDWARE_ERROR: '+str(exc));self.phase='FAULT';self.error=str(exc)
+                self._fault(str(exc))
         finally:
             self.backend.close()
             if lock: lock.close()
             self.hold_event.set()
     def _hold(self,reason,completed=False):
         if self.op:
-            self.completed[self.op['operation_id']]={'result_code':'COMPLETED' if completed else 'HELD',
+            self.pending_result_id=self.op['operation_id']
+            self.completed[self.pending_result_id]={'result_code':'COMPLETED' if completed else 'HELD',
                 'reason':reason,'execution_completed':completed,'task_outcome':'UNKNOWN',
                 'operation_id':self.op['operation_id']}
-            if len(self.completed)>128: self.completed.pop(next(iter(self.completed)))
+            if len(self.completed)>128:
+                old=next(iter(self.completed));self.completed.pop(old);self.result_ready.discard(old)
         self.op=None; self.target=None;self.path=None;self.windows.clear();self.epoch+=1;self.generation+=1
+        self.commanded_q=None;self.commanded_gripper=None
         self.permission=False;self.principal='';self.phase='HOLD';self.error=reason
+        self.hold_retarget=not (completed and reason=='PATH_COMPLETE')
         self.hold_pending=True;self.hold_event.clear()
         # Running native work may finish; its generation is no longer admissible.
+    def _finish_hold(self):
+        if self.last_write:
+            if self.hold_retarget:
+                self.health_data.update(self.backend.hold())
+            else:
+                # A completed timed path already ends at its approved final goal.
+                # Preserve its support torque instead of replacing it with a lagged measurement.
+                self.health_data.update(self.backend.health())
+                if self.health_data.get('torque')!='ON':raise RuntimeError('Torque lost before completion confirmation')
+        if self.pending_result_id is not None:
+            self.result_ready.add(self.pending_result_id);self.pending_result_id=None
+        self.hold_pending=False;self.hold_event.set()
+    def _fault(self,detail):
+        self._hold('HARDWARE_ERROR: '+detail);self.phase='FAULT';self.error=detail
+        if self.pending_result_id is not None:
+            self.completed[self.pending_result_id].update(result_code='FAULT',execution_completed=False,reason=detail)
+            self.result_ready.add(self.pending_result_id);self.pending_result_id=None
     def hold(self,reason='OPERATOR_HOLD'):
         with self.lock: self._hold(reason)
         confirmed=self.hold_event.wait(1.5)
@@ -78,6 +99,7 @@ class ArmController:
         with self.lock:
             if session != self.session: raise ValueError('Controller session mismatch')
             if not principal: raise ValueError('Principal required')
+            if self.hold_pending:raise ValueError('Hold confirmation is pending')
             if self.config.get('read_only',False):raise ValueError('This deployment profile is read-only')
             if self.phase=='FAULT' or not self.q or now()-self.sample_time>.15:
                 raise ValueError('Fresh measured feedback unavailable')
@@ -149,6 +171,7 @@ class ArmController:
                 if request.get('instruction') and not p.get('language_conditioned',False): raise ValueError('Policy does not accept language')
             self.epoch+=1;self.generation+=1;self.last_sequence=-1;self.last_input='';self.last_applied=''
             self.accepted={};self.target=target;self.path=path;self.plan_job=None;self.error='';self.phase='READY'
+            self.commanded_q=dict(self.q);self.commanded_gripper=self.gripper
             self.op={**copy.deepcopy(request),'operation_id':uid(),'operation_epoch':self.epoch,
                      'start':now(),'deadline':now()+duration,'last_live':now(),'last_direct':0.,'picked_up':False,
                      'requires_liveness':mode=='STREAM' or request.get('require_liveness',False)}
@@ -253,13 +276,20 @@ class ArmController:
             q,g=target
             applied={}
             for j in self.config['joints']:
-                n=j['name'];step=min(j['velocity_rad_s']*dt,.12)
-                applied[n]=self.q[n]+max(-step,min(step,q[n]-self.q[n]))
+                n=j['name'];step=j['velocity_rad_s']*dt
+                previous=self.commanded_q[n] if self.commanded_q is not None else self.q[n]
+                candidate=previous+max(-step,min(step,q[n]-previous))
+                lead=self.config.get('max_target_lead_rad',.12)
+                applied[n]=self.q[n]+max(-lead,min(lead,candidate-self.q[n]))
             dg=self.config.get('gripper',{}).get('velocity_percent_s',100)*dt
-            actual_g=self.gripper+max(-dg,min(dg,g-self.gripper))
-            self.backend.send(applied,actual_g);self.last_write=t;self.last_applied=self.last_input;self.phase='ACTIVE'
+            previous_g=self.commanded_gripper if self.commanded_gripper is not None else self.gripper
+            candidate_g=previous_g+max(-dg,min(dg,g-previous_g))
+            actual_g=self.gripper+max(-15.,min(15.,candidate_g-self.gripper))
+            self.backend.send(applied,actual_g);self.commanded_q=dict(applied);self.commanded_gripper=actual_g
+            self.last_write=t;self.last_applied=self.last_input;self.phase='ACTIVE'
             if self.path and t-op['start']>=self.path[-1][0]:
-                if max(abs(q[n]-self.q[n]) for n in q)<.03 and abs(g-self.gripper)<3:
+                goal_dispatched=all(abs(q[n]-applied[n])<.002 for n in q) and abs(g-actual_g)<.2
+                if goal_dispatched and all(abs(q[j['name']]-self.q[j['name']])<j.get('goal_tolerance_rad',.03) for j in self.config['joints']) and abs(g-self.gripper)<self.config.get('gripper',{}).get('goal_tolerance_percent',3.):
                     self._hold('PATH_COMPLETE',completed=True)
                 elif t-op['start']>self.path[-1][0]+2: self._hold('TRACKING_TIMEOUT')
     def _model_tick(self,t):

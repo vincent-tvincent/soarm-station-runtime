@@ -1,4 +1,4 @@
-"""Backend contract: measured radians, separate gripper percent, no setup writes."""
+"""Measured radians and separate gripper percent; no setup writes on connect."""
 import fcntl
 import hashlib
 import json
@@ -28,10 +28,14 @@ class MockArm:
         return {'torque':'ON' if self.torque else 'OFF','voltage_v':12.,'temperature_c':25.,'writes':self.writes}
     def send(self,q,gripper):
         self.q=dict(q); self.gripper=gripper; self.writes+=1; self.torque=True
+    def hold(self):
+        if self.torque:self.send(self.q,self.gripper)
+        return {'torque':'ON' if self.torque else 'OFF','writes':self.writes}
     def close(self): pass
 
 class LeRobotArm:
-    def __init__(self,config): self.config=config; self.bus=None; self.writes=0
+    def __init__(self,config):
+        self.config=config;self.bus=None;self.writes=0;self.dispatch_ready=False
     def connect(self):
         from lerobot.motors import Motor, MotorCalibration, MotorNormMode, SerialMotorsBus
         c=self.config
@@ -56,13 +60,40 @@ class LeRobotArm:
         torque=self.bus.sync_read('Torque_Enable',normalize=False)
         voltage=self.bus.sync_read('Present_Voltage',normalize=False)
         temp=self.bus.sync_read('Present_Temperature',normalize=False)
+        goals=self.bus.sync_read('Goal_Position')
         return {'torque':'ON' if all(torque.values()) else 'OFF' if not any(torque.values()) else 'MIXED',
-                'voltage_v':min(voltage.values())/10,'temperature_c':max(temp.values()),'writes':self.writes}
+                'voltage_v':min(voltage.values())/10,'temperature_c':max(temp.values()),'writes':self.writes,
+                'goal_positions_rad':{j['name']:math.radians(goals[j['name']]) for j in self.config['joints']},
+                'goal_gripper_percent':goals[self.gripper_name]}
     def send(self,q,gripper):
         action={n:math.degrees(v) for n,v in q.items()}
         action[self.gripper_name]=gripper
+        torque=self.bus.sync_read('Torque_Enable',normalize=False)
+        if not self.dispatch_ready:
+            if not all(torque.values()):
+                # First authorized dispatch: stage a freshly measured pose. These
+                # servos may arm from a goal write, so the staged goal must be current.
+                present=self.bus.sync_read('Present_Position',normalize=False)
+                self.bus.sync_write('Goal_Position',present,normalize=False)
+                self.writes+=1
+                self.bus.enable_torque()
+                if not all(self.bus.sync_read('Torque_Enable',normalize=False).values()):
+                    raise RuntimeError('Torque enable was not confirmed')
+            self.dispatch_ready=True
+        elif not all(torque.values()):
+            raise RuntimeError('Torque was lost; reconnect and obtain fresh permission before rearming')
         self.bus.sync_write('Goal_Position',action)
         self.writes+=1
+    def hold(self):
+        # Hold only motors measured ON. Never arm an OFF motor from a stop request.
+        torque=self.bus.sync_read('Torque_Enable',normalize=False)
+        present=self.bus.sync_read('Present_Position',normalize=False)
+        engaged={n:v for n,v in present.items() if torque[n]}
+        if engaged:
+            self.bus.sync_write('Goal_Position',engaged,normalize=False)
+            self.writes+=1
+        return {'torque':'ON' if all(torque.values()) else 'OFF' if not any(torque.values()) else 'MIXED',
+                'writes':self.writes}
     def close(self):
         if self.bus is not None: self.bus.disconnect(disable_torque=False)
 

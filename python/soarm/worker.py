@@ -29,7 +29,10 @@ class Runtime:
                     replacement.sequence=cam.sequence;self.cameras[n]=replacement;replacement.start()
             for arm in self.arms.values():
                 if arm.phase=='FAULT' and not arm.thread.is_alive() and not arm.stop.is_set():
-                    arm.backend=make_arm(arm.config);arm.permission=False;arm.op=None;arm.phase='HOLD'
+                    with arm.lock:
+                        arm.backend=make_arm(arm.config);arm.permission=False;arm.op=None;arm.phase='HOLD'
+                        arm.session=uid();arm.last_write=0.;arm.commanded_q=None;arm.commanded_gripper=None
+                        arm.hold_pending=False;arm.hold_event.set()
                     arm.thread=threading.Thread(target=arm.run,daemon=True,name='arm-'+arm.id);arm.start()
     def close(self):
         self.recovery_stop.set();self.recovery.join(timeout=3)
@@ -48,7 +51,7 @@ class Runtime:
         if op=='feedback': return a.feedback()
         if op=='result':
             value=a.completed.get(r['operation_id'])
-            return value if value and a.hold_event.is_set() else None
+            return value if r['operation_id'] in a.result_ready else None
         raise ValueError('Unknown IPC operation')
 
 def main():
