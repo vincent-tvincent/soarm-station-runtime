@@ -352,7 +352,7 @@ export class GraphExplorer {
       (this.scope === "focus" ? "Focused view · " : "Selected: ") +
       (focus?.name || "none");
     $("graph-counts").textContent =
-      `${d.nodes.length} nodes · ${d.topics.length} topics · ${d.actions.length} actions · ${d.services.length} services · ${entities.length} objects shown`;
+      `${d.nodes.filter((n) => n.discovery_state !== "unresolved_endpoint_owner").length} nodes${d.nodes.some((n) => n.discovery_state === "unresolved_endpoint_owner") ? ` · ${d.nodes.filter((n) => n.discovery_state === "unresolved_endpoint_owner").length} unresolved owners` : ""} · ${d.topics.length} topics · ${d.actions.length} actions · ${d.services.length} services · ${entities.length} objects shown`;
     $("graph-meta").textContent =
       (Object.values(d.coverage || {}).includes("partial")
         ? "Partial discovery"
@@ -758,7 +758,13 @@ export class GraphExplorer {
     host.replaceChildren();
     const heading = html("div", "inspector-heading");
     heading.append(
-      html("span", "eyebrow", n.kind.toUpperCase()),
+      html(
+        "span",
+        "eyebrow",
+        n.discovery_state === "unresolved_endpoint_owner"
+          ? "UNRESOLVED OWNER"
+          : n.kind.toUpperCase(),
+      ),
       html("h2", "", n.kind === "node" ? n.name : localName(n.name)),
       html("code", "", n.fully_qualified_name || n.name),
     );
