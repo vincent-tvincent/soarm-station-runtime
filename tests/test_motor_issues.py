@@ -83,7 +83,7 @@ class MotorIssueTests(unittest.TestCase):
         value['stats']['no_progress_s']['elbow_flex']=1.
         original=copy.deepcopy(value);issue=row(value)
         self.assertEqual(issue['state'],'stall');self.assertEqual(issue['code'],'TRACKING_NOT_PROGRESSING')
-        self.assertEqual(issue['source'],'runtime_progress');self.assertIn('Diagnostic only',issue['reason'])
+        self.assertEqual(issue['source'],'runtime_progress');self.assertIn('No measured progress',issue['reason'])
         self.assertEqual(value,original);self.assertEqual(value['phase'],'ACTIVE');self.assertEqual(value['error'],'')
         self.assertFalse(any('tracking_timeout_s' in joint for joint in arm()['joints']))
         configured=arm();configured['manual_control']={'stall_indicator_s':2.}
