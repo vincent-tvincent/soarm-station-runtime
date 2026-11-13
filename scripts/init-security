@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+set +u
+source /opt/ros/${ROS_DISTRO:-lyrical}/setup.bash
+set -u
+if [[ ! -d local/security ]]; then ros2 security create_keystore local/security; ros2 security create_enclave local/security /; fi
+python3 - <<'PY'
+from pathlib import Path
+from sros2._utilities import create_smime_signed_file
+p=Path('local/security');
+for name in ('permissions','governance'):
+ f=p/('enclaves/'+name+'.xml')
+ s=f.read_text().replace('<id>0</id>','<id>71</id>');f.write_text(s)
+ create_smime_signed_file(p/'public/ca.cert.pem',p/'private/ca.key.pem',f,p/('enclaves/'+name+'.p7s'))
+PY
+chmod -R go-rwx local/security

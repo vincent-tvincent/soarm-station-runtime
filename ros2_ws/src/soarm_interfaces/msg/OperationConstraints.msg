@@ -1,0 +1,5 @@
+uint32 max_operation_duration_ms
+uint32 max_input_age_ms
+float64 velocity_scaling
+float64 required_clearance_m
+string<=32 path_mode

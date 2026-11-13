@@ -1,0 +1,24 @@
+schema_version: 1
+device_id: linux-workstation
+control_hz: 100
+socket: /tmp/soarm-mock/runtime.sock
+frame_dir: /tmp/soarm-mock/frames
+lock_dir: /tmp/soarm-device-locks
+database: ../local/mock.sqlite3
+arms:
+  - id: arm1
+    backend: mock
+    base_frame: arm1_base
+    joints:
+      - {name: shoulder_pan, min_rad: -2.8, max_rad: 2.8, velocity_rad_s: 1.5}
+      - {name: shoulder_lift, min_rad: -1.8, max_rad: 1.8, velocity_rad_s: 1.5}
+      - {name: elbow_flex, min_rad: -1.8, max_rad: 1.8, velocity_rad_s: 1.5}
+      - {name: wrist_flex, min_rad: -1.8, max_rad: 1.8, velocity_rad_s: 2.0}
+      - {name: wrist_roll, min_rad: -3.14, max_rad: 3.14, velocity_rad_s: 2.0}
+    gripper: {name: gripper, unit: percent, velocity_percent_s: 100}
+cameras:
+  - {id: forward, backend: mock, width: 320, height: 240, fps: 30}
+profiles: {}
+web: {host: 0.0.0.0, port: 8443, token_env: SOARM_TOKEN, cert: ../local/tls/cert.pem, key: ../local/tls/key.pem}
+collector: {url: '', token_env: SOARM_COLLECTOR_TOKEN, ca: ''}
+monitoring: {period_s: 1, stale_ms: 500, drift_rad: 0.15, debounce_s: 1, storage_limit_mb: 2048}

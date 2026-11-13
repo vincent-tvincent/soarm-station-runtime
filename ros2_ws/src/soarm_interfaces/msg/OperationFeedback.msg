@@ -1,0 +1,14 @@
+string<=64 arm_id
+string<=16 phase
+string<=64 operation_id
+string<=64 runtime_boot_id
+string<=64 controller_session
+uint64 operation_epoch
+bool stream_ready
+string<=64 window_id
+uint32 window_valid_for_ms
+string<=64 last_accepted_input_id
+string<=64 last_applied_input_id
+uint64 intent_generation
+uint64 last_sequence
+string<=512 reason

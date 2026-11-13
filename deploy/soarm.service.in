@@ -1,0 +1,17 @@
+[Unit]
+Description=SOARM ROS 2 workstation
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/scripts/run @CONFIG@
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=15
+Environment=PYTHONUNBUFFERED=1
+Environment=ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+UMask=0077
+[Install]
+WantedBy=default.target

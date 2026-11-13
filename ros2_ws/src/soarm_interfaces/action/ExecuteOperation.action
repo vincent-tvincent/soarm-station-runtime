@@ -1,0 +1,13 @@
+RequestContext context
+OperationSpec operation
+InputSpec input
+---
+string<=64 arm_id
+string<=64 operation_id
+string<=32 result_code
+string<=512 reason
+bool execution_completed
+string<=32 task_outcome
+string<=64 evidence_id
+---
+OperationFeedback status

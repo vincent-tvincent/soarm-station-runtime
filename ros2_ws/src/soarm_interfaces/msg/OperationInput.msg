@@ -1,0 +1,16 @@
+uint16 schema_version
+string<=64 arm_id
+string<=16 frame_kind
+string<=64 operation_id
+string<=64 runtime_boot_id
+string<=64 controller_session
+uint64 operation_epoch
+string<=64 producer_instance_id
+string<=64 window_id
+uint64 sequence
+string<=64 input_id
+string<=32 payload_kind
+ModelTaskStep model_task
+trajectory_msgs/JointTrajectory joint_trajectory
+CartesianTarget cartesian_target
+DirectJointStep direct_target

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+set -a; source "$ROOT/local/secrets.env"; set +a
+exec "$ROOT/.venv/bin/python" -m soarm.collector --database "$ROOT/local/collector.sqlite3" --cert "$ROOT/local/tls/cert.pem" --key "$ROOT/local/tls/key.pem" "$@"

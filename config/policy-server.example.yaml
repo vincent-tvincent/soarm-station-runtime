@@ -1,0 +1,21 @@
+deployment: sorting-v1
+model: {repo_or_path: local/policies/sorting_v1/pretrained_model, device: cpu, tf32: false}
+execution: {action_fps: 30, supported_modes: [chunk], warmup_calls: 2}
+semantics: so101-degrees-gripper-percent-v1
+robot_type: soarm_multi
+zenoh: {listen_endpoints: [tcp/127.0.0.1:7447]}
+features:
+  - name: observation.state
+    shape: [6]
+    dtype: float32
+    kind: tensor
+    names: [arm1/shoulder_pan.pos, arm1/shoulder_lift.pos, arm1/elbow_flex.pos, arm1/wrist_flex.pos, arm1/wrist_roll.pos, arm1/gripper.pos]
+    semantics: calibrated_degrees_and_gripper_percent
+  - {name: observation.images.forward, shape: [480, 640, 3], dtype: uint8, kind: rgb, semantics: rgb_hwc_uint8}
+action_feature:
+  name: action
+  shape: [6]
+  dtype: float32
+  kind: tensor
+  names: [arm1/shoulder_pan.pos, arm1/shoulder_lift.pos, arm1/elbow_flex.pos, arm1/wrist_flex.pos, arm1/wrist_roll.pos, arm1/gripper.pos]
+  semantics: calibrated_degrees_and_gripper_percent

@@ -1,0 +1,15 @@
+# Resource-scoped implementation v1
+
+`lerobot_node` owns the single same-host worker process. Each arm has its own serialized device/control thread, state, permission, operation epoch and bounded model/IK worker. Each camera has its own capture/encoding thread and immutable sequence-named JPEG snapshot. ROS, policy and web consumers share that capture; no duplicate USB opens. The IPC socket has mode 0600 and device locks use canonical physical paths. Parent death terminates the hardware worker; startup/recovery does not restore permission or old operations.
+
+`workflow_manager` consumes shared observations, runs drift/availability rules and configured color-based fixed-cell sorting recipes, and invokes the same operation action. Sorting verification compares fresh destination and pickup evidence, not action completion. Recipes require measured poses and regions supplied in a deployment profile; none are invented for the attached workbench. Generic LLM/MCP helpers are optional future adapters, not control policies.
+
+`telemetry_node` owns the SQLite journal, persistent schedule, incident/history services and background HTTPS upload. `dashboard_node` owns authenticated web controls and bridges remote source frames. `robot_state_publisher` runs per configured URDF with unique frame prefixes. `static_transform_publishers` publishes only supplied extrinsics. Optional `recorder` wraps an allowlisted MCAP recorder and saves configuration/model metadata.
+
+IDL is under `ros2_ws/src/soarm_interfaces`. Messages use bounded resource IDs/strings and arrays for custom payloads; standard JointTrajectory is checked to 256 position-only points. Inline direct/model sequences are limited to 16 steps. Physical ROS interfaces use radians/metres. The gripper is explicitly percent until a physical joint mapping is provided. Unsupported constraints reject, rather than silently weakening a request.
+
+The old reference graph's role responsibilities remain; exact topic counts vary with resources. The initial public graph is described in README. One Python ROS application package holds the thin adapters; substantial logic stays in independently testable `python/soarm` modules. This is a packaging choice, not a second motor-control architecture.
+
+Control/feedback target 100 Hz; remote source target 50–120 Hz; cameras target 30 fresh FPS; ordinary dashboard rendering 10 Hz; durable telemetry 1 Hz. Actual acquisition timestamps and measured rates remain distinct. No callback restamps an old physical sample to manufacture freshness. All command authority uses host CLOCK_BOOTTIME windows; remote timestamps are never compared to host monotonic clocks.
+
+Native local/remote inference is outside final dispatch. Each result is admitted against the current operation and intent generation. A late result, mode switch, cancellation, lost input or camera dependency failure cannot restart an invalidated operation. Hold preserves support: no generic torque-off cleanup. The read-only adapter has a literal protocol READ allowlist and cannot emit a goal/torque/configuration/calibration write.

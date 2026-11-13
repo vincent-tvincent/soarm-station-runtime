@@ -1,0 +1,15 @@
+uint16 schema_version
+string<=64 device_id
+string<=64 runtime_boot_id
+uint64 sequence
+string<=64 monitoring_run_id
+builtin_interfaces/Time scheduled_time
+string<=64 arm_id
+sensor_msgs/JointState measured_joints
+bool valid
+uint32 source_age_ms
+float64 voltage_v
+float64 temperature_c
+string<=16 phase
+string<=16 measured_torque
+string<=512 reason

@@ -1,0 +1,16 @@
+std_msgs/Header header
+string<=64 arm_id
+string<=64 runtime_boot_id
+string<=64 controller_session
+string<=64 operation_id
+uint64 operation_epoch
+string<=16 phase
+string<=16 operation_type
+bool permission
+string<=16 measured_torque
+uint32 feedback_age_ms
+bool feedback_valid
+uint64 sample_sequence
+float64 measured_hz
+float64 gripper_percent
+string<=512 fault

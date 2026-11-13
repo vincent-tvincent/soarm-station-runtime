@@ -1,0 +1,5 @@
+Event event
+---
+bool committed
+string<=64 event_id
+string<=512 reason

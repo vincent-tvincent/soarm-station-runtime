@@ -1,0 +1,4 @@
+string<=64 arm_id
+---
+bool success
+string<=512 message

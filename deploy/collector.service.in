@@ -1,0 +1,12 @@
+[Unit]
+Description=SOARM durable HTTPS telemetry collector
+After=network-online.target
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/scripts/run-collector
+Restart=on-failure
+RestartSec=5
+UMask=0077
+[Install]
+WantedBy=default.target

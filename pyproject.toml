@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=71"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "soarm-core"
+version = "0.1.0"
+description = "Configurable Linux ROS 2 and LeRobot workstation"
+requires-python = ">=3.12"
+dependencies = ["PyYAML>=6,<7", "aiohttp>=3.12,<4", "numpy>=2,<3", "opencv-python-headless>=4.10,<6", "cryptography>=41"]
+[project.scripts]
+soarm-worker = "soarm.worker:main"
+soarm-collector = "soarm.collector:main"
+soarm-operator = "soarm.operator:main"
+soarm-release = "soarm.release:main"
+[tool.setuptools.packages.find]
+where = ["python"]

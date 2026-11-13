@@ -1,0 +1,1 @@
+Kinematic and inertial model derived from Hugging Face SO-ARM100 SO101/so101_new_calib.urdf at source snapshot fda892cba81032c46c40976a48c9ceadbf40a9ca. Visual/collision mesh elements are omitted; this model supplies FK/IK/TF, not collision clearance. Source URDF SHA256: 3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c

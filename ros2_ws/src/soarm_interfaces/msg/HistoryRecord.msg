@@ -1,0 +1,2 @@
+TelemetrySample sample
+bool remote_committed

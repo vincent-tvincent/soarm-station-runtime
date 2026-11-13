@@ -1,0 +1,10 @@
+string<=64 request_id
+string<=64 arm_id
+string<=64 operator_session_id
+string<=64 expected_controller_session
+bool enable
+---
+bool accepted
+bool permission
+string<=64 controller_session
+string<=512 reason

@@ -1,0 +1,10 @@
+RequestContext context
+string<=64 definition_id
+string<=64 object_id
+string<=64 destination_id
+---
+string<=32 outcome
+string<=512 reason
+string<=64 evidence_id
+---
+WorkflowStatus status

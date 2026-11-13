@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python3 -m venv .venv --system-site-packages
+.venv/bin/pip install -r requirements-ros.lock
+.venv/bin/python -m pip install uv
+.venv/bin/uv python install 3.12
+.venv/bin/uv venv --python 3.12 .runtime-venv
+.venv/bin/uv pip install --index-strategy unsafe-best-match --python .runtime-venv/bin/python -r requirements-runtime.lock
+.venv/bin/uv pip install --index-strategy unsafe-best-match --python .runtime-venv/bin/python -e . --no-deps
+.venv/bin/pip install -e . --no-deps
+set +u
+source /opt/ros/${ROS_DISTRO:-lyrical}/setup.bash
+set -u
+cd ros2_ws
+colcon build --symlink-install --parallel-workers 2

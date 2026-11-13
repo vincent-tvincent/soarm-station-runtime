@@ -1,0 +1,9 @@
+string<=64 event_id
+string<=32 source_role
+string<=64 source_boot_id
+string<=64 arm_id
+string<=64 operation_or_run_id
+builtin_interfaces/Time time
+string<=16 severity
+string<=64 code
+string<=512 detail

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+CONFIG=${1:-$ROOT/local/pi.yaml}
+mkdir -p "$HOME/.config/systemd/user"
+sed -e "s|@ROOT@|$ROOT|g" -e "s|@CONFIG@|$CONFIG|g" "$ROOT/deploy/soarm.service.in" > "$HOME/.config/systemd/user/soarm.service"
+systemctl --user daemon-reload
+systemctl --user enable --now soarm.service
