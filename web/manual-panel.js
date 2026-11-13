@@ -105,7 +105,7 @@ export class ManualPanel {
         this.clearKeys();
     });
     this.timer = setInterval(() => this.tick(), 33);
-    this.poseTimer = setInterval(() => this.refreshPose(), 150);
+    this.poseTimer = setInterval(() => this.refreshPose(), 50);
     this.hostTimer = setInterval(() => {
       if (this.visible && this.mode === "leader")
         this.safe(() => this.refreshHosts());

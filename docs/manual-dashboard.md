@@ -65,3 +65,16 @@ setting neither grants permission nor renews input liveness. The FK overlay in
 Leader mode is labeled Leader and uses the host's observed pose, never the
 Joint-mode draft. IK readouts show measured TCP/elevation/roll/jaw values next
 to the corresponding jog buttons.
+
+### Display-only tracking indicators
+
+The native snapshot now exposes the controller's existing per-joint no-progress
+ages. An ACTIVE, fresh, lead-limited body joint with admitted-reference error
+above its normal tolerance and at least1s without measured progress is shown red
+as `TRACKING_NOT_PROGRESSING`. `manual_control.stall_indicator_s` may tune the
+indicator threshold. The controller's existing outside-envelope tracking state
+also appears red for the affected body joint. These diagnostics do not add a
+stall-stop deadline, throttle input or change motor limits. Ordinary lead
+limiting and normal gripper contact are not labeled as stalls. Recovery still
+requires fresh following feedback within tolerance; stale data cannot clear it.
+The FK view requests fresh geometry up to20Hz, independently of100Hz control.

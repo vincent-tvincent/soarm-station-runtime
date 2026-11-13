@@ -430,6 +430,6 @@ class ArmController:
                 'operation_deadline_remaining_s':None if self.op is None or self.op['deadline'] is None else self.op['deadline']-now(),
                 'source_liveness_age_ms':None if self.op is None else (now()-self.op['last_live'])*1000,
                 'health':dict(self.health_data),'health_time_ns':self.health_time_ns,
-                'reference_positions':dict(self.commanded_q) if self.commanded_q is not None else None,'reference_gripper':self.commanded_gripper,'model_state':self.model_state,'model_reason':self.model_reason,'stats':dict(self.stats),'measured_hz':(len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0}
+                'reference_positions':dict(self.commanded_q) if self.commanded_q is not None else None,'reference_gripper':self.commanded_gripper,'model_state':self.model_state,'model_reason':self.model_reason,'stats':{**self.stats,'no_progress_s':{name:max(0.,now()-started) for name,started in self.tracking_wait.items()}},'measured_hz':(len(times)-1)/(times[-1]-times[0]) if len(times)>1 else 0}
     def close(self):
         self.hold('SHUTDOWN');self.stop.set();self.thread.join(timeout=3);self.pool.shutdown(wait=False,cancel_futures=True)

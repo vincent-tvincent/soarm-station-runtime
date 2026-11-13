@@ -1,6 +1,8 @@
 """Pure, non-actuating projection of reported motor issues for the FK view.
 
-No stall is inferred from elapsed time, gripper contact or ordinary lead limiting.
+Sustained body-joint nonprogress uses an existing runtime progress timer plus
+fresh tracking evidence; elapsed time or lead limiting alone is insufficient.
+The display does not add a motion guard, and expected gripper contact is excluded.
 UI latches use positive issues, then clear only the explicitly listed clear_kinds.
 Unknown/missing/stale evidence is not a clear signal.
 """
@@ -109,6 +111,10 @@ def project_motor_issues(snapshot,definitions=None,*,arm_config=None,max_feedbac
         health_age=age+max(0.,(sample_ns-health_ns)/1e6)
     health_fresh=health_age is not None and 0<=health_age<=max_health_age_ms
     tracking=stats.get('tracking_state')
+    progress=stats.get('no_progress_s')
+    progress=progress if isinstance(progress,dict) else {}
+    settings=(arm_config or {}).get('manual_control',{})
+    indicator_s=_number(settings.get('stall_indicator_s',1.)) if isinstance(settings,dict) else None
     runtime_clear=(snapshot.get('error')=='' and phase in ('ACTIVE','IDLE') and valid_limited
                    and tracking in ('FOLLOWING','LEAD_LIMITED'))
     sequence=snapshot.get('sequence')
@@ -126,6 +132,19 @@ def project_motor_issues(snapshot,definitions=None,*,arm_config=None,max_feedbac
         if name in positives:
             kind,code,provenance=positives[name]
             row.update(state=kind,active=True,kind=kind,code=code,reason=reason,source=provenance)
+        elif (definition.get('role')=='joint' and phase=='ACTIVE' and row['feedback_fresh']
+              and name in limited_names and tolerance is not None and tolerance>0
+              and tracking_error is not None and tracking_error>tolerance
+              and tracking=='REFERENCE_OUTSIDE_ENVELOPE'):
+            row.update(state='fault',active=True,kind='fault',code='REFERENCE_OUTSIDE_ENVELOPE',source='runtime_tracking',
+                       reason=f'The runtime reports {name} outside its tracking envelope; admitted reference error is {tracking_error:.4f} rad. Target advancement is waiting; this display adds no stop condition.')
+        elif (definition.get('role')=='joint' and phase=='ACTIVE' and row['feedback_fresh']
+              and name in limited_names and tolerance is not None and tolerance>0
+              and tracking_error is not None and tracking_error>tolerance
+              and tracking=='LEAD_LIMITED' and indicator_s is not None and indicator_s>0
+              and _number(progress.get(name)) is not None and progress[name]>=indicator_s):
+            row.update(state='stall',active=True,kind='stall',code='TRACKING_NOT_PROGRESSING',source='runtime_progress',
+                       reason=f'No qualifying measured progress for {progress[name]:.2f} s while the admitted reference remains ahead by {tracking_error:.4f} rad (goal tolerance {tolerance:.4f} rad). Diagnostic only; control is not stopped by this indicator.')
         elif (row['feedback_fresh'] and runtime_clear and name not in limited_names and
               tolerance is not None and tolerance>0 and tracking_error is not None and tracking_error<=tolerance):
             clears=['stall'];health=health_rows.get(name,{})

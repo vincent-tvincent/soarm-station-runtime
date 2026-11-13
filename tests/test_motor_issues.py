@@ -75,6 +75,71 @@ class MotorIssueTests(unittest.TestCase):
         value['error']='';value['phase']='ACTIVE';value['stats']={'tracking_state':'FOLLOWING','limited_actuators':[]};value['reference_gripper']=51.
         self.assertIsNone(latch('stall',row(value,'jaw')))
 
+    def test_observed_direct_nonprogress_flags_at_indicator_threshold_without_motion_timeout(self):
+        value=snapshot();value['operation_type']='DIRECT';value['reference_positions']['elbow_flex']=.62
+        value['stats']={'tracking_state':'LEAD_LIMITED','limited_actuators':['elbow_flex'],
+                        'no_progress_s':{'elbow_flex':.999}}
+        self.assertEqual(row(value)['state'],'unknown')
+        value['stats']['no_progress_s']['elbow_flex']=1.
+        original=copy.deepcopy(value);issue=row(value)
+        self.assertEqual(issue['state'],'stall');self.assertEqual(issue['code'],'TRACKING_NOT_PROGRESSING')
+        self.assertEqual(issue['source'],'runtime_progress');self.assertIn('Diagnostic only',issue['reason'])
+        self.assertEqual(value,original);self.assertEqual(value['phase'],'ACTIVE');self.assertEqual(value['error'],'')
+        self.assertFalse(any('tracking_timeout_s' in joint for joint in arm()['joints']))
+        configured=arm();configured['manual_control']={'stall_indicator_s':2.}
+        self.assertEqual(project_motor_issues(value,arm_config=configured)['by_name']['elbow_flex']['state'],'unknown')
+        value['stats']['no_progress_s']['elbow_flex']=2.
+        self.assertEqual(project_motor_issues(value,arm_config=configured)['by_name']['elbow_flex']['code'],'TRACKING_NOT_PROGRESSING')
+
+    def test_observed_nonprogress_requires_fresh_limited_body_error_and_current_progress_evidence(self):
+        base=snapshot();base['reference_positions']['elbow_flex']=.62
+        base['stats']={'tracking_state':'LEAD_LIMITED','limited_actuators':['elbow_flex'],
+                       'no_progress_s':{'elbow_flex':2.}}
+        variants=[]
+        value=copy.deepcopy(base);value['age_ms']=500.;variants.append(value)
+        value=copy.deepcopy(base);value['positions'].pop('elbow_flex');variants.append(value)
+        value=copy.deepcopy(base);value['reference_positions']=None;variants.append(value)
+        value=copy.deepcopy(base);value['reference_positions']['elbow_flex']=.56;variants.append(value)
+        value=copy.deepcopy(base);value['phase']='IDLE';variants.append(value)
+        value=copy.deepcopy(base);value['stats']['limited_actuators']=[];variants.append(value)
+        for duration in (None,float('nan'),-1.,True,'2'):
+            value=copy.deepcopy(base);value['stats']['no_progress_s']['elbow_flex']=duration;variants.append(value)
+        for value in variants:
+            with self.subTest(value=value):
+                self.assertIsNone(row(value)['active']);self.assertNotIn('stall',row(value)['clear_kinds'])
+
+    def test_progress_resets_indicator_but_only_following_at_goal_clears_the_latch(self):
+        value=snapshot();value['reference_positions']['elbow_flex']=.62
+        value['stats']={'tracking_state':'LEAD_LIMITED','limited_actuators':['elbow_flex'],
+                        'no_progress_s':{'elbow_flex':2.}}
+        previous=latch(None,row(value));self.assertEqual(previous,'stall')
+        value['stats']['no_progress_s']['elbow_flex']=.05
+        self.assertEqual(row(value)['state'],'unknown');self.assertEqual(latch(previous,row(value)),'stall')
+        value['positions']['elbow_flex']=.61
+        value['stats']={'tracking_state':'FOLLOWING','limited_actuators':[],'no_progress_s':{}}
+        self.assertIsNone(latch(previous,row(value)))
+
+    def test_estimated_stall_excludes_long_gripper_contact_and_native_report_still_wins(self):
+        value=snapshot();value['reference_gripper']=20.
+        value['stats']={'tracking_state':'LEAD_LIMITED','limited_actuators':['_gripper'],
+                        'no_progress_s':{'_gripper':60.,'jaw':60.}}
+        self.assertIsNone(row(value,'jaw')['active'])
+        value['error']='TRACKING_STALLED: _gripper';value['phase']='HOLD'
+        self.assertEqual(row(value,'jaw')['code'],'TRACKING_STALLED')
+
+    def test_current_outside_envelope_wait_is_body_specific_without_stop_timeout(self):
+        value=snapshot();value['reference_positions']['elbow_flex']=.64;value['reference_gripper']=20.
+        value['stats']={'tracking_state':'REFERENCE_OUTSIDE_ENVELOPE','limited_actuators':['elbow_flex','_gripper'],
+                        'no_progress_s':{'elbow_flex':100.,'_gripper':100.}}
+        issue=row(value)
+        self.assertEqual(issue['state'],'fault');self.assertEqual(issue['code'],'REFERENCE_OUTSIDE_ENVELOPE')
+        self.assertIsNone(row(value,'wrist_flex')['active']);self.assertIsNone(row(value,'jaw')['active'])
+        self.assertEqual(value['phase'],'ACTIVE');self.assertEqual(value['error'],'')
+        value['age_ms']=500.;self.assertIsNone(row(value)['active'])
+        value['age_ms']=5.;value['positions']['elbow_flex']=.63
+        value['stats']={'tracking_state':'FOLLOWING','limited_actuators':[],'no_progress_s':{}}
+        self.assertIsNone(latch('fault',row(value)))
+
     def test_specific_hardware_fault_uses_observed_unique_motor_identity(self):
         value=snapshot();value['phase']='FAULT';value['error']='Servo protection id=3 status=32'
         result=project(value)
