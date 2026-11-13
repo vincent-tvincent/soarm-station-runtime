@@ -11,6 +11,12 @@ credentials remain compatible for clients outside that private connection;
 `web.trusted_network_access: false` restores bearer-only API access when needed.
 No token is embedded in the page, stored in the browser or placed in a URL.
 
+## Manual controls update
+
+The approved Joint / keyboard IK / Leader modes and measured FK view are now
+available. See [manual controls](manual-dashboard.md) and the
+[deployment evidence](manual-deployment-2026-11-13.md).
+
 ## Operations
 
 Select an arm explicitly. The right panel switches between **Status**, **Manual**
