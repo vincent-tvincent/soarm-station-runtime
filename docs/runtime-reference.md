@@ -64,9 +64,9 @@ Cartesian endpoints use LeRobot/Placo with explicit base frames, bounded solve t
 
 ## Dashboard and operator API
 
-The dashboard uses HTTPS and authenticated WebSocket connections. Tokens are read from the environment variable named by configuration; HTTPS keys/certificates are host-local. The static login page is public; state, media and control endpoints authenticate. Control and camera sockets are separate.
+The dashboard opens automatically over HTTPS from the owner’s Tailscale connection or loopback, with no token form. Control and camera sockets are separate. Actual socket peers establish private-network access; browser origins are checked for commands and WebSockets. Existing bearer tokens remain compatible for other clients. HTTPS keys/certificates stay host-local.
 
-Authenticated routes include:
+Dashboard routes include:
 
 | Method | Route |
 | --- | --- |
@@ -75,7 +75,7 @@ Authenticated routes include:
 | GET | `/api/operations/REQUEST_ID` |
 | WSS | `/ws/control`, `/ws/camera/ID` |
 
-HTTP clients use bearer headers. Browser sockets use the `soarm_station` subprotocol and token, never query-string credentials. The native operator CLI can sample a local LeRobot leader:
+The owner’s browser needs no bearer header or token. Its sockets use the `soarm_station` subprotocol. Other clients may continue using bearer headers or the existing token subprotocol convention; query-string credentials are never used. The native operator CLI can sample a local LeRobot leader:
 
 ```bash
 python -m soarm_station.operator --url https://robot.example.net:8443 --ca robot-cert.pem \

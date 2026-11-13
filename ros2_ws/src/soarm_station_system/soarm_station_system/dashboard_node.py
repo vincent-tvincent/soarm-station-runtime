@@ -1,5 +1,4 @@
 import asyncio
-import hmac
 import json
 import os
 import ssl
@@ -20,6 +19,7 @@ from .conversion import goal_from_dict,stream_from_dict
 from .common import BaseNode,STATE,SENSOR,run,topic
 from soarm_station.dashboard_data import resources,render_motors,validate_motor_record
 from soarm_station.graph_observer import GraphObserver
+from soarm_station.web_access import dashboard_access_middleware
 
 ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js'))
 
@@ -64,28 +64,14 @@ class DashboardNode(BaseNode):
             self.loop.close()
     async def start_web(self):
         cfg=self.config['web'];token=os.environ.get(cfg.get('token_env','SOARM_STATION_TOKEN'),'')
-        if len(token)<24:raise ValueError('Set an operator token of at least 24 characters')
         app=self.create_app(token)
         self.runner=web.AppRunner(app,access_log=None);await self.runner.setup()
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         parent=Path(self.config['_path']).parent
         context.load_cert_chain(parent/cfg['cert'],parent/cfg['key'])
         await web.TCPSite(self.runner,cfg.get('host','0.0.0.0'),cfg.get('port',8443),ssl_context=context).start()
-    def create_app(self,token):
-        @web.middleware
-        async def auth(request,handler):
-            # Static login page contains no state or credentials. Every API/media route authenticates.
-            if request.path=='/' or request.path.startswith('/assets/'):return await handler(request)
-            supplied=request.headers.get('Authorization','')
-            if request.path.startswith('/ws/') and not supplied:
-                protocols=request.headers.get('Sec-WebSocket-Protocol','').split(',')
-                supplied='Bearer '+protocols[1].strip() if len(protocols)==2 and protocols[0].strip()=='soarm_station' else ''
-                origin=request.headers.get('Origin')
-                if origin and origin!='https://'+request.host:raise web.HTTPForbidden(text='Origin mismatch')
-            if not hmac.compare_digest(supplied,'Bearer '+token):raise web.HTTPUnauthorized()
-            try:return await handler(request)
-            except (ValueError,KeyError,TimeoutError) as exc:raise web.HTTPBadRequest(text=str(exc))
-        app=web.Application(middlewares=[auth],client_max_size=262144)
+    def create_app(self,token=''):
+        app=web.Application(middlewares=[dashboard_access_middleware(self.config.get('web',{}),token)],client_max_size=262144)
         app.router.add_get('/',self.index);app.router.add_get('/api/status',self.status);app.router.add_get('/api/history',self.history)
         app.router.add_post('/api/permission',self.permission);app.router.add_post('/api/hold',self.hold)
         app.router.add_post('/api/stream',self.stream_input);app.router.add_post('/api/operate',self.operate);app.router.add_get('/api/operations/{id}',self.operation_status)

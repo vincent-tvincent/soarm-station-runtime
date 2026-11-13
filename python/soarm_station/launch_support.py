@@ -3,6 +3,7 @@ import os
 import re
 import shlex
 from pathlib import Path
+from .web_access import validate_access_config
 
 
 def is_project_root(path):
@@ -69,7 +70,7 @@ def child_environment(root,config,environment=None,secrets_file=None,keystore=No
     overrides={name:private[name] for name in names if not base.get(name) and name in private}
     if web:
         token_name=web.get('token_env','SOARM_STATION_TOKEN');token=base.get(token_name) or overrides.get(token_name,'')
-        if len(token)<24:raise ValueError(f'Missing/short {token_name}. Run scripts/init-local or provide the environment variable.')
+        validate_access_config(web,token)
         parent=Path(config['_path']).parent
         for field in ('cert','key'):
             value=web.get(field)

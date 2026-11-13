@@ -123,13 +123,10 @@ ros2 run --prefix "$SOARM_STATION_ROOT/.venv/bin/python" \
   -p config:="$SOARM_STATION_CONFIG" --log-level debug
 ```
 
-Use the same setup in separate terminals for `workflow_manager`, `telemetry_node`, `static_transform_publishers` and, when configured, `recorder`. A standalone dashboard also needs the operator token in its environment:
+Use the same setup in separate terminals for `workflow_manager`, `telemetry_node`, `static_transform_publishers` and, when configured, `recorder`. A standalone dashboard opens directly to loopback/Tailscale peers; no operator token is required for that access:
 
 ```bash
 source scripts/setup.bash config/mock.yaml
-set -a
-source "$SOARM_STATION_ROOT/local/secrets.env"
-set +a
 ros2 run --prefix "$SOARM_STATION_ROOT/.venv/bin/python" \
   soarm_station_system dashboard_node --ros-args \
   -p config:="$SOARM_STATION_CONFIG" --log-level debug

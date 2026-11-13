@@ -893,3 +893,41 @@ test("a late rejected enable does not hold another controller's arm", async () =
     false,
   );
 });
+
+test("private station opens without a token and does not enable control", async () => {
+  const f = fixture();
+  await f.client.connect();
+  assert.equal(f.client.connected, true);
+  assert.equal(f.calls[0].headers.Authorization, undefined);
+  assert.equal(
+    f.calls.some(
+      (c) => c.path === "/api/permission" || c.path === "/api/operate",
+    ),
+    false,
+  );
+  f.client.openCamera("overview");
+  assert.deepEqual(f.sockets[0].protocols, ["soarm_station"]);
+  await f.client.enable("arm1");
+  const opening = f.client.startManual("arm1");
+  assert.deepEqual(f.sockets[1].protocols, ["soarm_station"]);
+  f.sockets[1].open();
+  await opening;
+  await f.client.disconnect();
+  assert.ok(f.calls.some((c) => c.path === "/api/hold"));
+  assert.ok(f.calls.every((c) => c.headers.Authorization === undefined));
+});
+
+test("tokenless error text is retained without empty-string redaction", async () => {
+  const f = fixture();
+  await f.client.connect();
+  f.setRoute((c) =>
+    c.path === "/api/history"
+      ? f.response("History unavailable", 400)
+      : undefined,
+  );
+  await assert.rejects(
+    f.client.request("/api/history"),
+    (e) => e.message === "History unavailable",
+  );
+  await f.client.disconnect();
+});

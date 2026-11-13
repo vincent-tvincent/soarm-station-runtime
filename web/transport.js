@@ -156,7 +156,7 @@ export class StationClient {
     });
   }
   _requireConnected() {
-    if (!this.connected || !this.#token)
+    if (!this.connected)
       throw new StationError(
         "Connect before using the station",
         "DISCONNECTED",
@@ -199,8 +199,6 @@ export class StationClient {
   }
 
   async _request(path, body, token = this.#token) {
-    if (!token)
-      throw new StationError("Authentication required", "DISCONNECTED");
     const url = this._url(path);
     const encoded = body === undefined ? undefined : JSON.stringify(body);
     if (encoded && new TextEncoder().encode(encoded).length > 262144) {
@@ -221,7 +219,7 @@ export class StationClient {
       const response = await this.env.fetch(url, {
         method: body === undefined ? "GET" : "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           Accept: "application/json",
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
@@ -232,9 +230,10 @@ export class StationClient {
         credentials: "same-origin",
       });
       if (!response.ok) {
-        const detail = (await response.text())
-          .replaceAll(token, "[redacted]")
-          .slice(0, 512);
+        const raw = await response.text();
+        const detail = (
+          token ? raw.replaceAll(token, "[redacted]") : raw
+        ).slice(0, 512);
         throw new StationError(
           detail || `HTTP ${response.status}`,
           response.status === 401 || response.status === 403
@@ -258,18 +257,18 @@ export class StationClient {
     return this._request(path, body);
   }
 
-  async connect(token) {
+  async connect(token = "") {
     if (
       typeof token !== "string" ||
-      token.trim().length < 24 ||
-      /[\s,]/.test(token.trim())
+      (token !== "" && (token.trim().length < 24 || /[\s,]/.test(token.trim())))
     ) {
       throw new StationError(
         "Enter the configured operator token",
         "INVALID_TOKEN",
       );
     }
-    if (this.#token) await this.disconnect();
+    if (this.connected || this.#token || this._active || this._cameras.size)
+      await this.disconnect();
     const generation = ++this._generation;
     this.#token = token.trim();
     this.operatorSessionId = `browser-${this.env.uuid()}`;
@@ -309,7 +308,7 @@ export class StationClient {
     for (const id of [...this._cameras.keys()]) this.closeCamera(id);
     this._ownedArms.clear();
     this._connection("disconnected");
-    if (token) {
+    if (arms.size) {
       const results = await Promise.allSettled(
         [...arms].map((arm_id) =>
           this._request("/api/hold", { arm_id }, token),
@@ -1160,10 +1159,10 @@ export class StationClient {
     op.pickupIds = new Set();
     op.pickedUp = false;
     const opened = deferred();
-    const ws = new this.env.WebSocket(this._url("/ws/control", true), [
-      "soarm_station",
-      this.#token,
-    ]);
+    const ws = new this.env.WebSocket(
+      this._url("/ws/control", true),
+      this._socketProtocols(),
+    );
     op.ws = ws;
     ws.onopen = () => {
       if (this._active !== op) {
@@ -1401,6 +1400,10 @@ export class StationClient {
         );
   }
 
+  _socketProtocols() {
+    return this.#token ? ["soarm_station", this.#token] : ["soarm_station"];
+  }
+
   openCamera(cameraId, onFrame = this.callbacks.onCamera) {
     this._requireConnected();
     if (typeof cameraId !== "string" || !cameraId)
@@ -1418,7 +1421,7 @@ export class StationClient {
     };
     const ws = new this.env.WebSocket(
       this._url(`/ws/camera/${encodeURIComponent(cameraId)}`, true),
-      ["soarm_station", this.#token],
+      this._socketProtocols(),
     );
     camera.ws = ws;
     ws.binaryType = "blob";

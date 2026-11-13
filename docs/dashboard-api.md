@@ -99,3 +99,18 @@ There are 1..16 endpoints. Position is metres; quaternion order is XYZW. POSITIO
 Static JS/CSS changes are read from disk on each request; reload the browser to load a new module. A change to the Python asset allowlist needs the dashboard process to load the new code. In a service launch using `respawn:=true`, gracefully terminate only the `dashboard_node` child after confirming no active operation/control authority; launch recreates it after the three-second respawn delay. This does not replace `lerobot_node` or its native worker. Verify their PID/runtime boot and permission/write count before and after.
 
 Use the actual dashboard child in the service cgroup, identified by its full executable path; do not use a stale PID. Dashboard HTTP/WebSocket sessions reconnect. A full service restart is unnecessary for a dashboard-only route/module update. If foreground launch has `respawn:=false`, it does not recreate the node automatically.
+
+## Automatic access for the owner
+
+`web.trusted_network_access` defaults to true. Actual socket peers on loopback,
+Tailscale IPv4 (`100.64.0.0/10`) or Tailscale IPv6 (`fd7a:115c:a1e0::/48`) access
+the APIs/media and WebSockets without an operator token. Forwarded headers are
+not identity. The browser connects automatically, with no credential form or
+bootstrap secret; WebSockets use only the `soarm_station` subprotocol.
+
+A valid bearer remains accepted for other clients. Setting the flag false
+keeps bearer-only API access; a token is required for that configuration.
+Trusted mode can start without a token. Empty bearer values never grant access.
+Browser mutations/WebSockets keep same-origin checks. This change only affects
+opening the dashboard; it does not enable motion, change actuator ownership or
+resume an earlier operation.

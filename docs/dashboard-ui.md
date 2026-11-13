@@ -1,9 +1,15 @@
 # Station dashboards
 
-The browser UI uses the existing authenticated station gateway. Open `/` for
-Operations or `/#graph` for the generic ROS explorer. Static assets contain no
-credentials or robot state. Sign in with the existing operator token; the token
-stays in browser memory and is never placed in a URL or local storage.
+The browser UI opens and connects automatically over the station's existing
+Tailscale connection or on the station itself. There is no operator-token form.
+Open `/` for Operations or `/#graph` for the generic ROS explorer. The small
+Reconnect control retries a lost connection; loading the page does not grant
+motion permission or resume an operation.
+
+The gateway trusts the actual loopback/Tailscale socket peer. Existing bearer
+credentials remain compatible for clients outside that private connection;
+`web.trusted_network_access: false` restores bearer-only API access when needed.
+No token is embedded in the page, stored in the browser or placed in a URL.
 
 ## Operations
 
@@ -117,6 +123,6 @@ python scripts/preview-dashboard.py --port 8767 --reference-root /path/to/so-arm
 The preview is loopback-only, prominently marked as mock, and uses historical
 camera references from the supplied project directory. Its controls affect
 in-memory fixtures only. It never imports the robot runtime, opens a device or
-connects to a production backend. The mock token is printed by that script.
+connects to a production backend. The loopback preview also opens without a token.
 See `design-qa.md` for browser evidence and intentional refinements to the
 original visual targets.

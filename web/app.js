@@ -77,12 +77,13 @@ function connection(info) {
     connected ? "Connected" : info.reason || info.state || "Disconnected",
   );
   graph?.setConnected(connected);
-  $("disconnect").hidden = !connected;
+  $("disconnect").hidden = false;
+  $("disconnect").disabled = info.state === "connecting";
+  $("disconnect").textContent = connected ? "Disconnect" : "Reconnect";
   if (info.state === "disconnected") {
     cameraIds = [];
     cameraFrames.clear();
     arrangeCameras();
-    $("login").hidden = false;
     operation = null;
   }
   updateControls();
@@ -151,43 +152,29 @@ function updateControls() {
     $("send-update").disabled = true;
   }
 }
-$("login").onsubmit = async (event) => {
-  event.preventDefault();
-  text("login-error", "");
-  try {
-    await client.connect($("token").value.trim());
-    $("token").value = "";
-    $("login").hidden = true;
-    connected = true;
-    text("connection", "Connected");
-    $("disconnect").hidden = false;
+let connectionAttempt = null;
+async function connectStation() {
+  if (connectionAttempt) return connectionAttempt;
+  connectionAttempt = (async () => {
     try {
+      await client.connect();
       resources =
         snapshot.resources || (await client.request("/api/resources"));
-    } catch {
-      resources = snapshot.resources || {};
+      renderState(snapshot);
+      await graph.refresh();
+    } catch (error) {
+      text("connection", "Connection unavailable");
+      showError(error);
     }
-    renderState(snapshot);
-    await graph.refresh();
-  } catch (e) {
-    text("login-error", e.message);
+  })();
+  try {
+    await connectionAttempt;
+  } finally {
+    connectionAttempt = null;
   }
-};
-$("disconnect").onclick = () => {
-  client.disconnect();
-  connected = false;
-  cameraIds = [];
-  cameraFrames.clear();
-  arrangeCameras();
-  $("login").hidden = false;
-  text("connection", "Disconnected");
-  $("disconnect").hidden = true;
-  for (const item of cameraFrames.values()) {
-    item.status.textContent = "Disconnected";
-  }
-  graph.setConnected(false);
-  updateControls();
-};
+}
+$("disconnect").onclick = () =>
+  connected ? safely(() => client.disconnect()) : connectStation();
 function setPage(value) {
   const page = value === "graph" ? "graph" : "operations";
   $("app").dataset.view = page;
@@ -1718,6 +1705,7 @@ graph = new GraphExplorer({
 loadExample();
 drawHistory();
 
-$("login").querySelector("button[type=submit]").disabled = false;
-
 setPage(location.hash.slice(1));
+
+// The station is already reached through the owner's private connection.
+void connectStation();

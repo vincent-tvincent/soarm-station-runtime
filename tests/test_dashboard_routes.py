@@ -19,7 +19,7 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
     (root/'payload-model.js').write_text('export const payload=true;')
     (tmp_path/'secrets.env').write_text('private')
     monkeypatch.setenv('SOARM_STATION_ROOT',str(tmp_path))
-    config={'device_id':'test','arms':[{'id':'arm1','backend':'mock','joints':[{'name':'joint','min_rad':-1.,'max_rad':1.,'velocity_rad_s':1.}]}],'cameras':[],'profiles':{}}
+    config={'device_id':'test','web':{'trusted_network_access':False},'arms':[{'id':'arm1','backend':'mock','joints':[{'name':'joint','min_rad':-1.,'max_rad':1.,'velocity_rad_s':1.}]}],'cameras':[],'profiles':{}}
     async def unused(request):raise AssertionError('Actuation route was not requested')
     owner=types.SimpleNamespace(config=config,public_resources=resources(config),motor_records={},motor_record_errors={},states={},inference={},joints={},images={},upload={},events=[],workflows={},decisions=[])
     for name in ('permission','hold','stream_input','operate','operation_status','start_workflow','history','image','control','camera_stream'):setattr(owner,name,unused)

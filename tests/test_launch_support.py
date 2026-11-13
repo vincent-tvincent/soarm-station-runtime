@@ -10,7 +10,7 @@ class LaunchSupportTests(unittest.TestCase):
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root=Path(self.temporary.name)
+        self.root=Path(self.temporary.name).resolve()
         self.write('python/soarm_station/config.py','')
         (self.root/'ros2_ws').mkdir()
         for relative in ('.venv/bin/python','.runtime-venv/bin/python'):
@@ -76,6 +76,7 @@ class LaunchSupportTests(unittest.TestCase):
         self.assertNotIn('UNRELATED',env)
 
     def test_missing_dependencies_fail_before_starting_nodes(self):
+        self.config['web']['trusted_network_access']=False
         cases=[('.venv/bin/python','scripts/bootstrap'),
                ('local/security/enclaves/permissions.p7s','scripts/init-security'),
                ('local/tls/key.pem','TLS key'),('local/secrets.env','SOARM_STATION_TOKEN')]
@@ -85,6 +86,12 @@ class LaunchSupportTests(unittest.TestCase):
                 try:
                     with self.assertRaisesRegex(ValueError,message):child_environment(self.root,self.config,{})
                 finally:path.write_bytes(content);path.chmod(mode)
+
+    def test_private_dashboard_starts_without_operator_token(self):
+        (self.root/'local/secrets.env').unlink()
+        result=child_environment(self.root,self.config,{})
+        self.assertNotIn('SOARM_STATION_TOKEN',result)
+        self.assertEqual(result['SOARM_STATION_ROOT'],str(self.root))
 
 
 if __name__=='__main__':unittest.main()

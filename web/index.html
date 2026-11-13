@@ -17,9 +17,9 @@
           ><button class="nav-item" data-page="graph">02 ROS graph</button>
         </nav>
         <div class="connection">
-          <span id="environment"></span><span id="connection">Disconnected</span
-          ><button id="disconnect" class="text-button" hidden>
-            Disconnect
+          <span id="environment"></span><span id="connection">Connecting…</span
+          ><button id="disconnect" class="text-button" disabled>
+            Reconnect
           </button>
         </div>
       </header>
@@ -30,20 +30,6 @@
         </div>
         <span id="page-series">CONTROL / 01</span>
       </div>
-      <form id="login" class="login-panel">
-        <div>
-          <h2>Connect to your station</h2>
-          <p>Sign in to view cameras, motor status and the ROS graph.</p>
-        </div>
-        <label
-          >Operator token<input
-            id="token"
-            type="password"
-            autocomplete="off"
-            required /></label
-        ><button class="primary" type="submit" disabled>Connect</button
-        ><span id="login-error" role="alert"></span>
-      </form>
       <main id="operations" class="page">
         <div class="arm-toolbar">
           <label class="inline-label"

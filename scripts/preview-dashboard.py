@@ -8,7 +8,6 @@ Bind is deliberately fixed to 127.0.0.1:8767; never deploy this preview server.
 import argparse
 import asyncio
 import copy
-import hmac
 import io
 import json
 import math
@@ -20,7 +19,6 @@ import uuid
 from aiohttp import web
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN = "soarm-preview-only-not-a-secret"
 HOST, PORT = "127.0.0.1", 8767
 ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js"}
 
@@ -75,7 +73,7 @@ class Preview:
     async def preview_info(self, request):
         return self.response({"environment": self.fixture["preview"]["environment"],
                               "scenario": self.scenario, "scenarios": list(self.fixture["scenarios"]),
-                              "mock_token": TOKEN, "hardware_connected": False})
+                              "hardware_connected": False})
 
     async def set_scenario(self, request):
         self.reset((await request.json())["scenario"])
@@ -307,12 +305,7 @@ def build_app(preview):
     async def auth(request, handler):
         public=request.path in ("/","/api/preview") or request.path.startswith("/assets/")
         if not public:
-            supplied=request.headers.get("Authorization", "")
-            if request.path.startswith("/ws/") and not supplied:
-                protocols=[p.strip() for p in request.headers.get("Sec-WebSocket-Protocol", "").split(",")]
-                if len(protocols)==2 and protocols[0]=="soarm_station":supplied="Bearer "+protocols[1]
-            if not hmac.compare_digest(supplied,"Bearer "+TOKEN):
-                return preview.response({"error":"Preview authentication required","mock":True},401)
+            # This preview listens only on loopback; no login step is needed.
             origin=request.headers.get("Origin")
             if origin and origin not in (f"http://127.0.0.1:{PORT}",f"http://localhost:{PORT}"):
                 return preview.response({"error":"Preview origin mismatch","mock":True},403)
@@ -341,7 +334,7 @@ def main():
     if not 1024<=PORT<=65535:parser.error("Port must be between 1024 and 65535")
     preview=Preview(args.fixture,args.web_root,args.reference_root,args.scenario)
     print(f"MOCK ONLY / no hardware or backend network: http://{HOST}:{PORT}")
-    print(f"Fake preview token: {TOKEN}")
+    print("Opens directly; no operator token required.")
     print("Historical camera references only. API controls mutate in-memory fixtures.")
     web.run_app(build_app(preview),host=HOST,port=PORT,access_log=None,print=None)
 
