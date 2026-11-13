@@ -58,3 +58,10 @@ loopback HTTPS test, not proof of an off-device wireless deployment. Collector
 and outbox software exist; choosing/deploying an external collector and the
 72-hour measured run remain distinct work. The dashboard names the missing
 configuration rather than hiding the queue.
+
+Leader **Gripper follow / O** can freeze the last sent gripper reference while
+body poses continue. Re-enabling uses fresh calibrated leader samples; this
+setting neither grants permission nor renews input liveness. The FK overlay in
+Leader mode is labeled Leader and uses the host's observed pose, never the
+Joint-mode draft. IK readouts show measured TCP/elevation/roll/jaw values next
+to the corresponding jog buttons.

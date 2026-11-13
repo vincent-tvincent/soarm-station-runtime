@@ -121,8 +121,9 @@ no additional listener or ROS node is created.
 | Method/path | Contract |
 | --- | --- |
 | GET `/api/input-hosts` | `hosts[]` has `id,label,platform,connected,state,reason,devices[],active,latest_pose,sample_age_ms,report_age_ms,measured_hz`. No placeholder host/device is added. |
-| POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100). Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,heartbeat_interval_ms,browser_lease_ms`. |
+| POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100); optional boolean `follow_gripper` (default true) and `gripper_reference` in percent. Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,follow_gripper,heartbeat_interval_ms,browser_lease_ms`. |
 | POST `/api/input-hosts/{id}/heartbeat` | `run_id,operator_session_id`, about every 500 ms while STARTING/READY/PICKUP/RUNNING. An expired lease cannot be revived. |
+| POST `/api/input-hosts/{id}/settings` | Matching `run_id,operator_session_id,follow_gripper` boolean. Forwards a same-run setting change; does not enable permission or renew liveness. |
 | POST `/api/input-hosts/{id}/stop` | Same matching run/session fields. Returns `stopped,hold_confirmed,state,reason`; wrong or absent ownership never issues a global hold. |
 | WS `/ws/input-host` | Native bridge hello/inventory/state/stopped; gateway start/stop/refresh. This is not a browser USB API. |
 
@@ -139,6 +140,18 @@ alive. Source/client loss causes a scoped stop/hold; reconnect only advertises
 again. The **Home** shortcut first stops the matching leader run and waits for
 both `stopped` and `hold_confirmed`; only then may the UI enable a new manual/Home
 operation. Never implement Home by jumping the leader coordinate offset.
+
+The **Gripper follow** toggle (UI shortcut **O**) changes only the jaw command
+source. Disabled follow retains the last successfully sent jaw reference while
+body poses continue from fresh leader samples. Before the first sent command,
+use a valid supplied `gripper_reference`, otherwise the current follower
+`gripper_percent` from control feedback. Missing feedback never becomes a
+fabricated 50% or 0% target. Enabling follow resumes fresh calibrated leader jaw
+samples through the existing runtime pickup/clutch and motion bounds. It does
+not reset the operation or change coordinates. `hosts[].active.follow_gripper`
+is the desired setting; `active.gripper_reference` reports the most recent
+observed sent jaw target. `latest_pose` remains the real leader pose, even when
+its jaw is not being followed.
 
 ## Verification
 

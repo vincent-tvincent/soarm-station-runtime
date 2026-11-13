@@ -127,17 +127,46 @@ class LeaderHostRegistry:
         if set(joints)!=set(device.get('joint_names') or []):raise ValueError('Configured leader mapping does not match follower joints')
         hz=body.get('hz',100)
         if type(hz) not in (int,float) or not 50<=hz<=100:raise ValueError('Leader input rate must be 50..100 Hz')
+        follow=body.get('follow_gripper',True)
+        if type(follow) is not bool:raise ValueError('follow_gripper must be boolean')
+        reference=body.get('gripper_reference')
+        if type(reference) in (int,float) and math.isfinite(reference):
+            if not 0<=reference<=100:raise ValueError('gripper_reference must be percent in [0,100]')
+            reference=float(reference)
+        else:reference=None # Native bridge uses fresh follower feedback, never a guessed value.
         run_id=uuid.uuid4().hex
         active={'run_id':run_id,'device_id':device['id'],'arm_id':arm_id,'operator_session_id':principal,
                 'runtime_boot_id':arm['runtime_boot_id'],'controller_session':arm['controller_session'],
-                'operation_id':'','hz':float(hz),'last_browser':time.monotonic()}
+                'operation_id':'','hz':float(hz),'follow_gripper':follow,'gripper_reference':reference,
+                'last_browser':time.monotonic()}
         host.update(active=active,state='STARTING',reason='Opening selected leader and checking calibration',latest_pose=None,last_sample_report=None)
         try:
             await host['ws'].send_json({'type':'start',**{k:v for k,v in active.items() if k!='last_browser'},'joint_names':joints})
         except Exception:
             host['active']=None;host['state']='OFFLINE';raise
         return web.json_response({'accepted':True,'run_id':run_id,'state':'STARTING','reason':host['reason'],
-                                  'heartbeat_interval_ms':500,'browser_lease_ms':int(self.lease_s*1000)})
+                                  'follow_gripper':follow,'heartbeat_interval_ms':500,'browser_lease_ms':int(self.lease_s*1000)})
+
+    async def settings_route(self,request):
+        from aiohttp import web
+        body=await self._body(request);host=self.hosts.get(request.match_info['host_id']);active=host.get('active') if host else None
+        if not active or active['run_id']!=body.get('run_id') or active['operator_session_id']!=body.get('operator_session_id'):
+            raise ValueError('Leader settings do not match the active run')
+        follow=body.get('follow_gripper')
+        if type(follow) is not bool:raise ValueError('follow_gripper must be boolean')
+        if host['state'] in ('STOPPING','OFFLINE','ERROR') or host.get('ws') is None or host['ws'].closed:
+            raise ValueError('Leader run is stopping or disconnected')
+        # Same operation/run only. This changes no permission, liveness deadline,
+        # body target, coordinate offset or runtime clutch state.
+        async with host.setdefault('_settings_lock',asyncio.Lock()):
+            if host.get('active') is not active or host['state'] in ('STOPPING','OFFLINE','ERROR'):
+                raise ValueError('Leader run ended before forwarding settings')
+            await host['ws'].send_json({'type':'settings','run_id':active['run_id'],
+                'operator_session_id':active['operator_session_id'],'follow_gripper':follow})
+            if host.get('active') is not active or host['state'] in ('STOPPING','OFFLINE','ERROR'):
+                raise ValueError('Leader run ended while forwarding settings')
+            active['follow_gripper']=follow
+        return web.json_response({'accepted':True,'run_id':active['run_id'],'follow_gripper':follow})
 
     async def heartbeat_route(self,request):
         from aiohttp import web
@@ -188,6 +217,9 @@ class LeaderHostRegistry:
                     else:
                         if host['state']!='STOPPING':host['state']=body.get('state','ERROR')
                         host['reason']=str(body.get('reason',''))[:512]
+                        reference=body.get('gripper_reference')
+                        if type(reference) in (int,float) and math.isfinite(reference) and 0<=reference<=100:
+                            active['gripper_reference']=float(reference)
                         if body.get('pose') is not None:
                             pose=body['pose'];positions=pose.get('positions') if isinstance(pose,dict) else None
                             if not isinstance(positions,dict) or len(positions)>32 or any(not isinstance(n,str) or type(v) not in (int,float) or not math.isfinite(v) for n,v in positions.items()):
@@ -227,6 +259,7 @@ class LeaderHostRegistry:
         app.add_routes([web.get('/api/input-hosts',self.hosts_route),
             web.post('/api/input-hosts/{host_id}/start',self.start_route),
             web.post('/api/input-hosts/{host_id}/heartbeat',self.heartbeat_route),
+            web.post('/api/input-hosts/{host_id}/settings',self.settings_route),
             web.post('/api/input-hosts/{host_id}/stop',self.stop_route),
             web.get('/ws/input-host',self.register_route)])
         async def startup(app):self.watch_task=asyncio.create_task(self._watch())

@@ -95,6 +95,22 @@ def calibration_for(profile):
     return {name: calibration[name] for name in names}
 
 
+def gripper_reference(value):
+    """A valid percent reference, or None; zero is valid and never a default."""
+    return float(value) if type(value) in (int,float) and math.isfinite(value) and 0<=value<=100 else None
+
+
+def select_gripper_command(sample, follow, last_sent, initial_reference, follower_state):
+    if follow:
+        value=gripper_reference(sample)
+        if value is None:raise ValueError('Invalid calibrated leader gripper sample')
+        return value
+    for candidate in (last_sent,initial_reference,(follower_state or {}).get('gripper_percent')):
+        value=gripper_reference(candidate)
+        if value is not None:return value
+    raise ValueError('Follower gripper reference unavailable; no default jaw target is generated')
+
+
 def discover(config, enumerate_ports=serial_inventory):
     """Return real OS devices, marking configured candidates without opening them."""
     result = []
@@ -269,6 +285,15 @@ class InputHostBridge:
             try:await asyncio.wait_for(asyncio.shield(task),3)
             except (asyncio.CancelledError,TimeoutError):pass
 
+    def apply_settings(self, message):
+        active=self.active
+        if (active is None or message.get('run_id')!=active['run_id']
+                or message.get('operator_session_id')!=active['operator_session_id']
+                or type(message.get('follow_gripper')) is not bool):
+            return False
+        active['follow_gripper']=message['follow_gripper']
+        return True
+
     async def operate(self, request):
         sampler=None;run_id=request["run_id"];arm_id=request["arm_id"]
         try:
@@ -298,6 +323,7 @@ class InputHostBridge:
                         elif body["type"]=="error":raise RuntimeError(body["reason"])
                         elif body["type"]=="result":raise RuntimeError("Follower operation ended")
                 receiver=asyncio.create_task(receive());sequence=0;started=time.monotonic();last_report=0.
+                last_sent_gripper=None
                 try:
                     while True:
                         tick=time.monotonic()
@@ -316,14 +342,23 @@ class InputHostBridge:
                         sample=await sampler.sample()
                         if receiver.done():await receiver;raise RuntimeError("Follower control socket closed")
                         if time.monotonic_ns()-sample["completed_ns"]>50_000_000:raise TimeoutError("Leader sample became stale before send")
+                        # Read the current setting after the asynchronous native read.
+                        # Only the outgoing jaw target changes; retain the real leader
+                        # sample for the pose overlay and continue all body joints.
+                        body=copy.deepcopy(sample['body'])
+                        follow=request.get('follow_gripper',True)
+                        body['gripper']=select_gripper_command(body.get('gripper'),follow,last_sent_gripper,
+                            request.get('gripper_reference'),latest['state'])
                         sequence+=1
                         await control.send_json({**grant,"arm_id":arm_id,"frame_kind":"COMMAND","sequence":sequence,
-                            "input_id":uuid.uuid4().hex,"body":sample["body"]})
+                            "input_id":uuid.uuid4().hex,"body":body})
+                        last_sent_gripper=body['gripper']
                         if tick-last_report>=.1:
                             reason=latest["grant"].get("reason","")
                             running=(latest["state"] or {}).get("phase")=="ACTIVE" and (latest["state"] or {}).get("operation_id")==grant.get("operation_id")
                             await self.emit(type="state",run_id=run_id,state="RUNNING" if running and "pickup" not in reason.lower() else "PICKUP",
                                 reason=reason or ("" if running else "Awaiting follower pickup/admission"),operation_id=grant.get("operation_id"),pose=sample["body"],
+                                follow_gripper=follow,gripper_reference=last_sent_gripper,
                                 sample_age_ms=(time.monotonic_ns()-sample["completed_ns"])/1e6,
                                 measured_hz=sequence/max(.001,time.monotonic()-started),sequence=sequence)
                             last_report=tick
@@ -361,6 +396,7 @@ class InputHostBridge:
                                     if self.active is not None:await self.emit(type="state",run_id=body["run_id"],state="ERROR",reason="Input host is busy");continue
                                     self.active=body;self.task=asyncio.create_task(self.operate(body))
                                 elif body.get("type")=="stop":await self.stop(body.get("run_id"))
+                                elif body.get("type")=="settings":self.apply_settings(body)
                                 elif body.get("type")=="refresh":await self.emit(type="inventory",host=self.advertisement())
                         finally:
                             updater.cancel();await self.stop()

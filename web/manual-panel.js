@@ -15,6 +15,7 @@ export class ManualPanel {
     Object.assign(this, { element, client, onError, onNotice });
     this.arm = "";
     this.mode = "joint";
+    this.followGripper = true;
     this.level = 2;
     this.keys = new Set();
     this.epoch = 0;
@@ -31,8 +32,8 @@ export class ManualPanel {
     element.innerHTML = `<label class="field-label manual-mode-label">Control mode<select id="manual-mode" aria-label="Manual control mode"><option value="joint">Joint targets</option><option value="ik">IK · keyboard jog</option><option value="leader">Leader arm</option></select></label>
     <div class="manual-control-area">
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
-      <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}</span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Normal</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 2 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
-      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><p class="detail-note">The selected leader follows through the station. Home stops following.</p></div>
+      <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Normal</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 2 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
+      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">The selected leader follows through the station. Home stops following.</p></div>
     </div>
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p><div id="manual-fk"></div>`;
     this.el = (id) => element.querySelector("#" + id);
@@ -77,6 +78,8 @@ export class ManualPanel {
       };
       b.onpointerup = b.onpointercancel = b.onlostpointercapture = release;
     }
+    this.el("leader-gripper-follow").onclick = () =>
+      this.safe(() => this.setGripperFollow(!this.followGripper));
     this.el("refresh-leaders").onclick = () =>
       this.safe(() => this.refreshHosts());
     this.el("leader-host").onchange = () => this.renderDevices();
@@ -159,7 +162,7 @@ export class ManualPanel {
       this.target = null;
       this.dirty = false;
       this.descriptor = null;
-      this.fk.resetArm();
+      this.fk.resetArm(arm);
       this.leaderRun = null;
       this.ownsStream = false;
       this.config = (resources.arms || []).find((a) => a.id === arm) || {};
@@ -454,6 +457,8 @@ export class ManualPanel {
             runtime_boot_id: context.boot,
             controller_session: context.session,
             hz: 100,
+            follow_gripper: this.followGripper,
+            gripper_reference: this.preservedGripper(this.measured()),
           },
         );
         if (!result.accepted)
@@ -657,7 +662,7 @@ export class ManualPanel {
     }
     if (
       e.target.closest(
-        'input,textarea,select,[contenteditable="true"],.fk-stage',
+        'input:not([type="range"]),textarea,select,[contenteditable="true"],.fk-stage',
       )
     )
       return;
@@ -665,6 +670,13 @@ export class ManualPanel {
       if (e.repeat) return;
       e.preventDefault();
       this.safe(() => this.preset(e.code === "KeyN" ? "home" : "fold"));
+      return;
+    }
+    if (this.mode === "leader" && e.code === "KeyO") {
+      if (!e.repeat) {
+        e.preventDefault();
+        this.safe(() => this.setGripperFollow(!this.followGripper));
+      }
       return;
     }
     if (this.mode !== "ik") return;
@@ -778,17 +790,38 @@ export class ManualPanel {
     this.poseLoading = true;
     const arm = this.arm;
     try {
+      const host = this.hosts.find(
+        (h) => h.id === this.el("leader-host").value,
+      );
+      const overlay =
+        this.mode === "leader"
+          ? host?.report_age_ms < 500 && host?.active
+            ? host.latest_pose
+            : null
+          : this.target;
       const value = await this.client.request(
         `/api/manual/${encodeURIComponent(arm)}/fk`,
-        { ...measured, target: this.target },
+        { ...measured, target: overlay },
       );
       if (arm !== this.arm) return;
+      const g = value.measured;
+      const readouts = {
+        X: `${(g.position_m[0] * 1000).toFixed(0)} mm`,
+        Y: `${(g.position_m[1] * 1000).toFixed(0)} mm`,
+        Z: `${(g.position_m[2] * 1000).toFixed(0)} mm`,
+        Elevation: `${((g.elevation_rad * 180) / Math.PI).toFixed(1)}°`,
+        "Wrist roll": `${((g.tool_roll_rad * 180) / Math.PI).toFixed(1)}°`,
+        Gripper: `${g.gripper_percent.toFixed(0)}%`,
+      };
+      for (const [name, value] of Object.entries(readouts))
+        this.element.querySelector(`[data-axis="${name}"]`).textContent = value;
       const record = this.snapshot.motor_status?.[arm];
       this.fk.update(
         value.measured,
         value.target,
         record?.motors || [],
         !this.stateForArm().feedback_valid || record?.state === "stale",
+        this.mode === "leader" ? "Leader" : "Target",
       );
     } catch (e) {
       this.el("manual-fk").querySelector(".fk-empty").textContent =
@@ -862,6 +895,25 @@ export class ManualPanel {
       ? old
       : "";
     this.updateControls();
+  }
+  async setGripperFollow(value) {
+    const run = this.leaderRun;
+    if (run && !run.stopping) {
+      const result = await this.client.request(
+        `/api/input-hosts/${encodeURIComponent(run.host)}/settings`,
+        {
+          run_id: run.run_id,
+          operator_session_id: this.client.operatorSessionId,
+          follow_gripper: value,
+        },
+      );
+      if (this.leaderRun !== run || !result.accepted) return;
+    }
+    this.followGripper = value;
+    this.el("leader-gripper-follow").setAttribute(
+      "aria-pressed",
+      String(value),
+    );
   }
   async heartbeat() {
     const run = this.leaderRun;

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config
+from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command
 from soarm_station.leader_gateway import LeaderHostRegistry
 
 
@@ -183,4 +183,84 @@ def test_native_bridge_samples_only_after_grant_and_never_enables_permission(hos
         assert commands and commands[0]['window_id']=='original-pi-window'
         assert 'reader_closed' in log and bridge.active is None
         assert bridge.headers=={} # trusted-network bridge does not demand a token
+    asyncio.run(check())
+
+
+def test_gripper_reference_never_defaults_or_loses_valid_zero():
+    assert select_gripper_command(80,False,31.7,5,{'gripper_percent':44})==31.7
+    assert select_gripper_command(80,False,None,0,{'gripper_percent':44})==0
+    assert select_gripper_command(80,False,None,float('nan'),{'gripper_percent':44})==44
+    assert select_gripper_command(80,True,31.7,5,{'gripper_percent':44})==80
+    with pytest.raises(ValueError,match='unavailable'):
+        select_gripper_command(80,False,None,None,{'gripper_percent':None})
+
+
+def test_follow_setting_is_scoped_and_changes_no_permission_or_liveness(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        response=await registry.start_route(Request({**body,'follow_gripper':False,'gripper_reference':37.5}))
+        run=json.loads(response.text)['run_id'];host=registry.hosts['test-host'];active=host['active'];initial_live=active['last_browser']
+        assert not active['follow_gripper'] and active['gripper_reference']==37.5
+        assert host['ws'].sent[0]['follow_gripper'] is False
+        settings={'run_id':run,'operator_session_id':'operator','follow_gripper':True}
+        for invalid in [{**settings,'run_id':'old'},{**settings,'operator_session_id':'other'},{**settings,'follow_gripper':'true'}]:
+            with pytest.raises(ValueError):await registry.settings_route(Request(invalid))
+        assert len(host['ws'].sent)==1
+        result=json.loads((await registry.settings_route(Request(settings))).text)
+        assert result['accepted'] and active['follow_gripper'] is True
+        assert host['ws'].sent[-1]=={'type':'settings',**settings}
+        assert active['last_browser']==initial_live and not held and state['arms']['follower']['permission']
+        assert registry.snapshot()['hosts'][0]['active']['follow_gripper'] is True
+        host['state']='STOPPING'
+        with pytest.raises(ValueError):await registry.settings_route(Request({**settings,'follow_gripper':False}))
+    asyncio.run(check())
+
+
+def test_bridge_toggle_keeps_body_live_and_holds_last_sent_jaw(host_config):
+    async def check():
+        done=asyncio.Event();samples=[];bridge=None
+        class Control:
+            closed=False
+            def __init__(self):self.queue=asyncio.Queue();self.commands=[]
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):self.closed=True
+            def __aiter__(self):return self
+            async def __anext__(self):return await self.queue.get()
+            async def send_json(self,value):
+                if value.get('operation_type'):
+                    grant={'stream_ready':True,'operation_id':'op','window_id':'pi-window','window_valid_for_ms':250}
+                    for payload in [{'type':'grant','grant':grant},{'type':'state','state':{'phase':'ACTIVE','operation_id':'op','gripper_percent':61.2}}]:
+                        self.queue.put_nowait(SimpleNamespace(type=SimpleNamespace(value=1),data=json.dumps(payload)))
+                elif value.get('frame_kind')=='COMMAND':
+                    self.commands.append(copy.deepcopy(value))
+                    if len(self.commands)==1:
+                        assert bridge.apply_settings({'run_id':'run','operator_session_id':'operator','follow_gripper':True})
+                    elif len(self.commands)==2:
+                        assert bridge.apply_settings({'run_id':'run','operator_session_id':'operator','follow_gripper':False})
+                    elif len(self.commands)==3:done.set()
+        control=Control()
+        class Session:
+            def ws_connect(self,url,**kwargs):return control
+        class Sampler:
+            def __init__(self,*args):pass
+            async def start(self):pass
+            async def sample(self):
+                index=len(samples);body={'positions':{'pan':.1+index*.01,'lift':-.1},'gripper':[80.,70.,60.,50.][min(index,3)],'gripper_unit':'percent'}
+                samples.append(copy.deepcopy(body));stamp=time.monotonic_ns()
+                return {'body':body,'started_ns':stamp,'completed_ns':stamp}
+            async def close(self):pass
+        bridge=InputHostBridge(host_config,'https://gateway.invalid',None,sampler_factory=Sampler,enumerate_ports=ports)
+        bridge.session=Session();bridge.registry=Socket()
+        request={'run_id':'run','device_id':'profile-leader','arm_id':'follower','operator_session_id':'operator',
+                 'runtime_boot_id':'boot','controller_session':'session','joint_names':['pan','lift'],'hz':100,
+                 'follow_gripper':False,'gripper_reference':37.5}
+        bridge.active=request
+        assert not bridge.apply_settings({'run_id':'old','operator_session_id':'operator','follow_gripper':True})
+        assert not bridge.apply_settings({'run_id':'run','operator_session_id':'other','follow_gripper':True})
+        bridge.task=asyncio.create_task(bridge.operate(request))
+        await asyncio.wait_for(done.wait(),1);await bridge.stop('run')
+        outgoing=[m['body'] for m in control.commands[:3]]
+        assert [b['gripper'] for b in outgoing]==[37.5,70.,70.]
+        assert outgoing[0]['positions']['pan']<outgoing[1]['positions']['pan']<outgoing[2]['positions']['pan']
+        assert [s['gripper'] for s in samples[:3]]==[80.,70.,60.] # actual overlay samples were not rewritten
     asyncio.run(check())

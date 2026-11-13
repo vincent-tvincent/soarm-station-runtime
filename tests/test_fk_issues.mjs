@@ -14,3 +14,12 @@ test('a stall-only recovery cannot erase a hardware fault; stale clear cannot er
  colors.update([{name:'wrist',motion_issue:{state:'clear',feedback_fresh:false,clear_kinds:['fault','stall']}}]);assert.ok(colors.states.has('wrist'));
  colors.update([{name:'wrist',motion_issue:{state:'clear',feedback_fresh:true,clear_kinds:['fault','stall']}}]);assert.equal(colors.states.size,0);
 });
+test('overlapping fault and stall remain red until both kinds clear',()=>{
+ const colors=new JointIssueColors();
+ colors.update([{name:'elbow',motion_issue:{active:true,kind:'fault',state:'fault'}}]);
+ colors.update([{name:'elbow',motion_issue:{active:true,kind:'stall',state:'stall'}}]);
+ colors.update([{name:'elbow',motion_issue:{feedback_fresh:true,clear_kinds:['stall']}}]);
+ assert.equal(colors.states.get('elbow').kind,'fault');
+ colors.update([{name:'elbow',motion_issue:{feedback_fresh:true,clear_kinds:['fault']}}]);
+ assert.equal(colors.states.size,0);
+});

@@ -13,17 +13,23 @@ export class JointIssueColors {
     for (const motor of motors) {
       const issue = motor.motion_issue;
       if (!issue) continue;
+      const previous = this.states.get(motor.name);
+      let pending = previous?.pending || (previous ? [previous] : []);
       if (issue.active === true && ["fault", "stall"].includes(issue.kind)) {
-        this.states.set(motor.name, issue);
-      } else {
-        const previous = this.states.get(motor.name);
-        if (
-          previous &&
-          issue.feedback_fresh &&
-          issue.clear_kinds?.includes(previous.kind)
-        )
-          this.states.delete(motor.name);
+        pending = [
+          ...pending.filter((item) => item.kind !== issue.kind),
+          issue,
+        ];
+      } else if (issue.feedback_fresh && Array.isArray(issue.clear_kinds)) {
+        pending = pending.filter(
+          (item) => !issue.clear_kinds.includes(item.kind),
+        );
       }
+      if (pending.length) {
+        const primary =
+          pending.find((item) => item.kind === "fault") || pending.at(-1);
+        this.states.set(motor.name, { ...primary, pending });
+      } else this.states.delete(motor.name);
     }
     return this.states;
   }
@@ -35,6 +41,8 @@ export class FKView {
   constructor(element) {
     this.element = element;
     this.issues = new JointIssueColors();
+    this.issueCaches = new Map();
+    this.armId = "";
     this.yaw = -0.68;
     this.pitch = 0.42;
     this.zoom = 1;
@@ -104,13 +112,17 @@ export class FKView {
       }
     };
   }
-  resetArm() {
+  resetArm(armId = "") {
+    this.issueCaches.set(this.armId, this.issues);
+    this.armId = armId;
+    this.issues = this.issueCaches.get(armId) || new JointIssueColors();
     this.geometry = null;
     this.target = null;
-    this.issues.reset();
     this.draw();
   }
-  update(geometry, target, motors, stale = false) {
+  update(geometry, target, motors, stale = false, overlayLabel = "Target") {
+    this.element.querySelector(".fk-legend span:nth-child(2)").textContent =
+      "┄ " + overlayLabel;
     this.geometry = geometry;
     this.target = target;
     this.issues.update(motors);
