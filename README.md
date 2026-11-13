@@ -99,6 +99,7 @@ See the [name migration](docs/name-migration.md) when updating clients or instal
 
 - [Startup and debugging](docs/startup-and-debug.md): first installation, foreground launch, ROS CLI, single-node runs and service management.
 - [Architecture](docs/architecture.md): process ownership, node responsibilities and timing.
+- [Dashboard UI](docs/dashboard-ui.md): camera layouts, operations panels and generic graph interaction.
 - [Dashboard backend API](docs/dashboard-api.md): motor/resource metadata, generic ROS discovery and bounded sampling.
 - [Runtime reference](docs/runtime-reference.md): configuration, interfaces, operations, policy bundles and telemetry.
 - [Naming validation](docs/naming-validation-2026-11-13.md): package migration, retained state and current service verification.
