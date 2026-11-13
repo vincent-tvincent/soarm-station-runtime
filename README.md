@@ -20,6 +20,8 @@ The active Pi profile is **`local/pi-writable.yaml`**, using the native LeRobot 
 
 ## Environments and installation
 
+The committed bootstrap was verified from clean local Git checkouts with new environments on the existing supported Pi OS/ROS stack. See [the reproducibility evidence and its limits](docs/reproducibility-2026-11-13.md). This does not establish a clean-OS or cross-distribution installation guarantee.
+
 ROS Lyrical on Ubuntu 26.04 uses distribution Python 3.14. `.venv` uses that Python with system site packages. `.runtime-venv` uses Python 3.12 and LeRobot 0.7.0 / CPU PyTorch 2.11.0. A permission-restricted Unix socket keeps the Python/native ABIs separate. Motor and camera devices have one owner; per-arm threads prevent another arm or camera from blocking control.
 
 On another compatible Linux host, install ROS 2, colcon, Python venv support and the distribution's NumPy/YAML dependencies, then:
