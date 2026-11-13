@@ -1418,38 +1418,110 @@ export class StationClient {
       urls: new Set(),
       current: null,
       times: [],
+      ws: null,
+      epoch: 0,
+      retry: 0,
+      reconnectTimer: null,
+      watchdog: null,
+      lastReceivedAt: this.env.now(),
     };
-    const ws = new this.env.WebSocket(
-      this._url(`/ws/camera/${encodeURIComponent(cameraId)}`, true),
-      this._socketProtocols(),
+    this._cameras.set(cameraId, camera);
+    this._openCameraSocket(camera);
+    return () => {
+      if (this._cameras.get(cameraId) === camera) this.closeCamera(cameraId);
+    };
+  }
+  _cameraWanted(camera) {
+    return (
+      this.connected &&
+      !camera.closed &&
+      this._cameras.get(camera.id) === camera
     );
+  }
+  _openCameraSocket(camera) {
+    if (!this._cameraWanted(camera)) return;
+    camera.reconnectTimer = null;
+    camera.pending = null;
+    camera.times = [];
+    camera.lastReceivedAt = this.env.now();
+    const epoch = ++camera.epoch;
+    let ws;
+    try {
+      ws = new this.env.WebSocket(
+        this._url(`/ws/camera/${encodeURIComponent(camera.id)}`, true),
+        this._socketProtocols(),
+      );
+    } catch (error) {
+      this._retryCamera(camera, error.message);
+      return;
+    }
     camera.ws = ws;
     ws.binaryType = "blob";
-    this._cameras.set(cameraId, camera);
+    const current = () =>
+      this._cameraWanted(camera) && camera.ws === ws && camera.epoch === epoch;
+    ws.onopen = () => {
+      if (current())
+        camera.onFrame({ cameraId: camera.id, state: "waiting", url: null });
+    };
     ws.onmessage = (event) => {
-      if (camera.closed || typeof event.data === "string") return;
+      if (!current() || typeof event.data === "string") return;
+      camera.lastReceivedAt = this.env.now();
       camera.pending = event.data;
       this._cameraDecode(camera);
     };
-    ws.onerror = () =>
-      this._error(
-        new StationError(
-          `Camera ${cameraId} connection failed`,
-          "CAMERA_ERROR",
-        ),
-      );
-    ws.onclose = () => {
-      if (!camera.closed) {
-        this.closeCamera(cameraId);
-        onFrame({ cameraId, state: "closed", url: null });
-      }
+    ws.onerror = () => {
+      if (current()) this._retryCamera(camera, "Camera connection interrupted");
     };
-    return () => this.closeCamera(cameraId);
+    ws.onclose = () => {
+      if (current()) this._retryCamera(camera, "Camera connection closed");
+    };
+    this._watchCamera(camera, ws, epoch);
+  }
+  _watchCamera(camera, ws, epoch) {
+    this.env.clearTimeout(camera.watchdog);
+    camera.watchdog = this.env.setTimeout(
+      () => {
+        camera.watchdog = null;
+        if (
+          !this._cameraWanted(camera) ||
+          camera.ws !== ws ||
+          camera.epoch !== epoch
+        )
+          return;
+        if (this.env.now() - camera.lastReceivedAt >= 5000)
+          this._retryCamera(camera, "No camera frames received");
+        else this._watchCamera(camera, ws, epoch);
+      },
+      Math.max(100, 5000 - (this.env.now() - camera.lastReceivedAt)),
+    );
+  }
+  _retryCamera(camera, reason) {
+    if (!this._cameraWanted(camera) || camera.reconnectTimer !== null) return;
+    const ws = camera.ws;
+    camera.ws = null;
+    ++camera.epoch;
+    camera.pending = null;
+    this.env.clearTimeout(camera.watchdog);
+    camera.watchdog = null;
+    if (ws && ws.readyState < 2) ws.close();
+    const delay = Math.min(5000, 500 * 2 ** Math.min(camera.retry++, 4));
+    camera.onFrame({
+      cameraId: camera.id,
+      state: "reconnecting",
+      reason,
+      retryInMs: delay,
+      url: null,
+    });
+    camera.reconnectTimer = this.env.setTimeout(
+      () => this._openCameraSocket(camera),
+      delay,
+    );
   }
   async _cameraDecode(camera) {
     if (camera.busy || camera.closed || !camera.pending) return;
     camera.busy = true;
-    const data = camera.pending;
+    const data = camera.pending,
+      epoch = camera.epoch;
     camera.pending = null;
     const blob =
       data instanceof Blob ? data : new Blob([data], { type: "image/jpeg" });
@@ -1457,7 +1529,11 @@ export class StationClient {
     camera.urls.add(url);
     try {
       await this.env.decodeImage(url);
-      if (camera.closed) return;
+      if (camera.closed || epoch !== camera.epoch) {
+        this._releaseCameraURL(camera, url);
+        return;
+      }
+      camera.retry = 0;
       const now = this.env.now();
       camera.times.push(now);
       if (camera.times.length > 30) camera.times.shift();
@@ -1480,7 +1556,13 @@ export class StationClient {
         this.env.afterPaint(() => this._releaseCameraURL(camera, previous));
     } catch (error) {
       this._releaseCameraURL(camera, url);
-      if (!camera.closed) this._error(error);
+      if (!camera.closed && epoch === camera.epoch)
+        camera.onFrame({
+          cameraId: camera.id,
+          state: "decode_error",
+          reason: error.message,
+          url: null,
+        });
     } finally {
       if (camera.closed) this._releaseCameraURL(camera, url);
       camera.busy = false;
@@ -1496,7 +1578,12 @@ export class StationClient {
     camera.closed = true;
     camera.pending = null;
     this._cameras.delete(cameraId);
-    if (camera.ws.readyState < 2) camera.ws.close();
+    this.env.clearTimeout(camera.reconnectTimer);
+    this.env.clearTimeout(camera.watchdog);
+    camera.reconnectTimer = null;
+    camera.watchdog = null;
+    ++camera.epoch;
+    if (camera.ws && camera.ws.readyState < 2) camera.ws.close();
     for (const url of [...camera.urls]) this._releaseCameraURL(camera, url);
   }
 }

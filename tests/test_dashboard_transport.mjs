@@ -789,7 +789,9 @@ test("camera URLs decode before publication, retire after display boundary, and 
   });
   await f.client.connect(TOKEN);
   const frames = [];
-  f.client.openCamera("overview", (frame) => frames.push(frame));
+  f.client.openCamera("overview", (frame) => {
+    if (frame.state === "frame") frames.push(frame);
+  });
   const ws = f.sockets[0];
   ws.open();
   ws.message(new Blob(["one"]));
@@ -929,5 +931,100 @@ test("tokenless error text is retained without empty-string redaction", async ()
     f.client.request("/api/history"),
     (e) => e.message === "History unavailable",
   );
+  await f.client.disconnect();
+});
+
+test("camera connection drops recover without restarting or holding manual control", async () => {
+  const f = fixture();
+  await f.client.connect();
+  const opening = f.client.startManual("arm1");
+  const control = f.sockets[0];
+  control.open();
+  await opening;
+  const states = [];
+  f.client.openCamera("overview", (x) => states.push(x));
+  const camera = f.sockets[1];
+  camera.open();
+  const before = f.client.currentOperation;
+  camera.close();
+  assert.equal(states.at(-1).state, "reconnecting");
+  await f.clock.advance(500);
+  assert.equal(f.sockets.length, 3);
+  const replacement = f.sockets[2];
+  replacement.open();
+  replacement.message(new Blob(["new-frame"]));
+  await flush();
+  assert.equal(states.at(-1).state, "frame");
+  assert.equal(f.client.currentOperation.operationId, before.operationId);
+  assert.equal(control.readyState, 1);
+  assert.equal(
+    f.calls.some((c) => c.path === "/api/hold" || c.path === "/api/permission"),
+    false,
+  );
+  await f.client.disconnect();
+});
+
+test("a silent camera retries and explicit close cancels all further retries", async () => {
+  const f = fixture();
+  await f.client.connect();
+  const states = [];
+  const stop = f.client.openCamera("overview", (x) => states.push(x));
+  f.sockets[0].open();
+  await f.clock.advance(5000);
+  assert.equal(states.at(-1).state, "reconnecting");
+  await f.clock.advance(500);
+  assert.equal(f.sockets.length, 2);
+  stop();
+  await f.clock.advance(15000);
+  assert.equal(f.sockets.length, 2);
+  await f.client.disconnect();
+});
+
+test("camera retry stops on dashboard disconnect and never reopens controls", async () => {
+  const f = fixture();
+  await f.client.connect();
+  f.client.openCamera("overview");
+  f.sockets[0].close();
+  await f.client.disconnect();
+  await f.clock.advance(15000);
+  assert.equal(f.sockets.length, 1);
+  assert.equal(f.urls.size, 0);
+});
+
+test("a late camera decode from a dropped socket cannot replace its new stream", async () => {
+  const pending = deferred();
+  let decodeCount = 0;
+  const f = fixture({
+    env: {
+      decodeImage: () =>
+        ++decodeCount === 1 ? pending.promise : Promise.resolve(),
+    },
+  });
+  await f.client.connect();
+  const frames = [];
+  f.client.openCamera("overview", (x) => {
+    if (x.state === "frame") frames.push(x);
+  });
+  f.sockets[0].message(new Blob(["old-frame"]));
+  await flush();
+  const oldUrl = [...f.urls][0];
+  f.sockets[0].close();
+  await f.clock.advance(500);
+  f.sockets[1].message(new Blob(["new-frame"]));
+  pending.resolve();
+  await flush();
+  assert.equal(frames.length, 1);
+  assert.notEqual(frames[0].url, oldUrl);
+  assert.ok(f.revoked.includes(oldUrl));
+  await f.client.disconnect();
+});
+
+test("an obsolete camera stop handle does not close a replacement subscription", async () => {
+  const f = fixture();
+  await f.client.connect();
+  const oldStop = f.client.openCamera("overview");
+  f.client.openCamera("overview");
+  oldStop();
+  assert.equal(f.sockets[1].readyState, 0);
   await f.client.disconnect();
 });

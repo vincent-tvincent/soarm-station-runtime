@@ -37,9 +37,14 @@ Camera layouts preserve native image ratios and never crop:
 
 Camera FPS describes browser receipt, not source capture timing. No frame for
 more than two seconds is labeled explicitly. Cameras and control use separate
-WebSockets. Changing a layout does not open USB devices or restart capture.
+WebSockets. Changing a layout does not open USB devices or restart capture. A dropped or silent
+camera WebSocket reconnects automatically with bounded backoff. Video recovery
+does not reopen the control socket, grant permission or resume a stopped operation.
 
-Manual controls use named joint bounds and measured pickup. Payload supports
+Manual controls use named joint bounds and measured pickup. **Start manual stream**
+requests permission when needed, then starts the stream in one explicit click.
+No separate Enable click is required for manual mode. Without edited targets,
+the controls refresh from the current measured pose when starting. Payload supports
 DIRECT, TRAJECTORY and MODEL in INLINE/STREAM modes. The JSON editor contains
 semantic intent; the transport adds current owner/session/window identities.
 MODEL requires a registered profile. Existing configured Cartesian endpoints

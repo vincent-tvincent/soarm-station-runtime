@@ -20,6 +20,7 @@ from .common import BaseNode,STATE,SENSOR,run,topic
 from soarm_station.dashboard_data import resources,render_motors,validate_motor_record
 from soarm_station.graph_observer import GraphObserver
 from soarm_station.web_access import dashboard_access_middleware
+from soarm_station.web_streams import stream_camera_frames
 
 ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js'))
 
@@ -148,14 +149,8 @@ class DashboardNode(BaseNode):
         b,t=self.images[n]
         return web.Response(body=b,content_type='image/jpeg',headers={'X-Source-Time-Ns':str(t),'Cache-Control':'no-store'})
     async def camera_stream(self,r):
-        n=r.match_info['id'];ws=web.WebSocketResponse(protocols=['soarm_station'],max_msg_size=1024,heartbeat=10);await ws.prepare(r);last=0
-        try:
-            while not ws.closed and not self.stopping:
-                frame=self.images.get(n)
-                if frame and frame[1]!=last:last=frame[1];await ws.send_bytes(frame[0])
-                await asyncio.sleep(1/30)
-        finally:await ws.close()
-        return ws
+        n=r.match_info['id']
+        return await stream_camera_frames(r,lambda:self.images.get(n),lambda:self.stopping)
     async def control(self,r):
         ws=web.WebSocketResponse(protocols=['soarm_station'],max_msg_size=262144,heartbeat=10,receive_timeout=2);await ws.prepare(r)
         arm='';h=None;feedback={};principal=uuid.uuid4().hex

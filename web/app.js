@@ -37,6 +37,9 @@ let snapshot = {},
   cameraFrames = new Map(),
   pipPositions = new Map(),
   manualTarget = null,
+  manualDraftDirty = false,
+  startingManual = false,
+  manualStartVersion = 0,
   noticeTimer,
   graph,
   connected = false,
@@ -81,6 +84,8 @@ function connection(info) {
   $("disconnect").disabled = info.state === "connecting";
   $("disconnect").textContent = connected ? "Disconnect" : "Reconnect";
   if (info.state === "disconnected") {
+    ++manualStartVersion;
+    manualDraftDirty = false;
     cameraIds = [];
     cameraFrames.clear();
     arrangeCameras();
@@ -114,10 +119,11 @@ function profileList() {
 function updateControls() {
   const a = armState(),
     busy =
-      operation &&
-      !["done", "ended", "error", "idle", "result", "closed"].includes(
-        operation.state,
-      );
+      startingManual ||
+      (operation &&
+        !["done", "ended", "error", "idle", "result", "closed"].includes(
+          operation.state,
+        ));
   $("enable-control").disabled =
     !connected ||
     !selectedArm ||
@@ -128,7 +134,7 @@ function updateControls() {
   $("start-manual").disabled =
     !connected ||
     !selectedArm ||
-    !a.permission ||
+    armConfig().read_only ||
     !!busy ||
     !manualTarget ||
     !a.feedback_valid;
@@ -138,6 +144,9 @@ function updateControls() {
     !a.permission ||
     !!busy ||
     ($("operation-type").value === "MODEL" && !$("profile-select").value);
+  $("start-manual").textContent = startingManual
+    ? "Starting…"
+    : "Start manual stream";
   $("arm-select").disabled = !!busy;
   $("send-update").disabled =
     !busy ||
@@ -223,6 +232,7 @@ $("enable-control").onclick = () =>
   });
 $("hold").onclick = () =>
   safely(async () => {
+    ++manualStartVersion;
     await client.hold(selectedArm);
     notice("Hold requested. Support torque is preserved.");
   });
@@ -443,6 +453,7 @@ function renderMotors() {
     );
 }
 function renderManual() {
+  manualDraftDirty = false;
   const cfg = armConfig(),
     p = joints(),
     grip = armState().gripper_percent;
@@ -512,6 +523,7 @@ function renderManual() {
       if (!Number.isFinite(v) || v < j.min || v > j.max) return;
       numeric.value = String(v);
       slider.value = String(v);
+      manualDraftDirty = true;
       if (j.unit === "%") manualTarget.gripper = v;
       else manualTarget.positions[j.name] = v;
       if (
@@ -545,12 +557,33 @@ $("reset-targets").onclick = () => {
 };
 $("start-manual").onclick = () =>
   safely(async () => {
-    await client.startManual(selectedArm);
-    client.setManualTarget(manualTarget);
-    text(
-      "manual-note",
-      "Manual stream is active. Changing a target sends it to the selected arm.",
-    );
+    if (startingManual) return;
+    const arm = selectedArm,
+      version = ++manualStartVersion;
+    startingManual = true;
+    updateControls();
+    try {
+      if (!manualDraftDirty) renderManual();
+      const staged = manualDraftDirty ? structuredClone(manualTarget) : null;
+      if (!armState().permission) await client.enable(arm);
+      if (version !== manualStartVersion) {
+        if (connected) await client.hold(arm);
+        return;
+      }
+      await client.startManual(arm);
+      if (version !== manualStartVersion) {
+        await client.hold(arm);
+        return;
+      }
+      if (staged) client.setManualTarget(staged);
+      text(
+        "manual-note",
+        "Manual stream is active. Changing a target sends it to the selected arm.",
+      );
+    } finally {
+      startingManual = false;
+      updateControls();
+    }
   });
 function operationChanged(event) {
   operation = event;
@@ -570,6 +603,7 @@ function operationChanged(event) {
     ].includes(event.state)
   ) {
     operation = null;
+    manualDraftDirty = false;
     $("stream-actions").hidden = true;
     text("manual-note", "Stream is not active. Targets remain local.");
   } else $("stream-actions").hidden = event.mode !== "STREAM";
@@ -1384,6 +1418,7 @@ function updateCameras(ids) {
         item.fig.classList.remove("stale");
         const now = performance.now();
         item.lastFrameAt = now;
+        item.connectionState = "frame";
         item.frames++;
         if (!item.lastAt) item.lastAt = now;
         if (now - item.lastAt >= 1000) {
@@ -1397,7 +1432,17 @@ function updateCameras(ids) {
             ? " · " + item.img.naturalWidth + " × " + item.img.naturalHeight
             : "");
         item.status.title = item.status.textContent;
-      } else if (frame.state) item.status.textContent = frame.state;
+      } else if (frame.state) {
+        item.connectionState = frame.state;
+        item.status.textContent =
+          frame.state === "reconnecting"
+            ? "Reconnecting…"
+            : frame.state === "waiting"
+              ? "Waiting for frames"
+              : frame.state === "decode_error"
+                ? "Frame unavailable"
+                : frame.state;
+      }
     });
   }
   arrangeCameras();
@@ -1689,10 +1734,11 @@ setInterval(() => {
   for (const item of cameraFrames.values()) {
     if (item.lastFrameAt && performance.now() - item.lastFrameAt > 2000) {
       item.fig.classList.add("stale");
-      item.status.textContent =
-        "No frame received for " +
-        Math.floor((performance.now() - item.lastFrameAt) / 1000) +
-        " s";
+      if (item.connectionState !== "reconnecting")
+        item.status.textContent =
+          "No frame received for " +
+          Math.floor((performance.now() - item.lastFrameAt) / 1000) +
+          " s";
     }
   }
 }, 1000);
