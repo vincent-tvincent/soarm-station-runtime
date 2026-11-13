@@ -40,3 +40,5 @@ One explicit one-second joint-state observation counted89 messages /15308 bytes.
 This deploys the approved UI and read-only backend observations. It does not newly qualify physical execution through every UI mode, model task success, camera FPS, large retained-history query latency or collision/Cartesian-path guarantees. Earlier native motion qualification and policy limits remain separate evidence.
 
 Detailed machine evidence is ignored `local/dashboard-combined-before.json` and `local/dashboard-combined-after.json`; backend contract is [dashboard-api.md](dashboard-api.md), UI design/usage [dashboard-ui.md](dashboard-ui.md). No Git remote was added and no GitHub push occurred. Browser reload obtains the new static assets.
+
+The subsequent [Blocks/JSON editor deployment](payload-editor-deployment-2026-11-13.md) used a dashboard-child-only reload and preserved the physical owner/native boot.
