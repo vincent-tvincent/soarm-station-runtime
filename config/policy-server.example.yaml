@@ -2,7 +2,7 @@ deployment: sorting-v1
 model: {repo_or_path: local/policies/sorting_v1/pretrained_model, device: cpu, tf32: false}
 execution: {action_fps: 30, supported_modes: [chunk], warmup_calls: 2}
 semantics: so101-degrees-gripper-percent-v1
-robot_type: soarm_multi
+robot_type: soarm_station_multi
 zenoh: {listen_endpoints: [tcp/127.0.0.1:7447]}
 features:
   - name: observation.state

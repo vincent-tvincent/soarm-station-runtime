@@ -14,7 +14,7 @@ from aiohttp import ClientSession
 async def run(args):
     tls=ssl.create_default_context(cafile=args.ca);principal='continuity-'+uuid.uuid4().hex
     report={'physical_actuation':False,'passed':False};sequence=0
-    async with ClientSession(headers={'Authorization':'Bearer '+os.environ['SOARM_TOKEN']}) as session:
+    async with ClientSession(headers={'Authorization':'Bearer '+os.environ['SOARM_STATION_TOKEN']}) as session:
         async def api(path,body=None,expect_error=False):
             async with session.request('POST' if body is not None else 'GET',args.url+path,json=body,ssl=tls) as response:
                 if expect_error:

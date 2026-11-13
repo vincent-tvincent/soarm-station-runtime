@@ -9,8 +9,8 @@ import time
 import uuid
 from pathlib import Path
 from aiohttp import ClientSession
-from soarm.config import load
-from soarm.ipc import Client
+from soarm_station.config import load
+from soarm_station.ipc import Client
 
 async def run(a):
     c=load(a.config);cfg=next(x for x in c['arms'] if x['id']==a.arm)
@@ -18,7 +18,7 @@ async def run(a):
     joint=next(j for j in cfg['joints'] if j['name']==a.joint)
     tls=ssl.create_default_context(cafile=str(Path(c['_path']).parent/c['web']['cert']))
     principal='physical-continuity-'+uuid.uuid4().hex;local=Client(c['socket']);report={'passed':False,'enables':0,'phases':[]}
-    async with ClientSession(headers={'Authorization':'Bearer '+os.environ[c['web'].get('token_env','SOARM_TOKEN')]}) as session:
+    async with ClientSession(headers={'Authorization':'Bearer '+os.environ[c['web'].get('token_env','SOARM_STATION_TOKEN')]}) as session:
         async def api(path,body=None):
             async with session.request('POST' if body is not None else 'GET','https://localhost:8443'+path,json=body,ssl=tls) as r:
                 r.raise_for_status();return await r.json()

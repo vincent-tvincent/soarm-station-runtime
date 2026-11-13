@@ -1,8 +1,10 @@
-# SOARM runtime
+# SOArm Station Runtime
 
-SOARM is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, an authenticated web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
+SOArm Station is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, an authenticated web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
 
-The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SOARM training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
+The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SOArm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
+
+Repository: `soarm-station-runtime`. Companion repository: `soarm-station-training`.
 
 ## Requirements
 
@@ -28,11 +30,11 @@ scripts/init-security
 
 source /opt/ros/lyrical/setup.bash
 source ros2_ws/install/setup.bash
-ros2 launch soarm_system system.launch.py \
+ros2 launch soarm_station_system system.launch.py \
   config:="$PWD/config/mock.yaml" log_level:=info respawn:=false
 ```
 
-This starts one mock arm and one mock camera without opening physical devices. Open `https://localhost:8443/`, trust the generated certificate at `local/tls/cert.pem`, and enter the `SOARM_TOKEN` value from `local/secrets.env`. Press Ctrl-C in the launch terminal to stop the graph.
+This starts one mock arm and one mock camera without opening physical devices. Open `https://localhost:8443/`, trust the generated certificate at `local/tls/cert.pem`, and enter the `SOARM_STATION_TOKEN` value from `local/secrets.env`. Press Ctrl-C in the launch terminal to stop the graph.
 
 No systemd service or manual venv activation is required. The launch file selects the ROS and native interpreters and prepares child-process environments. Motion permission starts disabled.
 
@@ -45,7 +47,7 @@ Create a host profile under the ignored `local/` directory:
 ```bash
 cp config/mock.yaml local/robot.yaml
 # Edit local/robot.yaml for the target devices and application settings.
-ros2 launch soarm_system system.launch.py config:="$PWD/local/robot.yaml"
+ros2 launch soarm_station_system system.launch.py config:="$PWD/local/robot.yaml"
 ```
 
 The copied profile initially uses mock devices. Hardware deployment requires adapter settings, stable device paths, calibration, joint limits and any model or measured transform assets. Each arm and camera has an explicit unique ID. Resource counts come from configuration; no default physical arm is selected. Relative paths resolve against the YAML file's directory.
@@ -61,7 +63,7 @@ For foreground debugging, pass `log_level:=debug respawn:=false`. Prepare a seco
 ```bash
 source scripts/setup.bash config/mock.yaml
 ros2 node list --no-daemon --spin-time 5
-ros2 topic echo /soarm/arms/arm1/joint_states --once \
+ros2 topic echo /soarm_station/arms/arm1/joint_states --once \
   --qos-reliability best_effort
 scripts/test
 ```
@@ -70,9 +72,9 @@ The [debugging guide](docs/startup-and-debug.md) also covers individual `ros2 ru
 
 | Path | Purpose |
 | --- | --- |
-| `python/soarm/` | Device ownership, control, policy execution, IPC and persistence. |
-| `ros2_ws/src/soarm_system/` | ROS node adapters and launch entry point. |
-| `ros2_ws/src/soarm_interfaces/` | Messages, services and actions. |
+| `python/soarm_station/` | Device ownership, control, policy execution, IPC and persistence. |
+| `ros2_ws/src/soarm_station_system/` | ROS node adapters and launch entry point. |
+| `ros2_ws/src/soarm_station_interfaces/` | Messages, services and actions. |
 | `config/` | Tracked mock and policy-server examples. |
 | `scripts/` | Bootstrap, local initialization, startup and development commands. |
 | `web/` | Dashboard assets. |
@@ -85,17 +87,20 @@ After configuring a deployment profile, install a user systemd service with an e
 
 ```bash
 scripts/install-service "$PWD/local/robot.yaml"
-systemctl --user status soarm.service
-journalctl --user -u soarm.service -f
+systemctl --user status soarm-station.service
+journalctl --user -u soarm-station.service -f
 ```
 
 The installer enables and starts the service. Stop it before launching the foreground graph with the same resources. Service startup invokes `scripts/run`, which enables application-node respawn. Direct `ros2 launch` defaults to no respawn for debugging. See [service management](docs/startup-and-debug.md#optional-systemd-service) for update, logout and removal behavior.
 
 ## Documentation and current scope
 
+See the [name migration](docs/name-migration.md) when updating clients or installations using the earlier SOARM names.
+
 - [Startup and debugging](docs/startup-and-debug.md): first installation, foreground launch, ROS CLI, single-node runs and service management.
 - [Architecture](docs/architecture.md): process ownership, node responsibilities and timing.
 - [Runtime reference](docs/runtime-reference.md): configuration, interfaces, operations, policy bundles and telemetry.
+- [Naming validation](docs/naming-validation-2026-11-13.md): package migration, retained state and current service verification.
 - [Installation evidence](docs/reproducibility-2026-11-13.md) and [foreground validation](docs/foreground-validation-2026-11-13.md): tested environments and verification limits.
 - [Physical validation](docs/physical-motion-validation-2026-11-12.md): measured behavior of the qualified SO-101 deployment.
 

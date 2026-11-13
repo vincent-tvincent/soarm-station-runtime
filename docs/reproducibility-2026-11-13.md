@@ -1,5 +1,7 @@
 # Clean-checkout reproducibility check — November 13, 2026
 
+This dated report uses the package/interface names of its tested revision. For current SOArm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
+
 Verified source commits: runtime `b9a10c9e3d9586f589801c74a30ca608ba6adcd7`; training `5d73b04d162d1929689a6e58779fa36af2d83474`. Both were cloned from local Git into new disk-backed `/var/tmp` directories with `git clone --local --no-hardlinks`. Ignored deployment files, environments, datasets, credentials and build outputs were not copied. Temporary clone remotes were removed. No repository was pushed.
 
 ## Wrapper locations

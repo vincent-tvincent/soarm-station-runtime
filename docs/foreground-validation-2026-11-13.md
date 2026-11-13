@@ -1,5 +1,7 @@
 # Foreground startup validation — November 13, 2026
 
+This dated report uses the package/interface names of its tested revision. For current SOArm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
+
 Source: runtime commit `73b282d`, tested on the reference Pi installation. See [developer startup instructions](startup-and-debug.md) for general usage and [deployment details](deployments/pi.md) for this host.
 
 

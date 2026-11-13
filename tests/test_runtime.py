@@ -3,10 +3,10 @@ import json
 import time
 from pathlib import Path
 import pytest
-from soarm.config import load
-from soarm.control import ArmController,now
-from soarm.worker import Runtime
-from soarm.journal import Journal
+from soarm_station.config import load
+from soarm_station.control import ArmController,now
+from soarm_station.worker import Runtime
+from soarm_station.journal import Journal
 
 ROOT=Path(__file__).resolve().parents[1]
 @pytest.fixture

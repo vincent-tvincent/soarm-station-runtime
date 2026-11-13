@@ -6,9 +6,9 @@ import cv2
 from rclpy.action import ActionServer,ActionClient,CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState,CompressedImage
-from soarm_interfaces.msg import WorkflowStatus,WorkflowDecision,OperationStatus,Event
-from soarm_interfaces.action import ExecuteWorkflow,ExecuteOperation
-from soarm_interfaces.srv import RecordEvent,Hold
+from soarm_station_interfaces.msg import WorkflowStatus,WorkflowDecision,OperationStatus,Event
+from soarm_station_interfaces.action import ExecuteWorkflow,ExecuteOperation
+from soarm_station_interfaces.srv import RecordEvent,Hold
 from .common import BaseNode,STATE,SENSOR,run,topic
 from .conversion import goal_from_dict
 
@@ -20,18 +20,18 @@ def wait(future,timeout=5):
 class WorkflowNode(BaseNode):
     def __init__(self):
         super().__init__('workflow_manager');self.joints={};self.states={};self.frames={};self.references={};self.pending={};self.alerts={};self.boot=uuid.uuid4().hex;self.event_pending={};self.claimed=set();self.claim_lock=threading.Lock()
-        self.status_pub=self.create_publisher(WorkflowStatus,'/soarm/workflow/status',STATE)
-        self.decision_pub=self.create_publisher(WorkflowDecision,'/soarm/workflow/decision',STATE)
-        group=ReentrantCallbackGroup();self.event_client=self.create_client(RecordEvent,'/soarm/telemetry/record_event',callback_group=group)
-        self.hold_client=self.create_client(Hold,'/soarm/lerobot/hold',callback_group=group)
-        self.operation=ActionClient(self,ExecuteOperation,'/soarm/lerobot/operate',callback_group=group)
+        self.status_pub=self.create_publisher(WorkflowStatus,'/soarm_station/workflow/status',STATE)
+        self.decision_pub=self.create_publisher(WorkflowDecision,'/soarm_station/workflow/decision',STATE)
+        group=ReentrantCallbackGroup();self.event_client=self.create_client(RecordEvent,'/soarm_station/telemetry/record_event',callback_group=group)
+        self.hold_client=self.create_client(Hold,'/soarm_station/lerobot/hold',callback_group=group)
+        self.operation=ActionClient(self,ExecuteOperation,'/soarm_station/lerobot/operate',callback_group=group)
         for a in self.config['arms']:
             n=a['id'];self.create_subscription(JointState,topic(n,'joint_states'),lambda m,n=n:self.joints.__setitem__(n,(m,time.monotonic())),SENSOR)
             self.create_subscription(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.states.__setitem__(n,m),STATE)
         for c in self.config['cameras']:
-            self.create_subscription(CompressedImage,'/soarm/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.frames.__setitem__(n,(m,time.monotonic())),SENSOR)
+            self.create_subscription(CompressedImage,'/soarm_station/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.frames.__setitem__(n,(m,time.monotonic())),SENSOR)
         self.create_timer(.1,self.rules)
-        self.action=ActionServer(self,ExecuteWorkflow,'/soarm/workflows/execute',execute_callback=self.execute,
+        self.action=ActionServer(self,ExecuteWorkflow,'/soarm_station/workflows/execute',execute_callback=self.execute,
             cancel_callback=lambda _:CancelResponse.ACCEPT,callback_group=group)
     def emit(self,arm,code,detail):
         e=Event();e.event_id=uuid.uuid4().hex;e.source_role='R02';e.source_boot_id=self.boot;e.arm_id=arm;e.time=self.get_clock().now().to_msg()

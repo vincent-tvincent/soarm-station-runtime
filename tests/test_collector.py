@@ -1,6 +1,6 @@
 import asyncio
 from aiohttp.test_utils import TestClient,TestServer
-from soarm.collector import create_app
+from soarm_station.collector import create_app
 def test_auth_durable_dedup_conflict(tmp_path):
     async def check():
         token='x'*32;client=TestClient(TestServer(create_app(str(tmp_path/'collector.db'),token)));await client.start_server()

@@ -9,7 +9,7 @@ The tested platform is Ubuntu 26.04 aarch64 with ROS 2 Lyrical and system Python
 Obtain the complete runtime repository. In a new Bash terminal, change to its root and run:
 
 ```bash
-cd /path/to/ros_system
+cd /path/to/soarm-station-runtime
 export ROS_DISTRO=lyrical
 scripts/bootstrap
 .venv/bin/python scripts/init-local --name localhost
@@ -29,13 +29,13 @@ After installation, source the standard ROS environments and launch:
 ```bash
 source /opt/ros/lyrical/setup.bash
 source ros2_ws/install/setup.bash
-ros2 launch soarm_system system.launch.py \
+ros2 launch soarm_station_system system.launch.py \
   config:="$PWD/config/mock.yaml" log_level:=debug respawn:=false
 ```
 
-This launches one mock arm (`arm1`) and one mock camera (`forward`). Use `config/multi_mock.yaml` for multiple mock resources. Both examples use HTTPS port 8443 and the same `/soarm` namespace; run one complete graph at a time with these settings.
+This launches one mock arm (`arm1`) and one mock camera (`forward`). Use `config/multi_mock.yaml` for multiple mock resources. Both examples use HTTPS port 8443 and the same `/soarm_station` namespace; run one complete graph at a time with these settings.
 
-Open `https://localhost:8443/`, trust the certificate at `local/tls/cert.pem`, and log in with the `SOARM_TOKEN` value in `local/secrets.env`. Successful startup produces process-start messages, fresh arm feedback and camera images. No motion permission or operation is created by startup.
+Open `https://localhost:8443/`, trust the certificate at `local/tls/cert.pem`, and log in with the `SOARM_STATION_TOKEN` value in `local/secrets.env`. Successful startup produces process-start messages, fresh arm feedback and camera images. No motion permission or operation is created by startup.
 
 The full launch selects both Python interpreters, loads the configured tokens for child processes and applies the DDS environment. It requires neither manual venv activation nor a systemd service.
 
@@ -54,14 +54,14 @@ Edit it for the target machine. Copying the example leaves its adapters in mock 
 After configuring the profile, launch it with:
 
 ```bash
-ros2 launch soarm_system system.launch.py \
+ros2 launch soarm_station_system system.launch.py \
   config:="$PWD/local/robot.yaml" log_level:=info respawn:=false
 ```
 
 If an installed service or another process already owns these devices, stop it first. For the supplied service:
 
 ```bash
-systemctl --user stop soarm.service
+systemctl --user stop soarm-station.service
 ```
 
 This command is unnecessary when no service is installed. Do not run the service and a foreground graph against the same device set.
@@ -71,13 +71,13 @@ Startup leaves motion permission disabled. Enable the intended arm and start an 
 ## Launch options and logs
 
 ```bash
-ros2 launch soarm_system system.launch.py --show-args
+ros2 launch soarm_station_system system.launch.py --show-args
 ```
 
 | Argument | Behavior |
 | --- | --- |
 | `root` | Full repository root, normally inferred from the selected launch file. Set an absolute path for a relocated installation. |
-| `config` | Explicit deployment YAML. Defaults to exported `SOARM_CONFIG`, otherwise `ROOT/config/mock.yaml`. |
+| `config` | Explicit deployment YAML. Defaults to exported `SOARM_STATION_CONFIG`, otherwise `ROOT/config/mock.yaml`. |
 | `log_level` | ROS node logging: `debug`, `info` (default), `warn`, `error` or `fatal`. |
 | `respawn` | `false` by default. `true` restarts application nodes after three seconds. |
 | `secrets_file` | Defaults to `ROOT/local/secrets.env`. Only configured operator/collector token names are read; exported nonempty values take precedence. |
@@ -97,13 +97,13 @@ ros2 node list --no-daemon --spin-time 5
 ros2 topic list
 ros2 action list
 ros2 service list
-ros2 param get /soarm/lerobot_node config
-ros2 topic echo /soarm/arms/arm1/joint_states --once \
+ros2 param get /soarm_station/lerobot_node config
+ros2 topic echo /soarm_station/arms/arm1/joint_states --once \
   --qos-reliability best_effort
-ros2 topic echo /soarm/arms/arm1/lerobot/status --once
-ros2 topic hz /soarm/arms/arm1/joint_states \
+ros2 topic echo /soarm_station/arms/arm1/lerobot/status --once
+ros2 topic hz /soarm_station/arms/arm1/joint_states \
   --qos-reliability best_effort
-ros2 topic info /soarm/camera/forward/image_raw/compressed --verbose
+ros2 topic info /soarm_station/camera/forward/image_raw/compressed --verbose
 ```
 
 For hardware, select `local/robot.yaml` instead. Replace resource IDs in topic paths to match the profile. Ctrl-C ends continuous inspection commands.
@@ -118,9 +118,9 @@ Stop the complete graph, then start the hardware node with mock adapters:
 
 ```bash
 source scripts/setup.bash config/mock.yaml
-ros2 run --prefix "$SOARM_ROOT/.venv/bin/python" \
-  soarm_system lerobot_node --ros-args \
-  -p config:="$SOARM_CONFIG" --log-level debug
+ros2 run --prefix "$SOARM_STATION_ROOT/.venv/bin/python" \
+  soarm_station_system lerobot_node --ros-args \
+  -p config:="$SOARM_STATION_CONFIG" --log-level debug
 ```
 
 Use the same setup in separate terminals for `workflow_manager`, `telemetry_node`, `static_transform_publishers` and, when configured, `recorder`. A standalone dashboard also needs the operator token in its environment:
@@ -128,16 +128,16 @@ Use the same setup in separate terminals for `workflow_manager`, `telemetry_node
 ```bash
 source scripts/setup.bash config/mock.yaml
 set -a
-source "$SOARM_ROOT/local/secrets.env"
+source "$SOARM_STATION_ROOT/local/secrets.env"
 set +a
-ros2 run --prefix "$SOARM_ROOT/.venv/bin/python" \
-  soarm_system dashboard_node --ros-args \
-  -p config:="$SOARM_CONFIG" --log-level debug
+ros2 run --prefix "$SOARM_STATION_ROOT/.venv/bin/python" \
+  soarm_station_system dashboard_node --ros-args \
+  -p config:="$SOARM_STATION_CONFIG" --log-level debug
 ```
 
 The prefix selects the ROS venv even when ament console scripts have absolute system-Python shebangs. The complete launch applies it automatically. Run one hardware owner for each device set.
 
-For IDE debugging, use `.venv/bin/python` for modules under `ros2_ws/src/soarm_system/soarm_system/` and `.runtime-venv/bin/python` for `python/soarm/worker.py` and native adapters. They are separate processes. A debugger attached to the ROS node does not automatically attach to its worker. Use mock devices for breakpoint stepping: pausing a real hardware owner can expire liveness checks.
+For IDE debugging, use `.venv/bin/python` for modules under `ros2_ws/src/soarm_station_system/soarm_station_system/` and `.runtime-venv/bin/python` for `python/soarm_station/worker.py` and native adapters. They are separate processes. A debugger attached to the ROS node does not automatically attach to its worker. Use mock devices for breakpoint stepping: pausing a real hardware owner can expire liveness checks.
 
 ## Rebuild and test
 
@@ -152,7 +152,7 @@ source ros2_ws/install/setup.bash
 scripts/test
 ```
 
-For application-package edits alone, `colcon build --symlink-install --packages-select soarm_system` is sufficient. Interface changes require rebuilding affected participants. Restart the graph to load source/configuration changes. Core Python uses editable installation and ROS Python uses symlink installation.
+For application-package edits alone, `colcon build --symlink-install --packages-select soarm_station_system` is sufficient. Interface changes require rebuilding affected participants. Restart the graph to load source/configuration changes. Core Python uses editable installation and ROS Python uses symlink installation.
 
 `scripts/test` runs checks in the ROS environment. Native-only checks require the separate LeRobot environment and appropriate test tooling; ROS modules cannot be imported with that environment's Python ABI.
 
@@ -162,17 +162,17 @@ Stop the foreground graph before installing the user service:
 
 ```bash
 scripts/install-service "$PWD/local/robot.yaml"
-systemctl --user status soarm.service
-journalctl --user -u soarm.service -f
+systemctl --user status soarm-station.service
+journalctl --user -u soarm-station.service -f
 ```
 
-The installer writes `~/.config/systemd/user/soarm.service` using the current checkout and supplied config paths, reloads systemd, and enables/starts the unit. Always pass an explicit absolute profile path. The unit starts the same ROS graph through `scripts/run`, with application-node respawn enabled and service restart on failure.
+The installer writes `~/.config/systemd/user/soarm-station.service` using the current checkout and supplied config paths, reloads systemd, and enables/starts the unit. Always pass an explicit absolute profile path. The unit starts the same ROS graph through `scripts/run`, with application-node respawn enabled and service restart on failure.
 
-Use `systemctl --user stop soarm.service` before foreground debugging and `systemctl --user start soarm.service` to return to service operation. After source/config changes, use `systemctl --user restart soarm.service`. If the checkout or profile path changes, rerun the installer and restart the unit so the new paths take effect.
+Use `systemctl --user stop soarm-station.service` before foreground debugging and `systemctl --user start soarm-station.service` to return to service operation. After source/config changes, use `systemctl --user restart soarm-station.service`. If the checkout or profile path changes, rerun the installer and restart the unit so the new paths take effect.
 
 User services run in the account's user manager. Running after logout or before an interactive login requires user lingering configured by the host administrator. Foreground ROS launch does not require lingering.
 
-To disable automatic startup, run `systemctl --user disable --now soarm.service`. To remove the generated unit afterward, delete `~/.config/systemd/user/soarm.service` and run `systemctl --user daemon-reload`. This does not remove the repository, configuration or runtime data.
+To disable automatic startup, run `systemctl --user disable --now soarm-station.service`. To remove the generated unit afterward, delete `~/.config/systemd/user/soarm-station.service` and run `systemctl --user daemon-reload`. This does not remove the repository, configuration or runtime data.
 
 ## Troubleshooting
 
@@ -185,7 +185,7 @@ To disable automatic startup, run `systemctl --user disable --now soarm.service`
 | ROS module/type import failure | Match the ROS distribution's Python ABI and rebuild/source interfaces. |
 | Empty graph or DDS authentication failure | Match credentials/domain, allow discovery time, check the host clock and an existing CLI daemon. |
 | Port or device already owned | Stop the previous graph/service and check configured ports, sockets and device owners. |
-| Console-script `StopIteration` after an old installation | Check for obsolete `python/soarm_system.egg-info` generated by the former core package name. Archive it outside `python/`, then reinstall/rebuild. The current core distribution is `soarm-core`. |
+| Console-script `StopIteration` after an old installation | Check for obsolete `python/soarm_system.egg-info` generated by the former core package name. Archive it outside `python/`, then reinstall/rebuild. The current core distribution is `soarm-station-runtime`. |
 | Camera below requested FPS | Measure capture timing and inspect USB bandwidth, exposure and lighting; requested FPS is not measured FPS. |
 | Healthy feedback but no motion | Check the selected backend, writable profile, arm permission and explicit operation state. |
 

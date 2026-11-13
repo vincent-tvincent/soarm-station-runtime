@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SOARM_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-export SOARM_ROOT
+SOARM_STATION_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export SOARM_STATION_ROOT
 # Fast DDS 3.6.2 parses UTC permission dates with local mktime().
 export TZ=UTC
-SOARM_CONFIG=${1:-$SOARM_ROOT/local/pi.yaml}
-export SOARM_CONFIG
-export PYTHONPATH="$SOARM_ROOT/python${PYTHONPATH:+:$PYTHONPATH}"
+SOARM_STATION_CONFIG=${1:-$SOARM_STATION_ROOT/local/pi.yaml}
+export SOARM_STATION_CONFIG
+export PYTHONPATH="$SOARM_STATION_ROOT/python${PYTHONPATH:+:$PYTHONPATH}"
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export ROS_DOMAIN_ID=71
-if [[ ! -d "$SOARM_ROOT/local/security" ]]; then echo 'Initialize DDS credentials with scripts/init-security first' >&2; exit 1; fi
+if [[ ! -d "$SOARM_STATION_ROOT/local/security" ]]; then echo 'Initialize DDS credentials with scripts/init-security first' >&2; exit 1; fi
 export ROS_SECURITY_ENABLE=true
 export ROS_SECURITY_STRATEGY=Enforce
-export ROS_SECURITY_KEYSTORE="$SOARM_ROOT/local/security"
-if [[ -f "$SOARM_ROOT/local/secrets.env" ]]; then set -a; source "$SOARM_ROOT/local/secrets.env"; set +a; fi
+export ROS_SECURITY_KEYSTORE="$SOARM_STATION_ROOT/local/security"
+if [[ -f "$SOARM_STATION_ROOT/local/secrets.env" ]]; then set -a; source "$SOARM_STATION_ROOT/local/secrets.env"; set +a; fi
 set +u
 source /opt/ros/${ROS_DISTRO:-lyrical}/setup.bash
-source "$SOARM_ROOT/ros2_ws/install/setup.bash"
-source "$SOARM_ROOT/.venv/bin/activate"
+source "$SOARM_STATION_ROOT/ros2_ws/install/setup.bash"
+source "$SOARM_STATION_ROOT/.venv/bin/activate"
 set -u
-exec ros2 launch soarm_system system.launch.py config:="$SOARM_CONFIG" respawn:=true
+exec ros2 launch soarm_station_system system.launch.py config:="$SOARM_STATION_CONFIG" respawn:=true

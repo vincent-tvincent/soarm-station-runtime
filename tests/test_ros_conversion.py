@@ -1,7 +1,7 @@
 import pytest
 try:
     import rclpy
-    from soarm_system.conversion import goal_from_dict,request_from_goal,stream_from_dict,frame_to_dict
+    from soarm_station_system.conversion import goal_from_dict,request_from_goal,stream_from_dict,frame_to_dict
     ROS_AVAILABLE=True
 except ImportError:
     ROS_AVAILABLE=False
@@ -38,8 +38,8 @@ def test_initial_native_integer_samples_publish_as_ros_float64():
     from types import SimpleNamespace
     from builtin_interfaces.msg import Time
     from rclpy.serialization import serialize_message
-    from soarm_system.runtime_node import RuntimeNode
-    from soarm_interfaces.msg import OperationStatus
+    from soarm_station_system.runtime_node import RuntimeNode
+    from soarm_station_interfaces.msg import OperationStatus
     messages=[]
     def publish(message):
         if isinstance(message,OperationStatus):

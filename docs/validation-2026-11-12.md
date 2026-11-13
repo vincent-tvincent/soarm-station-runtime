@@ -1,5 +1,7 @@
 # Initial monitoring validation — November 12, 2026 (America/Los_Angeles)
 
+This dated report uses the package/interface names of its tested revision. For current SOArm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
+
 This records the initial read-only deployment. The later user-approved native writable qualification and current state are in [physical motion validation](physical-motion-validation-2026-11-12.md). The earlier approval restriction below is historical.
 
 Target: Ubuntu 26.04.1 on Raspberry Pi 5, aarch64, kernel 7.0.0-1023-raspi; ROS 2 Lyrical. ROS Python 3.14.4; runtime Python 3.12.16; LeRobot 0.7.0, CPU PyTorch 2.11.0+cpu, torchvision 0.26.0+cpu. Exact installed packages are locked in requirements files.

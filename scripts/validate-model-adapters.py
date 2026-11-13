@@ -10,9 +10,9 @@ import time
 from pathlib import Path
 import numpy as np
 import cv2
-from soarm.config import load
-from soarm.control import ArmController
-from soarm.policy import verify_bundle
+from soarm_station.config import load
+from soarm_station.control import ArmController
+from soarm_station.policy import verify_bundle
 
 def exercise(root,bundle,backend):
     # Import the pinned native API before starting the fake high-rate plant.
@@ -64,11 +64,11 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--bundle',required=True)
     p.add_argument('--server-config',required=True);p.add_argument('--native-python',required=True);p.add_argument('--output',required=True);a=p.parse_args()
     reports=[exercise(Path(a.root),a.bundle,'local')]
-    log=open('/tmp/soarm-continuity-native-server.log','w')
+    log=open('/tmp/soarm-station-continuity-native-server.log','w')
     server=subprocess.Popen([a.native_python,'-m','lerobot.scripts.lerobot_policy_server','--config_path='+a.server_config],stdout=log,stderr=subprocess.STDOUT)
     try:
         time.sleep(4.)
-        if server.poll() is not None:raise RuntimeError('Synthetic native server failed; inspect /tmp/soarm-continuity-native-server.log')
+        if server.poll() is not None:raise RuntimeError('Synthetic native server failed; inspect /tmp/soarm-station-continuity-native-server.log')
         reports.append(exercise(Path(a.root),a.bundle,'remote'))
     finally:
         server.terminate()

@@ -6,9 +6,9 @@
 
 `telemetry_node` owns the SQLite journal, persistent schedule, incident/history services and background HTTPS upload. `dashboard_node` owns authenticated web controls and bridges remote source frames. `robot_state_publisher` runs per configured URDF with unique frame prefixes. `static_transform_publishers` publishes only supplied extrinsics. Optional `recorder` wraps an allowlisted MCAP recorder and saves configuration/model metadata.
 
-IDL is under `ros2_ws/src/soarm_interfaces`. Messages use bounded resource IDs/strings and arrays for custom payloads; standard JointTrajectory is checked to 256 position-only points. Inline direct/model sequences are limited to 16 steps. Physical ROS interfaces use radians/metres. The gripper is explicitly percent until a physical joint mapping is provided. Unsupported constraints reject, rather than silently weakening a request.
+IDL is under `ros2_ws/src/soarm_station_interfaces`. Messages use bounded resource IDs/strings and arrays for custom payloads; standard JointTrajectory is checked to 256 position-only points. Inline direct/model sequences are limited to 16 steps. Physical ROS interfaces use radians/metres. The gripper is explicitly percent until a physical joint mapping is provided. Unsupported constraints reject, rather than silently weakening a request.
 
-Topic counts depend on the configured resources. The [runtime reference](runtime-reference.md) describes the public graph and control contracts. One Python ROS application package holds the thin adapters; substantial logic stays in independently testable `python/soarm` modules.
+Topic counts depend on the configured resources. The [runtime reference](runtime-reference.md) describes the public graph and control contracts. One Python ROS application package holds the thin adapters; substantial logic stays in independently testable `python/soarm_station` modules.
 
 Control/feedback target 100 Hz; remote source target 50–120 Hz; cameras target 30 fresh FPS; ordinary dashboard rendering 10 Hz; durable telemetry 1 Hz. Actual acquisition timestamps and measured rates remain distinct. No callback restamps an old physical sample to manufacture freshness. All command authority uses host CLOCK_BOOTTIME windows; remote timestamps are never compared to host monotonic clocks.
 

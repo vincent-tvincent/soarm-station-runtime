@@ -56,10 +56,10 @@ class Runtime:
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);args=parser.parse_args()
-    if os.environ.get('SOARM_PARENT_PID'):
+    if os.environ.get('SOARM_STATION_PARENT_PID'):
         import ctypes
         ctypes.CDLL(None).prctl(1,signal.SIGTERM)
-        if os.getppid()!=int(os.environ['SOARM_PARENT_PID']):raise RuntimeError('Hardware owner parent exited')
+        if os.getppid()!=int(os.environ['SOARM_STATION_PARENT_PID']):raise RuntimeError('Hardware owner parent exited')
     c=load(args.config);path=Path(c['socket']);path.parent.mkdir(parents=True,exist_ok=True)
     process_lock=DeviceLock(c['lock_dir'],str(path));path.unlink(missing_ok=True)
     runtime=Runtime(c)

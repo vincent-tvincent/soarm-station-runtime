@@ -12,9 +12,9 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rosidl_runtime_py.convert import message_to_ordereddict
 from sensor_msgs.msg import JointState,CompressedImage
 from diagnostic_msgs.msg import DiagnosticArray
-from soarm_interfaces.msg import OperationStatus,OperationInput,Event,UploadStatus,WorkflowStatus,WorkflowDecision
-from soarm_interfaces.srv import SetControlPermission,Hold,QueryHistory
-from soarm_interfaces.action import ExecuteOperation,ExecuteWorkflow
+from soarm_station_interfaces.msg import OperationStatus,OperationInput,Event,UploadStatus,WorkflowStatus,WorkflowDecision
+from soarm_station_interfaces.srv import SetControlPermission,Hold,QueryHistory
+from soarm_station_interfaces.action import ExecuteOperation,ExecuteWorkflow
 from .conversion import goal_from_dict,stream_from_dict
 from .common import BaseNode,STATE,SENSOR,run,topic
 
@@ -29,22 +29,22 @@ class DashboardNode(BaseNode):
     def __init__(self):
         super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
         group=ReentrantCallbackGroup()
-        self.permission_client=self.create_client(SetControlPermission,'/soarm/lerobot/set_permission',callback_group=group)
-        self.hold_client=self.create_client(Hold,'/soarm/lerobot/hold',callback_group=group)
-        self.history_client=self.create_client(QueryHistory,'/soarm/telemetry/query_history',callback_group=group)
-        self.operation=ActionClient(self,ExecuteOperation,'/soarm/lerobot/operate',callback_group=group)
-        self.workflow=ActionClient(self,ExecuteWorkflow,'/soarm/workflows/execute',callback_group=group)
-        self.command=self.create_publisher(OperationInput,'/soarm/lerobot/command_stream',SENSOR)
+        self.permission_client=self.create_client(SetControlPermission,'/soarm_station/lerobot/set_permission',callback_group=group)
+        self.hold_client=self.create_client(Hold,'/soarm_station/lerobot/hold',callback_group=group)
+        self.history_client=self.create_client(QueryHistory,'/soarm_station/telemetry/query_history',callback_group=group)
+        self.operation=ActionClient(self,ExecuteOperation,'/soarm_station/lerobot/operate',callback_group=group)
+        self.workflow=ActionClient(self,ExecuteWorkflow,'/soarm_station/workflows/execute',callback_group=group)
+        self.command=self.create_publisher(OperationInput,'/soarm_station/lerobot/command_stream',SENSOR)
         for a in self.config['arms']:
             n=a['id'];self.create_subscription(JointState,topic(n,'joint_states'),lambda m,n=n:self.joints.__setitem__(n,asdict(m)),SENSOR)
             self.create_subscription(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.states.__setitem__(n,asdict(m)),STATE)
             self.create_subscription(DiagnosticArray,topic(n,'lerobot/inference_status'),lambda m,n=n:self.inference.__setitem__(n,asdict(m)),STATE)
         for c in self.config['cameras']:
-            self.create_subscription(CompressedImage,'/soarm/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.images.__setitem__(n,(bytes(m.data),m.header.stamp.sec*10**9+m.header.stamp.nanosec)),SENSOR)
-        self.create_subscription(Event,'/soarm/events',self.event,STATE)
-        self.create_subscription(UploadStatus,'/soarm/telemetry/upload_status',lambda m:setattr(self,'upload',asdict(m)),STATE)
-        self.create_subscription(WorkflowDecision,'/soarm/workflow/decision',lambda m:self.decisions.append(asdict(m)) or self.decisions.__delitem__(slice(None,-50)),STATE)
-        self.create_subscription(WorkflowStatus,'/soarm/workflow/status',lambda m:self.workflows.__setitem__(m.arm_id,asdict(m)),STATE)
+            self.create_subscription(CompressedImage,'/soarm_station/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.images.__setitem__(n,(bytes(m.data),m.header.stamp.sec*10**9+m.header.stamp.nanosec)),SENSOR)
+        self.create_subscription(Event,'/soarm_station/events',self.event,STATE)
+        self.create_subscription(UploadStatus,'/soarm_station/telemetry/upload_status',lambda m:setattr(self,'upload',asdict(m)),STATE)
+        self.create_subscription(WorkflowDecision,'/soarm_station/workflow/decision',lambda m:self.decisions.append(asdict(m)) or self.decisions.__delitem__(slice(None,-50)),STATE)
+        self.create_subscription(WorkflowStatus,'/soarm_station/workflow/status',lambda m:self.workflows.__setitem__(m.arm_id,asdict(m)),STATE)
         self.loop=asyncio.new_event_loop();self.thread=threading.Thread(target=self.serve,daemon=True);self.thread.start()
     def event(self,m):self.events.append(asdict(m));self.events=self.events[-100:]
     def serve(self):
@@ -55,7 +55,7 @@ class DashboardNode(BaseNode):
             if hasattr(self,'runner'):self.loop.run_until_complete(self.runner.cleanup())
             self.loop.close()
     async def start_web(self):
-        cfg=self.config['web'];token=os.environ.get(cfg.get('token_env','SOARM_TOKEN'),'')
+        cfg=self.config['web'];token=os.environ.get(cfg.get('token_env','SOARM_STATION_TOKEN'),'')
         if len(token)<24:raise ValueError('Set an operator token of at least 24 characters')
         @web.middleware
         async def auth(request,handler):
@@ -64,7 +64,7 @@ class DashboardNode(BaseNode):
             supplied=request.headers.get('Authorization','')
             if request.path.startswith('/ws/') and not supplied:
                 protocols=request.headers.get('Sec-WebSocket-Protocol','').split(',')
-                supplied='Bearer '+protocols[1].strip() if len(protocols)==2 and protocols[0].strip()=='soarm' else ''
+                supplied='Bearer '+protocols[1].strip() if len(protocols)==2 and protocols[0].strip()=='soarm_station' else ''
                 origin=request.headers.get('Origin')
                 if origin and origin!='https://'+request.host:raise web.HTTPForbidden(text='Origin mismatch')
             if not hmac.compare_digest(supplied,'Bearer '+token):raise web.HTTPUnauthorized()
@@ -81,7 +81,7 @@ class DashboardNode(BaseNode):
         parent=Path(self.config['_path']).parent
         context.load_cert_chain(parent/cfg['cert'],parent/cfg['key'])
         await web.TCPSite(self.runner,cfg.get('host','0.0.0.0'),cfg.get('port',8443),ssl_context=context).start()
-    async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_ROOT'])/'web/index.html').read_text(),content_type='text/html')
+    async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_STATION_ROOT'])/'web/index.html').read_text(),content_type='text/html')
     def state(self):return {'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
     async def status(self,r):return web.json_response(self.state())
     async def history(self,r):
@@ -130,7 +130,7 @@ class DashboardNode(BaseNode):
         finally:await ws.close()
         return ws
     async def control(self,r):
-        ws=web.WebSocketResponse(protocols=['soarm'],max_msg_size=262144,heartbeat=10,receive_timeout=2);await ws.prepare(r)
+        ws=web.WebSocketResponse(protocols=['soarm_station'],max_msg_size=262144,heartbeat=10,receive_timeout=2);await ws.prepare(r)
         arm='';h=None;feedback={};principal=uuid.uuid4().hex
         try:
             b=await ws.receive_json(timeout=5);arm=b['arm_id']

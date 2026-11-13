@@ -1,5 +1,5 @@
-from soarm_interfaces.action import ExecuteOperation
-from soarm_interfaces.msg import OperationInput,DirectJointStep
+from soarm_station_interfaces.action import ExecuteOperation
+from soarm_station_interfaces.msg import OperationInput,DirectJointStep
 from .common import duration_s
 def direct_body(m):
     if len(m.joint_names)!=len(m.positions_rad):raise ValueError('Joint array length mismatch')
@@ -20,7 +20,7 @@ def request_from_goal(g):
     selected={'MODEL':'model_steps','DIRECT':'direct_steps','TRAJECTORY':'joint_trajectory'}[k]
     if mode=='STREAM':
         if s.model_steps or s.direct_steps or s.cartesian_steps or s.joint_trajectory.points:raise ValueError('STREAM contains inline payload')
-        if g.input.stream_topic!='/soarm/lerobot/command_stream':raise ValueError('Unknown stream topic')
+        if g.input.stream_topic!='/soarm_station/lerobot/command_stream':raise ValueError('Unknown stream topic')
     elif mode=='INLINE':
         if g.input.stream_topic:raise ValueError('INLINE has stream topic')
         if k!='MODEL' and s.model_steps or k!='DIRECT' and s.direct_steps:raise ValueError('Incompatible inline payload')
@@ -77,7 +77,7 @@ def goal_from_dict(d,principal):
     g.operation.requested_constraints.max_operation_duration_ms=0 if duration is None else int(duration*1000)
     g.input.mode=d['mode'];g.input.producer_role='R06'
     kind={'DIRECT':'DIRECT_JOINT_TARGET','TRAJECTORY':'JOINT_TRAJECTORY','MODEL':'MODEL_TASK'}[d['operation_type']]
-    if d['mode']=='STREAM':g.input.stream_topic='/soarm/lerobot/command_stream';g.input.stream_payload_kind=kind
+    if d['mode']=='STREAM':g.input.stream_topic='/soarm_station/lerobot/command_stream';g.input.stream_payload_kind=kind
     else:
         g.input.inline_sequence.payload_kind=kind
         if d['operation_type']=='DIRECT':
@@ -87,7 +87,7 @@ def goal_from_dict(d,principal):
                 m.gripper_target.unit='percent';m.gripper_target.value=float(p.get('gripper',50))
                 m.duration_ms=int((p['time_s']-previous)*1000);previous=p['time_s'];g.input.inline_sequence.direct_steps.append(m)
         elif d['operation_type']=='MODEL':
-            from soarm_interfaces.msg import ModelTaskStep
+            from soarm_station_interfaces.msg import ModelTaskStep
             steps=d.get('model_steps') or [{'instruction':d.get('instruction',''),'duration_s':duration}]
             g.input.inline_sequence.model_steps=[ModelTaskStep(instruction=step.get('instruction',''),max_duration_ms=0 if step.get('duration_s') is None else int(step['duration_s']*1000)) for step in steps]
         else:

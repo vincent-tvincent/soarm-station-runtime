@@ -7,9 +7,9 @@ import urllib.request
 from uuid import uuid4
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState
-from soarm_interfaces.msg import TelemetrySample,UploadStatus,Event,OperationStatus
-from soarm_interfaces.srv import QueryHistory,RecordEvent
-from soarm.journal import Journal
+from soarm_station_interfaces.msg import TelemetrySample,UploadStatus,Event,OperationStatus
+from soarm_station_interfaces.srv import QueryHistory,RecordEvent
+from soarm_station.journal import Journal
 from .common import BaseNode,STATE,SENSOR,run,stamp_ns,topic
 
 def to_msg(s):
@@ -27,16 +27,16 @@ class TelemetryNode(BaseNode):
         self.run_id=self.journal.meta('monitoring_run_id') or uuid4().hex;self.journal.set_meta('monitoring_run_id',self.run_id)
         self.boot=uuid4().hex;self.period_ns=int(self.config.get('monitoring',{}).get('period_s',1)*1e9)
         self.next_ns=self.journal.meta('next_ns',time.time_ns());self.journal.set_meta('start_ns',self.journal.meta('start_ns',self.next_ns))
-        self.pub=self.create_publisher(TelemetrySample,'/soarm/telemetry/sample',STATE)
-        self.upload_pub=self.create_publisher(UploadStatus,'/soarm/telemetry/upload_status',STATE)
-        self.event_pub=self.create_publisher(Event,'/soarm/events',STATE)
+        self.pub=self.create_publisher(TelemetrySample,'/soarm_station/telemetry/sample',STATE)
+        self.upload_pub=self.create_publisher(UploadStatus,'/soarm_station/telemetry/upload_status',STATE)
+        self.event_pub=self.create_publisher(Event,'/soarm_station/events',STATE)
         for a in self.config['arms']:
             self.create_subscription(JointState,topic(a['id'],'joint_states'),lambda m,n=a['id']:self.cache.__setitem__(n,(m,time.monotonic())),SENSOR)
             self.create_subscription(OperationStatus,topic(a['id'],'lerobot/status'),lambda m,n=a['id']:self.states.__setitem__(n,m),STATE)
         from diagnostic_msgs.msg import DiagnosticArray
-        self.create_subscription(DiagnosticArray,'/soarm/health',self.on_health,STATE)
-        self.create_service(RecordEvent,'/soarm/telemetry/record_event',self.record_event)
-        self.create_service(QueryHistory,'/soarm/telemetry/query_history',self.history)
+        self.create_subscription(DiagnosticArray,'/soarm_station/health',self.on_health,STATE)
+        self.create_service(RecordEvent,'/soarm_station/telemetry/record_event',self.record_event)
+        self.create_service(QueryHistory,'/soarm_station/telemetry/query_history',self.history)
         self.create_timer(.1,self.sample);self.create_timer(1.,self.publish_upload)
         self.uploader=threading.Thread(target=self.upload,daemon=True);self.uploader.start()
     def on_health(self,m):
@@ -73,7 +73,7 @@ class TelemetryNode(BaseNode):
         except Exception as exc:response.reason=str(exc)[:512]
         return response
     def history(self,request,response):
-        from soarm_interfaces.msg import HistoryRecord
+        from soarm_station_interfaces.msg import HistoryRecord
         start=request.start_time.sec*10**9+request.start_time.nanosec
         end=request.end_time.sec*10**9+request.end_time.nanosec or 9223372036854775807
         rows,truncated=self.journal.history(request.arm_id,request.after_sequence,request.page_size or 100,start,end)
@@ -91,7 +91,7 @@ class TelemetryNode(BaseNode):
             pending=self.journal.pending()
             if not pending:continue
             try:
-                token=os.environ[c.get('token_env','SOARM_COLLECTOR_TOKEN')]
+                token=os.environ[c.get('token_env','SOARM_STATION_COLLECTOR_TOKEN')]
                 request=urllib.request.Request(url.rstrip('/')+'/v1/samples',data=json.dumps({'samples':pending}).encode(),
                     headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
                 with urllib.request.urlopen(request,timeout=3,context=context) as r:acks=json.load(r)['committed']

@@ -5,7 +5,7 @@ from pathlib import Path
 from aiohttp import ClientSession
 async def main(a):
     context=ssl.create_default_context(cafile=a.ca)
-    token=os.environ['SOARM_TOKEN'];principal='integration-'+uuid.uuid4().hex
+    token=os.environ['SOARM_STATION_TOKEN'];principal='integration-'+uuid.uuid4().hex
     async with ClientSession(headers={'Authorization':'Bearer '+token}) as session:
         async def request(path,body=None):
             async with session.request('POST' if body is not None else 'GET',a.url+path,json=body,ssl=context) as r:
@@ -16,6 +16,13 @@ async def main(a):
         # Test configuration explicitly selects the mock-only IDs; this script is never a real-arm exercise.
         assert state['device_id']=='linux-workstation', 'This integration test is only for the mock profile'
         assert set(state['arms'])=={'arm1','arm2'}
+        # Exercise the browser's token subprotocol without an Authorization header.
+        async with ClientSession() as browser:
+            async with browser.ws_connect(a.url+'/ws/camera/forward',ssl=context,protocols=['soarm_station',token]) as camera:
+                frame=await camera.receive(timeout=5)
+                assert frame.type.value==2 and frame.data[:2]==b'\xff\xd8'
+            async with browser.ws_connect(a.url+'/ws/control',ssl=context,protocols=['soarm_station',token]) as control:
+                assert control.protocol=='soarm_station'
         arm='arm1';s=state['arms'][arm]
         assert not s['permission']
         async with session.get(a.url+'/api/cameras/forward.jpg',ssl=context) as r:assert r.status==200 and (await r.read())[:2]==b'\xff\xd8'
@@ -66,7 +73,7 @@ async def main(a):
         def percentile(p):return values[min(len(values)-1,int((len(values)-1)*p))] if values else None
         report={'mock_arms':2,'mock_cameras':3,'sent_commands':sequence,'acknowledgements_observed':len(accepted),
             'ack_ms':{'p50':percentile(.5),'p95':percentile(.95),'p99':percentile(.99),'max':max(values) if values else None},
-            'state_frames':received_states,'disconnect_latched_hold':True,'independent_arm_unchanged':True,
+            'state_frames':received_states,'browser_subprotocol':'soarm_station','disconnect_latched_hold':True,'independent_arm_unchanged':True,
             'inline_completed':True,'anonymous_rejected':True,'durable_history_records':len(h['records']),
             'note':'ACK feedback is decimated; observed ACK count is not a packet loss metric. Timing uses one client clock.'}
         assert len(accepted)>5,report

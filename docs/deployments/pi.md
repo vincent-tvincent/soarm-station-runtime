@@ -14,7 +14,7 @@ This document describes one installation. Its private profiles and credentials a
 | ROS/native environments | Python 3.14 ROS Lyrical / Python 3.12 LeRobot 0.7.0 |
 | Writable profile | `local/pi-writable.yaml` |
 | Read-only fallback | `local/pi.yaml` |
-| Service | User unit `soarm.service`; enabled, with user lingering configured. |
+| Service | User unit `soarm-station.service`; enabled, with user lingering configured. |
 
 Private operator credentials, HTTPS keys, DDS credentials and calibration stay under ignored local paths. The certificate is `local/tls/cert.pem`; operator/collector tokens are in `local/secrets.env`.
 
@@ -24,18 +24,18 @@ After connecting to the host, enter Bash and run:
 
 ```bash
 cd /home/pipi/so-101/ros_system
-systemctl --user stop soarm.service
+systemctl --user stop soarm-station.service
 source /opt/ros/lyrical/setup.bash
 source ros2_ws/install/setup.bash
-ros2 launch soarm_system system.launch.py \
+ros2 launch soarm_station_system system.launch.py \
   config:="$PWD/local/pi-writable.yaml" log_level:=debug respawn:=false
 ```
 
 Press Ctrl-C and wait for shutdown before returning to the service:
 
 ```bash
-systemctl --user start soarm.service
-systemctl --user status soarm.service
+systemctl --user start soarm-station.service
+systemctl --user status soarm-station.service
 ```
 
 ## Validation snapshot

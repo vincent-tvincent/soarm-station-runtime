@@ -9,36 +9,36 @@ from rclpy.action import ActionServer,GoalResponse,CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import JointState,Image,CompressedImage,CameraInfo
 from diagnostic_msgs.msg import DiagnosticArray,DiagnosticStatus,KeyValue
-from soarm_interfaces.msg import OperationStatus,OperationInput
-from soarm_interfaces.action import ExecuteOperation
-from soarm_interfaces.srv import SetControlPermission,Hold
-from soarm.ipc import Client
+from soarm_station_interfaces.msg import OperationStatus,OperationInput
+from soarm_station_interfaces.action import ExecuteOperation
+from soarm_station_interfaces.srv import SetControlPermission,Hold
+from soarm_station.ipc import Client
 from .common import BaseNode,STATE,SENSOR,run,stamp_ns,topic
 from .conversion import request_from_goal,frame_to_dict
 
 class RuntimeNode(BaseNode):
     def __init__(self):
         super().__init__('lerobot_node');c=self.config;self.stop=threading.Event();self.snapshot={};self.seq={};self.camera_seq={};self.rejected={}
-        self.root=Path(os.environ['SOARM_ROOT']);runtime_python=os.environ.get('SOARM_RUNTIME_PYTHON',str(self.root/'.runtime-venv/bin/python'))
-        self.process=subprocess.Popen([runtime_python,'-m','soarm.worker','--config',c['_path']],env={**os.environ,'PYTHONPATH':str(self.root/'python'),'SOARM_PARENT_PID':str(os.getpid())})
+        self.root=Path(os.environ['SOARM_STATION_ROOT']);runtime_python=os.environ.get('SOARM_STATION_RUNTIME_PYTHON',str(self.root/'.runtime-venv/bin/python'))
+        self.process=subprocess.Popen([runtime_python,'-m','soarm_station.worker','--config',c['_path']],env={**os.environ,'PYTHONPATH':str(self.root/'python'),'SOARM_STATION_PARENT_PID':str(os.getpid())})
         self.client=Client(c['socket']);self.control_client=Client(c['socket'])
         self.joints={};self.status={};self.camera_pubs={}
-        self.health=self.create_publisher(DiagnosticArray,'/soarm/health',STATE)
+        self.health=self.create_publisher(DiagnosticArray,'/soarm_station/health',STATE)
         self.inference={}
         for a in c['arms']:
             n=a['id'];self.joints[n]=self.create_publisher(JointState,topic(n,'joint_states'),SENSOR)
             self.status[n]=self.create_publisher(OperationStatus,topic(n,'lerobot/status'),STATE)
             self.inference[n]=self.create_publisher(DiagnosticArray,topic(n,'lerobot/inference_status'),STATE)
         for camera in c['cameras']:
-            prefix='/soarm/camera/'+camera['id']
+            prefix='/soarm_station/camera/'+camera['id']
             self.camera_pubs[camera['id']]=(self.create_publisher(CompressedImage,prefix+'/image_raw/compressed',SENSOR),
                 self.create_publisher(CameraInfo,prefix+'/camera_info',STATE),
                 self.create_publisher(Image,prefix+'/image_raw',SENSOR))
         group=ReentrantCallbackGroup()
-        self.create_service(SetControlPermission,'/soarm/lerobot/set_permission',self.permission,callback_group=group)
-        self.create_service(Hold,'/soarm/lerobot/hold',self.hold,callback_group=group)
-        self.create_subscription(OperationInput,'/soarm/lerobot/command_stream',self.input,SENSOR,callback_group=group)
-        self.action=ActionServer(self,ExecuteOperation,'/soarm/lerobot/operate',execute_callback=self.execute,
+        self.create_service(SetControlPermission,'/soarm_station/lerobot/set_permission',self.permission,callback_group=group)
+        self.create_service(Hold,'/soarm_station/lerobot/hold',self.hold,callback_group=group)
+        self.create_subscription(OperationInput,'/soarm_station/lerobot/command_stream',self.input,SENSOR,callback_group=group)
+        self.action=ActionServer(self,ExecuteOperation,'/soarm_station/lerobot/operate',execute_callback=self.execute,
             goal_callback=self.goal,cancel_callback=lambda _:CancelResponse.ACCEPT,callback_group=group)
         self.poller=threading.Thread(target=self.poll,daemon=True);self.poller.start()
         self.create_timer(1/c['control_hz'],self.publish_joints);self.create_timer(.02,self.publish_cameras);self.create_timer(.1,self.publish_status)

@@ -14,18 +14,18 @@ The runtime's `.venv` uses distribution Python for ROS. `.runtime-venv` contains
 
 | Interface | Purpose |
 | --- | --- |
-| `/soarm/arms/ID/joint_states` | Measured joint positions, with canonical resource-local joint names. |
-| `/soarm/arms/ID/lerobot/status` | Permission, operation, feedback validity/rate and measured torque state. |
-| `/soarm/arms/ID/lerobot/inference_status` | Policy state and reason. |
-| `/soarm/camera/ID/image_raw` | Raw camera frames, decoded when subscribed. |
-| `/soarm/camera/ID/image_raw/compressed` | Shared JPEG frames. |
-| `/soarm/camera/ID/camera_info` | Camera model; `K[0] = 0` means uncalibrated. |
-| `/soarm/health`, `/soarm/diagnostics` | Typed motor health and standard diagnostics. |
-| `/soarm/lerobot/operate` | `ExecuteOperation` action. |
-| `/soarm/lerobot/set_permission` | Explicit arm control-permission service. |
-| `/soarm/lerobot/hold` | Explicit arm hold service. |
+| `/soarm_station/arms/ID/joint_states` | Measured joint positions, with canonical resource-local joint names. |
+| `/soarm_station/arms/ID/lerobot/status` | Permission, operation, feedback validity/rate and measured torque state. |
+| `/soarm_station/arms/ID/lerobot/inference_status` | Policy state and reason. |
+| `/soarm_station/camera/ID/image_raw` | Raw camera frames, decoded when subscribed. |
+| `/soarm_station/camera/ID/image_raw/compressed` | Shared JPEG frames. |
+| `/soarm_station/camera/ID/camera_info` | Camera model; `K[0] = 0` means uncalibrated. |
+| `/soarm_station/health`, `/soarm_station/diagnostics` | Typed motor health and standard diagnostics. |
+| `/soarm_station/lerobot/operate` | `ExecuteOperation` action. |
+| `/soarm_station/lerobot/set_permission` | Explicit arm control-permission service. |
+| `/soarm_station/lerobot/hold` | Explicit arm hold service. |
 
-Custom IDL lives in `ros2_ws/src/soarm_interfaces`. TF link names use `ID/` prefixes. Configure measured fixed transforms; camera extrinsics are not inferred. Physical telemetry preserves units and does not claim calibrated joint effort.
+Custom IDL lives in `ros2_ws/src/soarm_station_interfaces`. TF link names use `ID/` prefixes. Configure measured fixed transforms; camera extrinsics are not inferred. Physical telemetry preserves units and does not claim calibrated joint effort.
 
 ## Operations and permission
 
@@ -75,10 +75,10 @@ Authenticated routes include:
 | GET | `/api/operations/REQUEST_ID` |
 | WSS | `/ws/control`, `/ws/camera/ID` |
 
-HTTP clients use bearer headers. Browser sockets use the `soarm` subprotocol and token, never query-string credentials. The native operator CLI can sample a local LeRobot leader:
+HTTP clients use bearer headers. Browser sockets use the `soarm_station` subprotocol and token, never query-string credentials. The native operator CLI can sample a local LeRobot leader:
 
 ```bash
-python -m soarm.operator --url https://robot.example.net:8443 --ca robot-cert.pem \
+python -m soarm_station.operator --url https://robot.example.net:8443 --ca robot-cert.pem \
   --arm arm1 --leader local/leader.yaml --hz 100
 ```
 
@@ -100,4 +100,4 @@ Deploy `scripts/run-collector` on a collector host and configure `collector.url`
 
 `recording.enabled` starts optional MCAP evidence recording. The allowlist includes measured state, images/CameraInfo, TF and events, excluding commands/action internals. ROS bags are separate from LeRobot training datasets. Replay uses an isolated graph without physical devices.
 
-`soarm-release keygen/sign/verify` provides Ed25519 archive manifests and rejects altered signatures/digests. Keep signing keys under ignored `local/` and verify an archive before deployment. DDS uses host-local CA credentials on domain 71. Launched processes use `TZ=UTC` for the tested Fast DDS policy-date behavior; the host timezone is unchanged.
+`soarm-station-release keygen/sign/verify` provides Ed25519 archive manifests and rejects altered signatures/digests. Keep signing keys under ignored `local/` and verify an archive before deployment. DDS uses host-local CA credentials on domain 71. Launched processes use `TZ=UTC` for the tested Fast DDS policy-date behavior; the host timezone is unchanged.

@@ -1,6 +1,6 @@
 import json
 import pytest
-from soarm.hardware import ReadOnlySO101
+from soarm_station.hardware import ReadOnlySO101
 def test_allowlist_and_no_motion():
  a=ReadOnlySO101({})
  with pytest.raises(ValueError):a._read(1,42,2)

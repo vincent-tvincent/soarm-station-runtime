@@ -148,7 +148,7 @@ class LocalPolicy(NativePolicy):
         pre,post=make_pre_post_processors(cfg,pretrained_path=checkpoint,
             preprocessor_overrides={'device_processor':{'device':cfg.device}})
         self.engine=SyncInferenceEngine(self.policy,pre,post,{},[f['name'] for f in profile['action_features']],
-            task='',device=cfg.device,robot_type=profile.get('robot_type','soarm_multi'))
+            task='',device=cfg.device,robot_type=profile.get('robot_type','soarm_station_multi'))
         self.engine.reset();self.engine.start()
     def _observe(self,obs,capture_time):
         # Cached native actions retain their original chunk's acquisition time.

@@ -7,8 +7,8 @@ try:
 except ImportError:
     torch=None
 pytestmark=pytest.mark.skipif(torch is None,reason='Run native model tests with the pinned Python3.12 environment')
-from soarm.policy import NativePolicy,LocalPolicy,RemotePolicy,ModelOutcome
-from soarm.model_runtime import ModelSupervisor
+from soarm_station.policy import NativePolicy,LocalPolicy,RemotePolicy,ModelOutcome
+from soarm_station.model_runtime import ModelSupervisor
 
 class Engine:
     def __init__(self,events):

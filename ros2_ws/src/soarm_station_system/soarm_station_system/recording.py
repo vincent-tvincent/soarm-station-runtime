@@ -11,10 +11,10 @@ class Recorder(BaseNode):
         path.mkdir(parents=True,exist_ok=True)
         from datetime import datetime,timezone
         output=path/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        topics=['/tf','/tf_static','/soarm/events','/soarm/workflow/status','/soarm/workflow/decision']
+        topics=['/tf','/tf_static','/soarm_station/events','/soarm_station/workflow/status','/soarm_station/workflow/decision']
         for a in c['arms']:topics.extend([topic(a['id'],'joint_states'),topic(a['id'],'lerobot/status')])
         for camera in c['cameras']:
-            topics.extend(['/soarm/camera/'+camera['id']+'/image_raw/compressed','/soarm/camera/'+camera['id']+'/camera_info'])
+            topics.extend(['/soarm_station/camera/'+camera['id']+'/image_raw/compressed','/soarm_station/camera/'+camera['id']+'/camera_info'])
         manifest={'schema_version':1,'config_revision':c['_revision'],'topics':topics,'device_id':c['device_id'],
                   'models':[{k:a.get(k) for k in ('id','base_frame','urdf','tcp_frame')} for a in c['arms']],
                   'camera_calibration':[{k:v for k,v in x.items() if k!='device'} for x in c['cameras']]}

@@ -7,8 +7,8 @@ import statistics
 import time
 from pathlib import Path
 
-from soarm.config import load
-from soarm.hardware import DeviceLock, LeRobotArm
+from soarm_station.config import load
+from soarm_station.hardware import DeviceLock, LeRobotArm
 
 p = argparse.ArgumentParser()
 p.add_argument('--config', required=True)

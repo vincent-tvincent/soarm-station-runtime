@@ -42,5 +42,5 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--database',required=True);p.add_argument('--cert',required=True);p.add_argument('--key',required=True)
     p.add_argument('--host',default='0.0.0.0');p.add_argument('--port',type=int,default=9443);a=p.parse_args()
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(a.cert,a.key)
-    web.run_app(create_app(a.database,os.environ['SOARM_COLLECTOR_TOKEN']),host=a.host,port=a.port,ssl_context=context,print=None)
+    web.run_app(create_app(a.database,os.environ['SOARM_STATION_COLLECTOR_TOKEN']),host=a.host,port=a.port,ssl_context=context,print=None)
 if __name__=='__main__':main()

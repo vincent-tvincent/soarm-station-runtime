@@ -2,8 +2,8 @@ import copy
 import time
 from pathlib import Path
 import pytest
-from soarm.config import load
-from soarm.control import ArmController
+from soarm_station.config import load
+from soarm_station.control import ArmController
 
 ROOT=Path(__file__).resolve().parents[1]
 class Clock:
@@ -13,7 +13,7 @@ class Clock:
 
 @pytest.fixture
 def setup(monkeypatch):
-    clock=Clock();monkeypatch.setattr('soarm.control.now',clock)
+    clock=Clock();monkeypatch.setattr('soarm_station.control.now',clock)
     config=load(ROOT/'config/mock.yaml');arm=ArmController(config['arms'][0],config,'boot',{})
     arm.q={j['name']:0. for j in arm.config['joints']};arm.backend.q=dict(arm.q);arm.gripper=50.;arm.sample_time=clock()
     return arm,clock
@@ -182,8 +182,8 @@ def test_body_trajectory_preserves_grasp_reference_without_requiring_grip_positi
     assert arm.op is None and arm.permission
 
 def configured_model(setup):
-    from soarm.model_runtime import ModelSupervisor
-    from soarm.policy import FixturePolicy
+    from soarm_station.model_runtime import ModelSupervisor
+    from soarm_station.policy import FixturePolicy
     import hashlib,json
     arm,clock=setup
     profile={'backend':'fixture','arm_id':arm.id,'language_conditioned':False,'action_fps':20,'timeout_s':.01}
@@ -210,8 +210,8 @@ def test_current_native_job_failure_still_revokes(setup):
     s.tick(clock());assert not arm.permission and arm.op is None and arm.model_state=='FAULT'
 
 def test_failed_remote_session_recreated_only_for_a_fresh_authorized_operation(setup,monkeypatch):
-    from soarm.policy import FixturePolicy
-    import soarm.model_runtime as module
+    from soarm_station.policy import FixturePolicy
+    import soarm_station.model_runtime as module
     arm,clock,s=configured_model(setup);profile=arm.system['profiles']['fixture'];closed=[];loaded=[]
     class FailedRemote(FixturePolicy):
         terminally_failed=True
@@ -242,8 +242,8 @@ def test_stale_profile_load_is_cleaned_instead_of_adopted(setup):
     assert closed==[True] and s.session is not stale and arm.permission
 
 def test_remote_failure_while_idle_can_rebind_on_first_fresh_operation(setup,monkeypatch):
-    from soarm.policy import FixturePolicy
-    import soarm.model_runtime as module
+    from soarm_station.policy import FixturePolicy
+    import soarm_station.model_runtime as module
     arm,clock,s=configured_model(setup);profile=arm.system['profiles']['fixture'];closed=[]
     class FailedRemote(FixturePolicy):
         terminally_failed=True

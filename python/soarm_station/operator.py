@@ -11,7 +11,7 @@ from aiohttp import ClientSession
 
 async def run(args):
     context=ssl.create_default_context(cafile=args.ca)
-    headers={'Authorization':'Bearer '+os.environ['SOARM_TOKEN']}
+    headers={'Authorization':'Bearer '+os.environ['SOARM_STATION_TOKEN']}
     principal=uuid.uuid4().hex;grant=None;sequence=0;leader=None
     if args.leader:
         import draccus,yaml

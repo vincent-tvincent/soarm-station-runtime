@@ -1,9 +1,9 @@
 import math
 import threading
-from soarm.hardware import LeRobotArm
-from soarm.config import load
-from soarm.control import ArmController
-from soarm.worker import Runtime
+from soarm_station.hardware import LeRobotArm
+from soarm_station.config import load
+from soarm_station.control import ArmController
+from soarm_station.worker import Runtime
 from pathlib import Path
 import pytest
 
@@ -77,7 +77,7 @@ def test_reconnect_has_no_goals_and_requires_new_session(tmp_path):
 
 def test_command_advances_while_measured_plant_lags_then_respects_lead_cap():
     root=Path(__file__).resolve().parents[1];c=load(root/'config/mock.yaml');a=ArmController(c['arms'][0],c,'boot',{})
-    from soarm.control import now
+    from soarm_station.control import now
     a.q={j['name']:0. for j in a.config['joints']};a.gripper=50.;a.sample_time=now()
     a.set_permission(True,'operator',a.session)
     grant=a.begin({'principal':'operator','runtime_boot_id':'boot','controller_session':a.session,'operation_type':'DIRECT','mode':'STREAM'})
@@ -98,7 +98,7 @@ def test_completed_path_preserves_final_servo_goal():
 
 def test_joint_specific_completion_tolerance():
     root=Path(__file__).resolve().parents[1];c=load(root/'config/mock.yaml');a=ArmController(c['arms'][0],c,'boot',{})
-    from soarm.control import now
+    from soarm_station.control import now
     a.q={j['name']:0. for j in a.config['joints']};a.gripper=50.;a.sample_time=now()
     next(j for j in a.config['joints'] if j['name']=='elbow_flex')['goal_tolerance_rad']=.07
     a.set_permission(True,'operator',a.session)

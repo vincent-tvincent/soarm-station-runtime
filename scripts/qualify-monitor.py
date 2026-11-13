@@ -2,8 +2,8 @@
 """Read only IPC snapshots; no controls or hardware opens."""
 import argparse,json,time,statistics
 from pathlib import Path
-from soarm.config import load
-from soarm.ipc import Client
+from soarm_station.config import load
+from soarm_station.ipc import Client
 p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--seconds',type=float,default=20);p.add_argument('--output',required=True);a=p.parse_args()
 c=load(a.config);client=Client(c['socket']);initial=client.call('snapshot');seen={};gaps={};start=time.monotonic()
 while time.monotonic()-start<a.seconds:

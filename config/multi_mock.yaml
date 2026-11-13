@@ -1,9 +1,9 @@
 schema_version: 1
 device_id: linux-workstation
 control_hz: 100
-socket: /tmp/soarm-multi/runtime.sock
-frame_dir: /tmp/soarm-multi/frames
-lock_dir: /tmp/soarm-device-locks
+socket: /tmp/soarm-station-multi/runtime.sock
+frame_dir: /tmp/soarm-station-multi/frames
+lock_dir: /tmp/soarm-station-device-locks
 database: ../local/multi.sqlite3
 arms:
 - id: arm1
@@ -82,12 +82,12 @@ profiles: {}
 web:
   host: 0.0.0.0
   port: 8443
-  token_env: SOARM_TOKEN
+  token_env: SOARM_STATION_TOKEN
   cert: ../local/tls/cert.pem
   key: ../local/tls/key.pem
 collector:
   url: ''
-  token_env: SOARM_COLLECTOR_TOKEN
+  token_env: SOARM_STATION_COLLECTOR_TOKEN
   ca: ''
 monitoring:
   period_s: 1

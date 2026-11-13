@@ -13,8 +13,8 @@ import uuid
 from pathlib import Path
 
 from aiohttp import ClientSession
-from soarm.config import load
-from soarm.ipc import Client
+from soarm_station.config import load
+from soarm_station.ipc import Client
 
 
 class Sampler:
@@ -39,7 +39,7 @@ async def exercise(args):
     c=load(args.config);config=next(a for a in c['arms'] if a['id']==args.arm)
     if config['backend']!='so101' or config.get('read_only'):raise ValueError('An explicit writable SO101 profile is required')
     tls=ssl.create_default_context(cafile=str(Path(c['_path']).parent/c['web']['cert']))
-    token=os.environ[c['web'].get('token_env','SOARM_TOKEN')]
+    token=os.environ[c['web'].get('token_env','SOARM_STATION_TOKEN')]
     principal='physical-check-'+uuid.uuid4().hex
     report={'arm_id':args.arm,'kind':'controlled_native_runtime_motion','phases':[],'passed':False}
     sampler=Sampler(c,args.arm);sampler.thread.start()
