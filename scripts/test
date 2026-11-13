@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+set +u
+source /opt/ros/${ROS_DISTRO:-lyrical}/setup.bash
+if [[ -f ros2_ws/install/setup.bash ]]; then source ros2_ws/install/setup.bash; fi
+set -u
 export PYTHONPATH="$PWD/python${PYTHONPATH:+:$PYTHONPATH}"
 .venv/bin/python -m pytest -q tests

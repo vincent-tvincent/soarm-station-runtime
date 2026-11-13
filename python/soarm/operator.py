@@ -29,8 +29,8 @@ async def run(args):
             if not permission['accepted']:raise RuntimeError(permission['reason'])
         try:
             async with session.ws_connect(args.url+'/ws/control',ssl=context,max_msg_size=262144) as ws:
-                await ws.send_json({**body,'runtime_boot_id':state['runtime_boot_id'],'operation_type':'DIRECT','mode':'STREAM','duration_s':120})
-                deadline=time.monotonic()+args.seconds
+                await ws.send_json({**body,'runtime_boot_id':state['runtime_boot_id'],'operation_type':'DIRECT','mode':'STREAM','duration_s':args.seconds})
+                deadline=None if args.seconds is None else time.monotonic()+args.seconds
                 async def receive():
                     nonlocal grant
                     async for m in ws:
@@ -40,7 +40,8 @@ async def run(args):
                             elif d['type']=='error':raise RuntimeError(d['reason'])
                 receiver=asyncio.create_task(receive())
                 try:
-                    while time.monotonic()<deadline:
+                    while deadline is None or time.monotonic()<deadline:
+                        if receiver.done():await receiver;break
                         start=time.monotonic()
                         if grant:
                             # Never read a cached pose file and rewrap it in a fresh grant.
@@ -67,7 +68,7 @@ async def run(args):
             if leader:leader.disconnect()
 def main():
     p=argparse.ArgumentParser();p.add_argument('--url',required=True);p.add_argument('--ca',required=True);p.add_argument('--arm',required=True)
-    p.add_argument('--leader');p.add_argument('--hold-measured',action='store_true');p.add_argument('--hz',type=float,default=100);p.add_argument('--seconds',type=float,default=30)
+    p.add_argument('--leader');p.add_argument('--hold-measured',action='store_true');p.add_argument('--hz',type=float,default=100);p.add_argument('--seconds',type=float,default=None,help='Optional explicit session limit; default runs until stopped')
     a=p.parse_args()
     if not 50<=a.hz<=120:p.error('Remote input rate must be 50..120 Hz')
     asyncio.run(run(a))

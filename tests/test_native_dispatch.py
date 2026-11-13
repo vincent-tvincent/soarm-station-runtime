@@ -108,4 +108,4 @@ def test_joint_specific_completion_tolerance():
     a.op['start']=now()-.2;a._tick(now(),.01)
     assert a.op is not None # The final goal itself must be fully dispatched first.
     for _ in range(4):a._tick(now(),.01)
-    assert a.op is None and a.error=='PATH_COMPLETE'
+    assert a.op is None and a.phase=='IDLE' and a.permission

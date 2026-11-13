@@ -64,7 +64,7 @@ class RuntimeNode(BaseNode):
             m.gripper_percent=s['gripper'];m.fault=s['error'][:512];self.status[n].publish(m)
             d=DiagnosticStatus();d.name=n;d.hardware_id=n;d.message=s['error'] or s['phase'];d.level=DiagnosticStatus.OK if m.feedback_valid else DiagnosticStatus.ERROR
             d.values=[KeyValue(key=k,value=str(v)) for k,v in {**s['health'],'input_rejected':self.rejected.get(n,0)}.items()];health.status.append(d)
-            self.inference[n].publish(DiagnosticArray(header=health.header,status=[DiagnosticStatus(name=n+'/policy',message=s['operation_type'])]))
+            self.inference[n].publish(DiagnosticArray(header=health.header,status=[DiagnosticStatus(name=n+'/policy',message=s.get('model_state',s['operation_type']),values=[KeyValue(key='reason',value=s.get('model_reason',''))])]))
         self.health.publish(health)
     def publish_cameras(self):
         for c in self.config['cameras']:

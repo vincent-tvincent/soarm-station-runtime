@@ -2,6 +2,8 @@
 import hashlib
 import json
 import math
+import threading
+from dataclasses import dataclass
 import time
 from pathlib import Path
 
@@ -41,59 +43,178 @@ def observations(profile,q,g,cameras):
         c=cameras[name];data=Path(c['path']).read_bytes();image=cv2.imdecode(np.frombuffer(data,dtype=np.uint8),cv2.IMREAD_COLOR)
         obs[feature]=cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
     return obs
-class LocalPolicy:
+
+@dataclass(frozen=True)
+class ModelOutcome:
+    state: str
+    target: dict | None = None
+    interval_s: float = 0.
+    source_time: float = 0.
+    max_age_s: float = 5.
+    execution_generation: int = 0
+    session: object = None
+    reason: str = ''
+    hold_token: object = None
+
+class NativeHoldRequested(Exception):pass
+
+class NativePolicy:
+    control_polls=False
+    """The native engine owns queue eligibility; the arm owner acknowledges holds."""
+    def _initialize(self,profile):
+        from lerobot.utils.action_interpolator import ActionInterpolator
+        self.profile=profile;self.interval=1./profile['action_fps']
+        self.max_age=profile.get('action_source_max_age_s',5.)
+        self.interpolator=ActionInterpolator(multiplier=1)
+        self.commit_interpolator=ActionInterpolator(multiplier=1)
+        self.intent_token=None;self.reset_count=0;self.hold_ack=None;self.chunk_capture=None
+    @property
+    def terminally_failed(self):
+        stopped=getattr(self.engine,'_stop_event',None)
+        return self.engine.failed or (stopped is not None and stopped.is_set())
+    @property
+    def execution_generation(self):
+        runtime=getattr(self.engine,'runtime',None)
+        return runtime.generation if runtime is not None else self.reset_count
+    def _hold_token(self):
+        hold=getattr(self.engine,'_hold',None)
+        return (self.reset_count,self.execution_generation,getattr(hold,'started_at',0.),getattr(hold,'reason',None))
+    def gate(self,outcome=None):
+        if self.engine.failed:return ModelOutcome('FAULT',session=self,reason='Native inference session faulted')
+        if not self.engine.dispatch_allowed():
+            if self.engine.failed:return ModelOutcome('FAULT',session=self,reason='Native action/source deadline expired')
+            token=self._hold_token()
+            return ModelOutcome('WAIT' if token==self.hold_ack else 'HOLD',session=self,
+                reason=getattr(getattr(self.engine,'_hold',None),'reason',None) or 'Native startup/refill wait',hold_token=token)
+        if outcome is not None:
+            if outcome.execution_generation!=self.execution_generation:return ModelOutcome('WAIT',session=self,reason='Native execution generation replaced')
+            if time.monotonic()-outcome.source_time>outcome.max_age_s:
+                return ModelOutcome('FAULT',session=self,reason='Policy action source observation expired')
+        self.hold_ack=None
+        return ModelOutcome('ACTION',session=self)
+    def _request_hold(self):raise NativeHoldRequested()
+    def acknowledge_hold(self,token):
+        self.engine.acknowledge_hold();self.hold_ack=token
+    def reset_task(self,instruction,token):
+        # Called on the bounded native worker, never on the motor thread.
+        if token!=self.intent_token:
+            if self.intent_token is not None:
+                self.engine.pause();self.engine.reset();self.interpolator.reset()
+            if self.engine.task!=instruction:self.engine.set_task(instruction)
+            self.engine.resume()
+            self.intent_token=token;self.reset_count+=1;self.hold_ack=None;self.chunk_capture=None
+    def pause(self):self.engine.pause()
+    def commit(self,outcome,send,hold):
+        from lerobot.inference.dispatch import commit_action
+        state=self.gate(outcome)
+        if state.state!='ACTION':return False,state
+        held=[]
+        def native_hold():
+            token=self._hold_token();hold();self.hold_ack=token;held.append(token)
+        sent=commit_action(self.engine,self.commit_interpolator,send,hold=native_hold)
+        if sent:return True,ModelOutcome('ACTION',session=self)
+        return False,ModelOutcome('FAULT' if self.engine.failed else 'HOLD',session=self,
+            reason='Native dispatch denied',hold_token=held[-1] if held else self._hold_token())
+    def poll(self,obs,capture_time):
+        from lerobot.inference.dispatch import next_interpolated_action
+        self._observe(obs,capture_time)
+        try:action=next_interpolated_action(self.engine,self.interpolator,self._frame(obs),hold=self._request_hold)
+        except NativeHoldRequested:
+            state=self.gate()
+            return ModelOutcome('WAIT',session=self,reason='Native eligibility changed; retry') if state.state=='ACTION' else state
+        if self.engine.failed:return ModelOutcome('FAULT',session=self,reason='Native inference failed')
+        if action is None:return ModelOutcome('WAIT',session=self,reason='Native action buffer has no eligible endpoint')
+        source=self._action_source(capture_time)
+        result=ModelOutcome('ACTION',target_from_action(self.profile,action),self.interval,source,self.max_age,
+                            self.execution_generation,self)
+        state=self.gate(result)
+        return result if state.state=='ACTION' else state
+    def _observe(self,obs,capture_time):pass
+    def _frame(self,obs):return obs
+    def _action_source(self,capture_time):return capture_time
+    def close(self):self.engine.stop()
+
+class LocalPolicy(NativePolicy):
     def __init__(self,profile):
-        import torch
         from lerobot.configs.policies import PreTrainedConfig
         from lerobot.policies.factory import get_policy_class,make_pre_post_processors
+        from lerobot.inference import SyncInferenceEngine
+        self._initialize(profile)
         manifest=verify_bundle(profile['bundle']);checkpoint=Path(profile['bundle'])/'pretrained_model'
         for field in ('state_features','action_features','cameras','action_fps','calibration_revision','arm_id','language_conditioned'):
             if manifest[field]!=profile[field]:raise ValueError('Policy manifest/profile mismatch: '+field)
         cfg=PreTrainedConfig.from_pretrained(checkpoint);cfg.device=profile.get('device','cpu')
         self.policy=get_policy_class(cfg.type).from_pretrained(checkpoint,config=cfg).to(cfg.device).eval()
-        self.pre,self.post=make_pre_post_processors(cfg,pretrained_path=checkpoint,
+        pre,post=make_pre_post_processors(cfg,pretrained_path=checkpoint,
             preprocessor_overrides={'device_processor':{'device':cfg.device}})
-        self.policy.reset();self.profile=profile
-    def predict(self,obs,instruction):
-        import torch
-        batch={}
-        for name,value in obs.items():
-            v=torch.from_numpy(value)
-            if name.startswith('observation.images.'):v=v.permute(2,0,1).float()/255
-            batch[name]=v
-        batch['task']=instruction
-        with torch.inference_mode():return self.post(self.policy.select_action(self.pre(batch)))
-    def close(self):pass
-class RemotePolicy:
-    def __init__(self,profile,instruction):
+        self.engine=SyncInferenceEngine(self.policy,pre,post,{},[f['name'] for f in profile['action_features']],
+            task='',device=cfg.device,robot_type=profile.get('robot_type','soarm_multi'))
+        self.engine.reset();self.engine.start()
+    def _observe(self,obs,capture_time):
+        # Cached native actions retain their original chunk's acquisition time.
+        if self.chunk_capture is None or self.policy.count_queued_actions()==0:self.chunk_capture=capture_time
+    def _action_source(self,capture_time):return self.chunk_capture
+
+class RemotePolicy(NativePolicy):
+    control_polls=True
+    def __init__(self,profile,instruction=''):
         from lerobot.inference import RemoteInferenceConfig
         from lerobot.remote_inference import RemoteClient,RemoteInferenceEngine
-        from lerobot.utils.action_interpolator import ActionInterpolator
-        self.config=RemoteInferenceConfig(**profile['remote']);self.client=RemoteClient.connect(self.config)
-        cap=self.client.capabilities
-        expected_names=tuple(f['name'] for f in profile['state_features'])
+        self._initialize(profile)
+        values=dict(profile['remote']);values.setdefault('max_observation_age_s',self.max_age)
+        self.config=RemoteInferenceConfig(**values);self.max_age=self.config.max_observation_age_s
+        self.client=RemoteClient.connect(self.config);cap=self.client.capabilities
         state=next(f for f in cap.features if f.name=='observation.state')
-        if tuple(state.names)!=expected_names:raise ValueError('Remote policy state mapping mismatch')
+        if tuple(state.names)!=tuple(f['name'] for f in profile['state_features']):raise ValueError('Remote policy state mapping mismatch')
         if tuple(cap.action_feature.names)!=tuple(f['name'] for f in profile['action_features']):raise ValueError('Remote action mapping mismatch')
-        if abs(cap.action_interval-1/profile['action_fps'])>1e-6:raise ValueError('Remote policy cadence mismatch')
+        if abs(cap.action_interval-self.interval)>1e-6:raise ValueError('Remote policy cadence mismatch')
         self.client.admit(features=cap.features,action_feature=cap.action_feature,semantics=self.config.semantics,
             action_interval=cap.action_interval,mode=self.config.mode)
-        self.engine=RemoteInferenceEngine(self.client,self.config,task=instruction);self.interpolator=ActionInterpolator(multiplier=1)
-        self.engine.start();self.engine.resume()
-    def predict(self,obs,instruction):
-        from lerobot.inference import dispatch_tick
-        self.engine.submit_observation(obs,capture_time=time.monotonic())
-        if self.engine.failed:raise RuntimeError('Native remote inference failed')
-        result=[]
-        dispatch_tick(self.engine,self.interpolator,send=lambda action:result.append(action),hold=lambda:None)
-        return result[0] if result else None
-    def close(self):self.engine.stop()
-def predict(owner,profile,q,g,cameras,instruction):
-    token=(owner.epoch,owner.generation)
-    if profile.get('backend')=='fixture':return {'positions':q,'gripper':g,'gripper_unit':'percent'}
-    if getattr(owner,'policy_token',None)!=token:
-        if owner.policy:owner.policy.close()
-        owner.policy=RemotePolicy(profile,instruction) if profile.get('backend')=='remote' else LocalPolicy(profile)
-        owner.policy_token=token
-    action=owner.policy.predict(observations(profile,q,g,cameras),instruction)
-    return target_from_action(profile,action) if action is not None else None
+        self.engine=RemoteInferenceEngine(self.client,self.config,task=instruction);self.engine.start();self.engine.resume()
+    def _observe(self,obs,capture_time):self.engine.submit_observation(obs,capture_time=capture_time)
+    def _frame(self,obs):return None
+    def _action_source(self,capture_time):
+        current=self.engine.runtime.current
+        return current.capture_time if current is not None else capture_time
+
+class FixturePolicy:
+    """Hardware-free fixture implements the same outcome contract, without torch."""
+    def __init__(self,profile):self.profile=profile;self.intent_token=None;self.resets=0;self.calls=0;self.paused=False
+    def reset_task(self,instruction,token):
+        if token!=self.intent_token:self.resets+=1;self.intent_token=token
+        self.paused=False
+    def pause(self):self.paused=True
+    def poll(self,obs,capture_time):
+        self.calls+=1
+        if self.profile.get('fixture_delay_s'):time.sleep(self.profile['fixture_delay_s'])
+        states=self.profile.get('fixture_states',['ACTION']);state=states[min(self.calls-1,len(states)-1)]
+        return ModelOutcome(state,obs if state=='ACTION' else None,1/self.profile.get('action_fps',30),capture_time,
+            self.profile.get('action_source_max_age_s',5),0,self,'fixture '+state,('fixture',self.calls) if state=='HOLD' else None)
+    def gate(self,outcome=None):
+        if self.paused:return ModelOutcome('WAIT',session=self,reason='fixture paused')
+        if outcome and time.monotonic()-outcome.source_time>outcome.max_age_s:return ModelOutcome('FAULT',session=self,reason='Policy action source observation expired')
+        return ModelOutcome('ACTION',session=self)
+    def acknowledge_hold(self,token):pass
+    def commit(self,outcome,send,hold):
+        state=self.gate(outcome)
+        if state.state!='ACTION':return False,state
+        send();return True,state
+    def close(self):pass
+
+def load_session(profile):
+    if profile.get('backend')=='fixture':return FixturePolicy(profile)
+    return RemotePolicy(profile) if profile.get('backend')=='remote' else LocalPolicy(profile)
+
+def poll_session(session,profile,q,g,cameras,capture_time):
+    if profile.get('backend')=='fixture':obs={'positions':q,'gripper':g,'gripper_unit':'percent'}
+    else:obs=observations(profile,q,g,cameras)
+    return session.poll(obs,capture_time)
+
+
+def prepare_remote_observation(profile,q,g,cameras,capture_time):
+    return observations(profile,q,g,cameras),capture_time
+
+def current_remote_observation(profile,prepared,q,g):
+    import numpy as np
+    obs=dict(prepared);obs['observation.state']=np.asarray(native_state(profile,q,g),dtype=np.float32)
+    return obs

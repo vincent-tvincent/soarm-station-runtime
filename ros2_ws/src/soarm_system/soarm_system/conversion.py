@@ -34,7 +34,7 @@ def request_from_goal(g):
     if c.velocity_scaling not in (0.,1.):raise ValueError('Velocity scaling requires a registered motion profile')
     result={'principal':g.context.operator_session_id,'runtime_boot_id':g.context.expected_runtime_boot_id,
         'controller_session':g.context.expected_controller_session,'operation_type':k,'mode':mode,
-        'input_timeout_s':(c.max_input_age_ms or 250)/1000,'duration_s':(c.max_operation_duration_ms or 30000)/1000,'profile_id':g.operation.policy_profile_id,
+        'input_timeout_s':(c.max_input_age_ms or 250)/1000,'duration_s':c.max_operation_duration_ms/1000 if c.max_operation_duration_ms else None,'profile_id':g.operation.policy_profile_id,
         'payload_kind':g.input.stream_payload_kind if mode=='STREAM' else s.payload_kind,
         'constraints':{'required_clearance_m':c.required_clearance_m,'cartesian_path':c.path_mode=='CARTESIAN_PATH'}}
     if mode=='INLINE':
@@ -54,11 +54,11 @@ def request_from_goal(g):
             else:result['points']=trajectory_points(s.joint_trajectory)
         else:
             if not 1<=len(s.model_steps)<=16:raise ValueError('Expected 1..16 model steps')
-            result['model_steps']=[{'instruction':m.instruction,'duration_s':(m.max_duration_ms or int(result['duration_s']*1000))/1000} for m in s.model_steps]
+            result['model_steps']=[{'instruction':m.instruction,'duration_s':m.max_duration_ms/1000 if m.max_duration_ms else None} for m in s.model_steps]
             result['instruction']=s.model_steps[0].instruction
     return result
 def frame_to_dict(m):
-    if m.schema_version!=1:raise ValueError('Unsupported stream schema')
+    if m.schema_version not in (1,2):raise ValueError('Unsupported stream schema')
     body={}
     if m.frame_kind=='COMMAND':
         if m.payload_kind=='DIRECT_JOINT_TARGET':body=direct_body(m.direct_target)
@@ -68,12 +68,13 @@ def frame_to_dict(m):
     elif m.payload_kind not in ('','NONE'):raise ValueError('Non-command payload kind')
     return {'frame_kind':m.frame_kind,'runtime_boot_id':m.runtime_boot_id,'controller_session':m.controller_session,
             'operation_id':m.operation_id,'operation_epoch':m.operation_epoch,'principal':m.producer_instance_id,
-            'window_id':m.window_id,'sequence':m.sequence,'input_id':m.input_id,'body':body}
+            'window_id':m.window_id,'sequence':m.sequence,'semantic_revision':m.semantic_revision,'input_id':m.input_id,'body':body}
 def goal_from_dict(d,principal):
     g=ExecuteOperation.Goal();c=g.context;c.schema_version=1;c.request_id=d.get('request_id','');c.arm_id=d['arm_id']
     c.expected_runtime_boot_id=d['runtime_boot_id'];c.expected_controller_session=d['controller_session'];c.operator_session_id=principal
     g.operation.operation_type=d['operation_type'];g.operation.policy_profile_id=d.get('profile_id','')
-    g.operation.requested_constraints.max_operation_duration_ms=int(d.get('duration_s',30)*1000)
+    duration=d.get('duration_s')
+    g.operation.requested_constraints.max_operation_duration_ms=0 if duration is None else int(duration*1000)
     g.input.mode=d['mode'];g.input.producer_role='R06'
     kind={'DIRECT':'DIRECT_JOINT_TARGET','TRAJECTORY':'JOINT_TRAJECTORY','MODEL':'MODEL_TASK'}[d['operation_type']]
     if d['mode']=='STREAM':g.input.stream_topic='/soarm/lerobot/command_stream';g.input.stream_payload_kind=kind
@@ -87,9 +88,11 @@ def goal_from_dict(d,principal):
                 m.duration_ms=int((p['time_s']-previous)*1000);previous=p['time_s'];g.input.inline_sequence.direct_steps.append(m)
         elif d['operation_type']=='MODEL':
             from soarm_interfaces.msg import ModelTaskStep
-            g.input.inline_sequence.model_steps=[ModelTaskStep(instruction=d['instruction'])]
+            steps=d.get('model_steps') or [{'instruction':d.get('instruction',''),'duration_s':duration}]
+            g.input.inline_sequence.model_steps=[ModelTaskStep(instruction=step.get('instruction',''),max_duration_ms=0 if step.get('duration_s') is None else int(step['duration_s']*1000)) for step in steps]
         else:
             from trajectory_msgs.msg import JointTrajectoryPoint
+            if not 1<=len(d.get('points',[]))<=256:raise ValueError('Expected 1..256 trajectory points')
             g.input.inline_sequence.joint_trajectory.joint_names=list(d['points'][0]['positions'])
             for p in d['points']:
                 m=JointTrajectoryPoint();m.positions=[p['positions'][n] for n in g.input.inline_sequence.joint_trajectory.joint_names]
@@ -97,18 +100,21 @@ def goal_from_dict(d,principal):
                 g.input.inline_sequence.joint_trajectory.points.append(m)
     return g
 def stream_from_dict(d,principal):
-    m=OperationInput();m.schema_version=1
-    for k in ('arm_id','frame_kind','operation_id','runtime_boot_id','controller_session','operation_epoch','window_id','sequence','input_id'):
+    m=OperationInput();m.schema_version=2
+    for k in ('arm_id','frame_kind','operation_id','runtime_boot_id','controller_session','operation_epoch','window_id','sequence','semantic_revision','input_id'):
         if k in d:setattr(m,k,d[k])
     m.producer_instance_id=principal
     if m.frame_kind=='COMMAND':
         m.payload_kind=d.get('payload_kind','DIRECT_JOINT_TARGET');b=d['body']
+        if m.payload_kind in ('MODEL_TASK','JOINT_TRAJECTORY') and (type(d.get('semantic_revision'))!=int or not 0<d['semantic_revision']<2**64):
+            raise ValueError('SEMANTIC_REVISION_REQUIRED: upgrade sparse producer')
         if m.payload_kind=='DIRECT_JOINT_TARGET':
             m.direct_target.joint_names=list(b['positions']);m.direct_target.positions_rad=[float(x) for x in b['positions'].values()]
             m.direct_target.gripper_target.unit=b.get('gripper_unit','percent');m.direct_target.gripper_target.value=float(b['gripper'])
         elif m.payload_kind=='MODEL_TASK':m.model_task.instruction=b['instruction']
         elif m.payload_kind=='JOINT_TRAJECTORY':
             from trajectory_msgs.msg import JointTrajectoryPoint
+            if not 1<=len(b.get('points',[]))<=256:raise ValueError('Expected 1..256 trajectory points')
             m.joint_trajectory.joint_names=list(b['points'][0]['positions'])
             for point in b['points']:
                 p=JointTrajectoryPoint();p.positions=[float(point['positions'][n]) for n in m.joint_trajectory.joint_names]

@@ -10,5 +10,6 @@ uint32 window_valid_for_ms
 string<=64 last_accepted_input_id
 string<=64 last_applied_input_id
 uint64 intent_generation
+uint64 last_accepted_semantic_revision
 uint64 last_sequence
 string<=512 reason

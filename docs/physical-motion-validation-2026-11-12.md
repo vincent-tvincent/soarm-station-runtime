@@ -1,5 +1,7 @@
 # Native writable control qualification — November 12, 2026
 
+This is the initial physical baseline. Later session lifetime/permission/reference behavior is revised in [the November13 continuity report](continuous-operation-2026-11-13.md); initial normal-completion re-enable behavior is historical.
+
 The user explicitly approved native LeRobot connection and controlled motion testing on the secured Pi. This supersedes the initial read-only deployment restriction. The active service profile is `local/pi-writable.yaml`; `local/pi.yaml` remains the read-only fallback. No calibration or PID change was performed.
 
 ## Connection and startup

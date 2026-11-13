@@ -11,6 +11,7 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rosidl_runtime_py.convert import message_to_ordereddict
 from sensor_msgs.msg import JointState,CompressedImage
+from diagnostic_msgs.msg import DiagnosticArray
 from soarm_interfaces.msg import OperationStatus,OperationInput,Event,UploadStatus,WorkflowStatus,WorkflowDecision
 from soarm_interfaces.srv import SetControlPermission,Hold,QueryHistory
 from soarm_interfaces.action import ExecuteOperation,ExecuteWorkflow
@@ -26,7 +27,7 @@ async def resolved(f,timeout=5):
     return f.result()
 class DashboardNode(BaseNode):
     def __init__(self):
-        super().__init__('dashboard_node');self.states={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
+        super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
         group=ReentrantCallbackGroup()
         self.permission_client=self.create_client(SetControlPermission,'/soarm/lerobot/set_permission',callback_group=group)
         self.hold_client=self.create_client(Hold,'/soarm/lerobot/hold',callback_group=group)
@@ -37,6 +38,7 @@ class DashboardNode(BaseNode):
         for a in self.config['arms']:
             n=a['id'];self.create_subscription(JointState,topic(n,'joint_states'),lambda m,n=n:self.joints.__setitem__(n,asdict(m)),SENSOR)
             self.create_subscription(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.states.__setitem__(n,asdict(m)),STATE)
+            self.create_subscription(DiagnosticArray,topic(n,'lerobot/inference_status'),lambda m,n=n:self.inference.__setitem__(n,asdict(m)),STATE)
         for c in self.config['cameras']:
             self.create_subscription(CompressedImage,'/soarm/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.images.__setitem__(n,(bytes(m.data),m.header.stamp.sec*10**9+m.header.stamp.nanosec)),SENSOR)
         self.create_subscription(Event,'/soarm/events',self.event,STATE)
@@ -80,7 +82,7 @@ class DashboardNode(BaseNode):
         context.load_cert_chain(parent/cfg['cert'],parent/cfg['key'])
         await web.TCPSite(self.runner,cfg.get('host','0.0.0.0'),cfg.get('port',8443),ssl_context=context).start()
     async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_ROOT'])/'web/index.html').read_text(),content_type='text/html')
-    def state(self):return {'device_id':self.config['device_id'],'arms':dict(self.states),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
+    def state(self):return {'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
     async def status(self,r):return web.json_response(self.state())
     async def history(self,r):
         q=QueryHistory.Request();q.arm_id=r.query.get('arm','');q.after_sequence=int(r.query.get('after',0));q.page_size=min(500,int(r.query.get('limit',100)))
@@ -152,6 +154,8 @@ class DashboardNode(BaseNode):
                     if d.get('arm_id')!=arm:raise ValueError('Arm mismatch')
                     self.command.publish(stream_from_dict(d,principal))
                 elif m.type in (web.WSMsgType.CLOSE,web.WSMsgType.CLOSED,web.WSMsgType.ERROR):break
+            if result.done() and not ws.closed:
+                await ws.send_json({'type':'result','result':asdict(result.result().result)})
         except Exception as exc:
             if not ws.closed:await ws.send_json({'type':'error','reason':str(exc)[:512]})
         finally:

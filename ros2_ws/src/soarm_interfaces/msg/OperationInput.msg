@@ -8,6 +8,7 @@ uint64 operation_epoch
 string<=64 producer_instance_id
 string<=64 window_id
 uint64 sequence
+uint64 semantic_revision
 string<=64 input_id
 string<=32 payload_kind
 ModelTaskStep model_task
