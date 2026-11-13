@@ -870,3 +870,26 @@ test("draft validation shares submission checks without sending or acquiring per
   assert.equal(f.client.currentOperation, null);
   await f.client.disconnect();
 });
+
+test("a late rejected enable does not hold another controller's arm", async () => {
+  const f = fixture();
+  await f.client.connect(TOKEN);
+  const wait = deferred();
+  f.setRoute((c) => (c.path === "/api/permission" ? wait.promise : undefined));
+  const request = f.client.enable("arm1");
+  const canceled = assert.rejects(request, (e) => e.code === "CANCELED");
+  await f.client.disconnect();
+  wait.resolve(
+    f.response({
+      accepted: false,
+      permission: true,
+      reason: "Another controller owns permission",
+    }),
+  );
+  await flush();
+  await canceled;
+  assert.equal(
+    f.calls.some((c) => c.path === "/api/hold"),
+    false,
+  );
+});

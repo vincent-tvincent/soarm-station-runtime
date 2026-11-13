@@ -122,9 +122,13 @@ step quantization was introduced. A separate mock verified the optional current
 column with 0.125 A while the native adapter still reports null. Canonical
 motor_status takes precedence over legacy fixture aliases.
 
-The full frontend suite now has **46 passing checks**: 20 transport, 12 editor,
+The full frontend suite now has **47 passing checks**: 21 transport, 12 editor,
 6 graph and 8 camera geometry. Shared draft validation was checked to perform
 no request/arming/operation. Browser console reported no errors. The new editor
 was tested without physical motion. No unresolved P0/P1/P2 visual finding.
 
 final result: passed
+
+Final transport review also verifies that a late rejected permission request
+does not send Hold to another controller. An accepted late grant still receives
+its existing cleanup. This prevents an unnecessary stop after cancellation.

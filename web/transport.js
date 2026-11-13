@@ -407,9 +407,11 @@ export class StationClient {
       enable: true,
     });
     if (generation !== this._generation) {
-      await this._request("/api/hold", { arm_id: armId }, token).catch(
-        () => {},
-      );
+      // A rejected grant acquired nothing; do not stop another controller.
+      if (result.accepted)
+        await this._request("/api/hold", { arm_id: armId }, token).catch(
+          () => {},
+        );
       throw new StationError(
         "Permission response belongs to a closed connection",
         "CANCELED",
