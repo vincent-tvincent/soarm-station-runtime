@@ -19,4 +19,4 @@ source /opt/ros/${ROS_DISTRO:-lyrical}/setup.bash
 source "$SOARM_ROOT/ros2_ws/install/setup.bash"
 source "$SOARM_ROOT/.venv/bin/activate"
 set -u
-exec ros2 launch soarm_system system.launch.py config:="$SOARM_CONFIG"
+exec ros2 launch soarm_system system.launch.py config:="$SOARM_CONFIG" respawn:=true

@@ -4,14 +4,26 @@ A configuration-driven ROS 2 application for **n cameras and m independent arms*
 
 The Pi deployment is `/home/pipi/so-101/ros_system`. This repository is independent of `../training`, has no configured Git remote, and has not been pushed. Initial implementation was produced with Codex assistance.
 
-## Run the deployed system
+## Foreground debugging — no service required
+
+See the [detailed startup and debugging guide](docs/startup-and-debug.md) for installation, mock/native profiles, ROS CLI inspection, single-node debugging and optional service deployment. After one-time bootstrap/private initialization, in Bash:
+
+```bash
+source /opt/ros/lyrical/setup.bash
+source ros2_ws/install/setup.bash
+ros2 launch soarm_system system.launch.py config:="$PWD/config/mock.yaml" log_level:=debug respawn:=false
+```
+
+For the Pi hardware, select `config:="$PWD/local/pi-writable.yaml"`. Stop an existing service before running a foreground graph. Ctrl-C stops the launch; control permission starts OFF. Complete launch prepares its child environments without `scripts/run` or venv activation. The full repository and initialized local credentials are required.
+
+## Optional deployed service
 
 ```bash
 systemctl --user status soarm.service
 journalctl --user -u soarm.service -f
 # Explicit foreground launch after stopping the service:
 systemctl --user stop soarm.service
-scripts/run local/pi.yaml
+scripts/run local/pi-writable.yaml
 ```
 
 The dashboard is **https://ubuntu-pi.tail521c60.ts.net:8443/**. Its development certificate is at `local/tls/cert.pem`; trust that certificate on the operator device. Enter the operator token stored on this host in `local/secrets.env`. Private credentials, calibration and device paths are ignored by Git. Do not copy the entire secret file to an operator computer.

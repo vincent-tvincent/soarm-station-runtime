@@ -10,7 +10,7 @@ Verified source commits: runtime `b9a10c9e3d9586f589801c74a30ca608ba6adcd7`; tra
 - `ros2_ws/src/soarm_system/soarm_system/runtime_node.py`, `python/soarm/worker.py`, and `python/soarm/ipc.py`: ROS-to-native-process bridge. One logical ROS hardware owner starts the separate pinned LeRobot environment and communicates through bounded local IPC.
 - Runtime and training `scripts/bootstrap`: repository-tracked environment/dependency installation, with runtime colcon build.
 
-These wrappers are committed source, not an untracked laptop setup. The current ROS launch still requires the wrapper-supplied repository/environment variables; bare `colcon build` plus `ros2 launch` is not a self-contained installation workflow yet.
+These wrappers are committed source, not an untracked laptop setup. A subsequent startup revision removes the launch-time dependency on wrapper-supplied variables: after bootstrap/private initialization, source ROS and the colcon overlay, then use ordinary `ros2 launch`. See [foreground startup and its separate verification](startup-and-debug.md). The full checkout, both environments and local credentials remain required; a colcon install tree alone is not a complete deployment.
 
 ## Verified clean runtime flow
 
@@ -50,7 +50,7 @@ The new clone created its own Python3.12.16 environment, installed the pinned de
 
 This is a **clean-checkout/new-venv check on the same supported host**, not a clean operating-system installation. The preinstalled ROS distribution, colcon/compiler/system Python packages and existing package-download caches were reused. The native/training venvs were new; the ROS venv intentionally uses distribution site packages. No x86_64, other ROS distribution, other Linux distribution or GPU-install matrix was executed.
 
-Bootstrap assumes required OS/ROS/build packages already exist; it does not provision arbitrary Linux installations. Runtime lock files are the tested Linux CPU set, not a cross-platform artifact/hash lock. Hardware use still requires the new operator's own stable device paths, permissions, calibration, host profile and registered policy assets. Private Pi deployment files are correctly absent from a clone. There is no clean-machine CI matrix yet. Whole-repository startup through the committed bootstrap/wrapper is the verified path; conventional ROS-only packaging remains a separate improvement.
+Bootstrap assumes required OS/ROS/build packages already exist; it does not provision arbitrary Linux installations. Runtime lock files are the tested Linux CPU set, not a cross-platform artifact/hash lock. Hardware use still requires the new operator's own stable device paths, permissions, calibration, host profile and registered policy assets. Private Pi deployment files are correctly absent from a clone. There is no clean-machine CI matrix yet. The clean-checkout test above used the committed bootstrap/wrapper; direct foreground ROS startup was subsequently verified separately. Conventional standalone ROS-only packaging remains a separate improvement.
 
 The initial attempt placed large test environments in RAM-backed `/tmp` and hit its quota. This was corrected by rerunning in disk-backed `/var/tmp` with a disk-backed TMPDIR. Disposable failed copies were removed; the successful checkouts and generated test credentials were removed after verification. This setup failure is not counted as a successful bootstrap.
 
