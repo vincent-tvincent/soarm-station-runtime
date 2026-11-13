@@ -1,3 +1,12 @@
+import {
+  openDraft,
+  describeBlocks,
+  setValue,
+  addStep,
+  removeStep,
+  moveStep,
+  getJson,
+} from "./payload-model.js";
 import { StationClient } from "./transport.js";
 import { GraphExplorer } from "./graph.js";
 import { fitRect, packEqualCameras } from "./camera-layout.js";
@@ -33,6 +42,10 @@ let snapshot = {},
   connected = false,
   operation = null,
   historyRows = [];
+let payloadView = "blocks",
+  payloadDraft = null,
+  activePayloadRow = null,
+  payloadRepresentations = {};
 const client = new StationClient({
   onState: renderState,
   onConnection: connection,
@@ -133,6 +146,10 @@ function updateControls() {
     ? "Choose the active stream type and STREAM delivery to update it."
     : "";
   $("end-stream").disabled = !busy;
+  if (payloadDraft?.valid === false) {
+    $("run-payload").disabled = true;
+    $("send-update").disabled = true;
+  }
 }
 $("login").onsubmit = async (event) => {
   event.preventDefault();
@@ -273,8 +290,11 @@ function renderState(state) {
     typeof c === "string" ? c : c.id,
   );
   updateCameras(ids);
-  const profiles = profileList().filter(
-    (p) => !p.arm_id || p.arm_id === selectedArm,
+  const allowedProfiles = armConfig().profile_ids;
+  const profiles = profileList().filter((p) =>
+    Array.isArray(allowedProfiles)
+      ? allowedProfiles.includes(p.id)
+      : p.arm_id === selectedArm,
   );
   if (
     JSON.stringify(profiles.map((p) => p.id)) !==
@@ -337,8 +357,8 @@ function eventLabel(e) {
 }
 function motorList() {
   const source =
-    snapshot.motors?.[selectedArm] ||
     snapshot.motor_status?.[selectedArm]?.motors ||
+    snapshot.motors?.[selectedArm] ||
     snapshot.health?.[selectedArm]?.motors ||
     armState().motors ||
     [];
@@ -609,6 +629,8 @@ function loadExample() {
       ],
     };
   $("payload-editor").value = JSON.stringify(value, null, 2);
+  payloadRepresentations = {};
+  refreshPayloadDraft(true);
   text("validation-message", "");
   updatePayloadHelp();
 }
@@ -630,9 +652,11 @@ function updatePayloadHelp() {
     "payload-help",
     type === "MODEL"
       ? "Choose a registered deployment profile. Instructions depend on its policy capabilities."
-      : mode === "STREAM"
-        ? "Start once, then send updated targets. End stream revokes control permission."
-        : "Named joint positions use radians; gripper uses percent. Times are seconds from the start.",
+      : type === "TRAJECTORY" && payloadDraft?.value?.cartesian
+        ? "Cartesian positions use metres in the selected frame. Each endpoint has its own duration."
+        : mode === "STREAM"
+          ? "Start once, then send updated targets. End stream revokes control permission."
+          : "Named joint positions use radians; gripper uses percent. Times are seconds from the start.",
   );
   updateControls();
 }
@@ -722,6 +746,7 @@ function validateDraft() {
   const duration = $("duration").value;
   if (duration && !(Number(duration) > 0))
     throw Error("Duration limit must be positive.");
+  client.validatePayload(selectedArm, type, mode, p);
   return p;
 }
 $("validate-payload").onclick = () => {
@@ -754,6 +779,492 @@ $("run-payload").onclick = () =>
 $("send-update").onclick = () =>
   safely(() => client.updateStream(validateDraft()));
 $("end-stream").onclick = () => safely(() => client.endOperation());
+const payloadElement = (tag, className, content) => {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (content !== undefined) el.textContent = content;
+  return el;
+};
+function payloadContext() {
+  return {
+    type: $("operation-type").value,
+    mode: $("operation-mode").value,
+    armId: selectedArm,
+    profileId: $("profile-select").value,
+  };
+}
+function refreshPayloadDraft(openFirst = false) {
+  const context = payloadContext();
+  if (
+    !payloadDraft ||
+    getJson(payloadDraft) !== $("payload-editor").value ||
+    ["type", "mode", "armId"].some(
+      (key) => payloadDraft.context[key] !== context[key],
+    )
+  ) {
+    payloadDraft = openDraft(context, $("payload-editor").value);
+  }
+  if (openFirst) activePayloadRow = null;
+  renderPayloadBlocks();
+  updatePayloadHelp();
+}
+function choosePayloadView(view) {
+  payloadView = view;
+  for (const tab of document.querySelectorAll("[data-payload-view]")) {
+    const active = tab.dataset.payloadView === view;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  $("payload-blocks-panel").hidden = view !== "blocks";
+  $("payload-json-panel").hidden = view !== "json";
+  if (view === "blocks") {
+    refreshPayloadDraft();
+    if (payloadDraft.error) text("validation-message", "");
+  }
+}
+function changeBlock(update, rerender = false, focusIndex = null) {
+  try {
+    payloadDraft = update(payloadDraft);
+    $("payload-editor").value = getJson(payloadDraft);
+    text("validation-message", "");
+    if (focusIndex !== null)
+      activePayloadRow =
+        describeBlocks(payloadDraft).rows[focusIndex]?.id || null;
+    if (rerender) renderPayloadBlocks();
+    else {
+      renderBlockIssues();
+      updateBlockSummaries();
+    }
+    updateControls();
+  } catch (error) {
+    text("payload-block-error", error.message);
+  }
+}
+function renderBlockIssues() {
+  const info = describeBlocks(payloadDraft);
+  const messages = info.issues.map((x) =>
+    typeof x === "string" ? x : x.message,
+  );
+  text("payload-block-error", messages.join(" "));
+  $("add-payload-step").hidden = !info.collection;
+  const limit =
+    payloadContext().type === "TRAJECTORY" && info.kind === "joint_sequence"
+      ? 256
+      : 16;
+  $("add-payload-step").disabled =
+    !info.structuralEditsEnabled || info.rows.length >= limit;
+  $("add-payload-step").title =
+    info.rows.length >= limit ? `Maximum ${limit} steps` : "";
+  return info;
+}
+function blockSummary(row, kind) {
+  const value = row.value || {};
+  if (kind === "joint_sequence")
+    return `${Object.keys(value.positions || {}).length} joints · at ${number(value.time_s, 2)} s`;
+  if (kind === "direct_target") return "Continuous joint target";
+  if (kind === "model_sequence")
+    return value.duration_s == null || value.duration_s === 0
+      ? "Profile duration"
+      : `${number(value.duration_s, 2)} s`;
+  if (kind === "model_task") return "Replace current task";
+  return `${value.frame_id || "Choose a frame"} · ${number(value.duration_s, 2)} s`;
+}
+function updateBlockSummaries() {
+  const info = describeBlocks(payloadDraft);
+  for (const row of info.rows) {
+    const card = [...$("payload-blocks").children].find(
+      (x) => x.dataset.rowId === row.id,
+    );
+    if (card)
+      card.querySelector(".payload-step-meta").textContent = blockSummary(
+        row,
+        info.kind,
+      );
+  }
+}
+function blockNumber(
+  parent,
+  label,
+  value,
+  path,
+  { min, max, step = "any", optional = false } = {},
+) {
+  const field = payloadElement("label", "payload-block-field");
+  field.append(
+    payloadElement("span", "", label.replace(/^Step \d+\s*(?:·\s*)?/, "")),
+  );
+  const input = document.createElement("input");
+  input.type = "number";
+  input.required = !optional;
+  input.step = String(step);
+  if (min !== undefined) input.min = String(min);
+  if (max !== undefined) input.max = String(max);
+  input.value = Number.isFinite(value) ? String(value) : "";
+  input.placeholder = optional ? "Default" : "Required";
+  input.setAttribute("aria-label", label);
+  input.oninput = () =>
+    changeBlock((draft) =>
+      setValue(
+        draft,
+        path,
+        input.value === ""
+          ? optional
+            ? undefined
+            : null
+          : Number(input.value),
+      ),
+    );
+  field.append(input);
+  parent.append(field);
+  return input;
+}
+function blockText(
+  parent,
+  label,
+  value,
+  path,
+  { multiline = false, placeholder = "" } = {},
+) {
+  const field = payloadElement(
+    "label",
+    "payload-block-field" + (multiline ? " full" : ""),
+  );
+  field.append(
+    payloadElement("span", "", label.replace(/^Step \d+\s*(?:·\s*)?/, "")),
+  );
+  const input = document.createElement(multiline ? "textarea" : "input");
+  if (!multiline) input.type = "text";
+  input.value = typeof value === "string" ? value : "";
+  input.placeholder = placeholder;
+  input.setAttribute("aria-label", label);
+  if (multiline) input.rows = 3;
+  input.oninput = () =>
+    changeBlock((draft) => setValue(draft, path, input.value));
+  field.append(input);
+  parent.append(field);
+  return input;
+}
+function renderJointFields(body, row, type) {
+  const value = row.value;
+  if (
+    !value.positions ||
+    typeof value.positions !== "object" ||
+    Array.isArray(value.positions)
+  ) {
+    body.append(
+      payloadElement(
+        "p",
+        "detail-note",
+        "The positions field must be an object. Repair it in JSON or use the current pose.",
+      ),
+    );
+    return;
+  }
+  const config = armConfig(),
+    names = [
+      ...new Set([
+        ...(config.joints || []).map((j) => j.name),
+        ...Object.keys(value.positions),
+      ]),
+    ];
+  const fields = payloadElement("div", "payload-joint-fields");
+  for (const name of names) {
+    const joint = config.joints?.find((j) => j.name === name);
+    blockNumber(
+      fields,
+      `Step ${row.index + 1} · ${name} (rad)`,
+      value.positions[name],
+      [...row.path, "positions", name],
+      {
+        min: joint?.min ?? joint?.min_rad,
+        max: joint?.max ?? joint?.max_rad,
+        step: "any",
+      },
+    );
+  }
+  if (type === "DIRECT")
+    blockNumber(
+      fields,
+      `Step ${row.index + 1} · gripper (%)`,
+      value.gripper,
+      [...row.path, "gripper"],
+      { min: 0, max: 100, step: "any" },
+    );
+  body.append(fields);
+}
+function renderCartesianFields(body, row) {
+  const value = row.value;
+  blockText(body, `Step ${row.index + 1} · frame`, value.frame_id, [
+    ...row.path,
+    "frame_id",
+  ]);
+  const xyz = payloadElement("div", "payload-vector-fields");
+  for (const [i, axis] of ["X", "Y", "Z"].entries())
+    blockNumber(
+      xyz,
+      `Step ${row.index + 1} · ${axis} (m)`,
+      value.position?.[i],
+      [...row.path, "position", i],
+    );
+  body.append(xyz);
+  const field = payloadElement("label", "payload-block-field");
+  field.append(payloadElement("span", "", "Orientation"));
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", `Step ${row.index + 1} orientation`);
+  select.add(new Option("Position only", "POSITION_ONLY"));
+  select.add(new Option("Strict pose", "STRICT_POSE"));
+  select.value = value.orientation_mode || "POSITION_ONLY";
+  select.onchange = () =>
+    changeBlock((draft) => {
+      let next = setValue(
+        draft,
+        [...row.path, "orientation_mode"],
+        select.value,
+      );
+      if (
+        !Array.isArray(row.value.orientation) ||
+        row.value.orientation.length !== 4
+      )
+        next = setValue(next, [...row.path, "orientation"], [0, 0, 0, 1]);
+      return next;
+    }, true);
+  field.append(select);
+  body.append(field);
+  if (select.value === "STRICT_POSE") {
+    const quaternion = payloadElement("div", "payload-vector-fields four");
+    for (const [i, axis] of ["Qx", "Qy", "Qz", "Qw"].entries())
+      blockNumber(
+        quaternion,
+        `Step ${row.index + 1} · ${axis}`,
+        value.orientation?.[i],
+        [...row.path, "orientation", i],
+      );
+    body.append(quaternion);
+  }
+  blockNumber(
+    body,
+    `Step ${row.index + 1} duration (s)`,
+    value.duration_s,
+    [...row.path, "duration_s"],
+    { min: 0.001 },
+  );
+}
+function renderPayloadBlocks() {
+  if (!payloadDraft)
+    payloadDraft = openDraft(payloadContext(), $("payload-editor").value);
+  const info = renderBlockIssues(),
+    box = $("payload-blocks");
+  box.replaceChildren();
+  const context = payloadContext();
+  $("payload-target-field").hidden =
+    context.type !== "TRAJECTORY" || context.mode !== "INLINE";
+  const target = $("payload-target-kind");
+  target.value = info.kind === "cartesian_sequence" ? "cartesian" : "joints";
+  target.options[1].disabled = !armConfig().capabilities?.cartesian_endpoints;
+  if (!payloadDraft.valid) {
+    box.append(
+      payloadElement(
+        "p",
+        "detail-note",
+        "The JSON draft is incomplete. Open JSON to repair it; no earlier draft will be sent.",
+      ),
+    );
+    return;
+  }
+  if (!info.rows.length) {
+    box.append(
+      payloadElement(
+        "div",
+        "payload-empty",
+        info.collection
+          ? "Add a step to build this sequence."
+          : "This payload structure cannot be shown as blocks. Open JSON to edit it.",
+      ),
+    );
+    return;
+  }
+  const title =
+    {
+      joint_sequence: context.type === "DIRECT" ? "Joint target" : "Waypoint",
+      direct_target: "Joint target",
+      model_sequence: "Model task",
+      model_task: "Model task",
+      cartesian_sequence: "Cartesian endpoint",
+    }[info.kind] || "Step";
+  for (const row of info.rows) {
+    const card = payloadElement("details", "payload-block-card");
+    card.dataset.rowId = row.id;
+    card.open = activePayloadRow
+      ? activePayloadRow === row.id
+      : row.index === 0;
+    const heading = payloadElement("summary", "payload-block-heading");
+    heading.append(
+      payloadElement(
+        "span",
+        "payload-step-number",
+        String(row.index + 1).padStart(2, "0"),
+      ),
+      payloadElement("span", "payload-step-title", title),
+      payloadElement("span", "payload-step-meta", blockSummary(row, info.kind)),
+      payloadElement(
+        "span",
+        "payload-step-toggle",
+        card.open ? "Collapse" : "Edit",
+      ),
+    );
+    card.append(heading);
+    card.ontoggle = () => {
+      card.querySelector(".payload-step-toggle").textContent = card.open
+        ? "Collapse"
+        : "Edit";
+      if (card.open) {
+        activePayloadRow = row.id;
+        for (const other of box.querySelectorAll("details"))
+          if (other !== card) other.open = false;
+      }
+    };
+    const body = payloadElement("div", "payload-block-body");
+    card.append(body);
+    if (
+      !row.value ||
+      typeof row.value !== "object" ||
+      Array.isArray(row.value)
+    ) {
+      body.append(
+        payloadElement(
+          "p",
+          "detail-note",
+          "This step must be an object. Repair it in JSON.",
+        ),
+      );
+      box.append(card);
+      continue;
+    }
+    if (info.kind === "joint_sequence") {
+      blockNumber(
+        body,
+        `Step ${row.index + 1} time from start (s)`,
+        row.value.time_s,
+        [...row.path, "time_s"],
+        { min: 0.001 },
+      );
+      renderJointFields(body, row, context.type);
+    } else if (info.kind === "direct_target")
+      renderJointFields(body, row, "DIRECT");
+    else if (info.kind === "model_sequence" || info.kind === "model_task") {
+      blockText(
+        body,
+        `Step ${row.index + 1} instruction`,
+        row.value.instruction,
+        [...row.path, "instruction"],
+        { multiline: true, placeholder: "Describe the intended task" },
+      );
+      if (info.kind === "model_sequence")
+        blockNumber(
+          body,
+          `Step ${row.index + 1} duration (s)`,
+          row.value.duration_s,
+          [...row.path, "duration_s"],
+          { min: 0, optional: true },
+        );
+    } else renderCartesianFields(body, row);
+    if (info.collection) {
+      const tools = payloadElement("div", "payload-step-tools");
+      for (const [caption, to] of [
+        ["Move up", row.index - 1],
+        ["Move down", row.index + 1],
+      ]) {
+        const b = payloadElement("button", "", caption);
+        b.setAttribute("aria-label", `${caption} step ${row.index + 1}`);
+        b.disabled =
+          !info.structuralEditsEnabled || to < 0 || to >= info.rows.length;
+        b.onclick = () =>
+          changeBlock((draft) => moveStep(draft, row.id, to), true, to);
+        tools.append(b);
+      }
+      const remove = payloadElement("button", "remove-step", "Remove");
+      remove.setAttribute("aria-label", `Remove step ${row.index + 1}`);
+      remove.disabled = !info.structuralEditsEnabled;
+      remove.onclick = () =>
+        changeBlock(
+          (draft) => removeStep(draft, row.id),
+          true,
+          Math.max(0, row.index - 1),
+        );
+      tools.append(remove);
+      body.append(tools);
+    }
+    box.append(card);
+  }
+}
+function addPayloadStep() {
+  const info = describeBlocks(payloadDraft),
+    last = info.rows.at(-1)?.value || {},
+    context = payloadContext();
+  let seed;
+  if (info.kind === "joint_sequence")
+    seed = {
+      duration_s: 1,
+      positions: last.positions ? structuredClone(last.positions) : joints(),
+      ...(context.type === "DIRECT"
+        ? {
+            gripper: Object.hasOwn(last, "gripper")
+              ? last.gripper
+              : (armState().gripper_percent ?? null),
+          }
+        : {}),
+    };
+  else if (info.kind === "model_sequence") seed = { instruction: "" };
+  else if (info.kind === "cartesian_sequence")
+    seed = {
+      frame_id: last.frame_id || armConfig().base_frame || "",
+      position: [null, null, null],
+      orientation_mode: "POSITION_ONLY",
+      orientation: [0, 0, 0, 1],
+      duration_s: 1,
+    };
+  else return;
+  changeBlock((draft) => addStep(draft, seed), true, info.rows.length);
+}
+for (const tab of document.querySelectorAll("[data-payload-view]"))
+  tab.onclick = () => choosePayloadView(tab.dataset.payloadView);
+$("payload-editor").oninput = () => {
+  payloadDraft = openDraft(payloadContext(), $("payload-editor").value);
+  text("validation-message", payloadDraft.error?.message || "");
+  updateControls();
+};
+$("add-payload-step").onclick = addPayloadStep;
+$("payload-target-kind").onchange = () => {
+  const next = $("payload-target-kind").value,
+    current =
+      describeBlocks(payloadDraft).kind === "cartesian_sequence"
+        ? "cartesian"
+        : "joints";
+  payloadRepresentations[current] = getJson(payloadDraft);
+  if (next === "cartesian" && !armConfig().capabilities?.cartesian_endpoints) {
+    $("payload-target-kind").value = current;
+    return;
+  }
+  const value =
+    next === "cartesian"
+      ? {
+          payload_kind: "CARTESIAN_TARGET",
+          cartesian: [
+            {
+              frame_id: armConfig().base_frame || "",
+              position: [null, null, null],
+              orientation_mode: "POSITION_ONLY",
+              orientation: [0, 0, 0, 1],
+              duration_s: 1,
+            },
+          ],
+        }
+      : { points: [{ time_s: 1, positions: joints() }] };
+  $("payload-editor").value =
+    payloadRepresentations[next] || JSON.stringify(value, null, 2);
+  refreshPayloadDraft(true);
+};
+
 function cameraAspect(id) {
   const item = cameraFrames.get(id);
   return item?.aspect || 4 / 3;

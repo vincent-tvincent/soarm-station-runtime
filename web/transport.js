@@ -483,6 +483,39 @@ export class StationClient {
       );
     return value;
   }
+  // Preview the exact semantic checks used by submit/updateStream; no I/O or grant.
+  validatePayload(armId, type, mode, payload) {
+    type = String(type).toUpperCase();
+    mode = String(mode).toUpperCase();
+    if (
+      !["DIRECT", "TRAJECTORY", "MODEL"].includes(type) ||
+      !["INLINE", "STREAM"].includes(mode)
+    ) {
+      throw new StationError(
+        "Unknown operation type or delivery mode",
+        "INVALID_INPUT",
+      );
+    }
+    return type === "DIRECT" && mode === "STREAM"
+      ? this._directTarget(armId, payload)
+      : this._payload(type, payload, armId, mode);
+  }
+
+  _directTarget(armId, target) {
+    allowedKeys(target, ["positions", "gripper", "gripper_unit"]);
+    if (
+      target.gripper_unit !== undefined &&
+      target.gripper_unit !== "percent"
+    ) {
+      throw new StationError("Gripper units must be percent", "INVALID_INPUT");
+    }
+    return {
+      positions: this._positions(target.positions, armId),
+      gripper: this._gripper(target.gripper),
+      gripper_unit: "percent",
+    };
+  }
+
   _payload(type, payload, armId, mode = "INLINE") {
     if (type === "MODEL") {
       allowedKeys(
@@ -777,19 +810,8 @@ export class StationClient {
     }
     if (type === "DIRECT" && mode === "STREAM") {
       allowedKeys(payload, ["positions", "gripper", "gripper_unit"]);
-      if (
-        payload.gripper_unit !== undefined &&
-        payload.gripper_unit !== "percent"
-      )
-        throw new StationError(
-          "Gripper units must be percent",
-          "INVALID_INPUT",
-        );
       const target = Object.keys(payload).length
-        ? {
-            positions: this._positions(payload.positions, armId),
-            gripper: this._gripper(payload.gripper),
-          }
+        ? this._directTarget(armId, payload)
         : null;
       const result = await this.startManual(armId, options);
       if (target) this.setManualTarget(target);
@@ -1228,16 +1250,8 @@ export class StationClient {
     const op = this._active;
     // Controls can be edited before opening manual mode; this does not select an arm or send data.
     if (!op || op.transport !== "websocket" || op.ending) return false;
-    allowedKeys(target, ["positions", "gripper", "gripper_unit"]);
-    const { positions, gripper, gripper_unit } = target;
-    if (gripper_unit !== undefined && gripper_unit !== "percent")
-      throw new StationError("Gripper units must be percent", "INVALID_INPUT");
-    // This API is a user-held browser intent, not a cached remote-leader sample API.
-    op.target = {
-      positions: this._positions(positions, op.armId),
-      gripper: this._gripper(gripper),
-      gripper_unit: "percent",
-    };
+    // User-held browser intent, not a cached remote-leader sample.
+    op.target = this._directTarget(op.armId, target);
     op.targetEdited = true;
     return true;
   }

@@ -44,6 +44,30 @@ release permission. Normal INLINE completion retains the healthy permission
 as before. Display updates are decimated independently of the 100-Hz browser
 manual sender and existing owner loop.
 
+## Structured payload editing
+
+Payload contains **Blocks** and **JSON** subtabs for one shared draft. Blocks
+provide editable joint targets, waypoints, model-task sequences and configured
+Cartesian endpoints. Continuous DIRECT/MODEL inputs use a single target/task
+card. Sequence cards can be added, removed and reordered; changing a card does
+not transmit a command. Run/Send updated payload remain explicit actions.
+
+Joint waypoint times are cumulative from the start. Reordering/removing carries
+each segment duration with its target and recalculates later cumulative times.
+Model and Cartesian durations are per-step; blank (or JSON zero for a model)
+uses the existing model-profile duration behavior. Joint/gripper values retain
+full numeric precision and never acquire invented targets.
+
+Switching subtabs preserves the draft and expanded card. Unknown JSON fields
+survive block edits; submission still rejects unsupported fields. Invalid JSON
+shows an error and never falls back to an earlier valid payload. Validate uses
+the same semantic normalizer as submission, with no networking or permission
+change. Runtime planning/admission remains separate.
+
+The pure editor model is `web/payload-model.js`; its row IDs are editor metadata
+and never appear in submitted payloads. `tests/test_payload_model.mjs` covers
+all operation shapes, timing/reordering, invalid drafts and lossless fields.
+
 ## Generic ROS graph
 
 `web/graph.js` consumes schema-version-1 graph JSON through an injected request
@@ -81,7 +105,7 @@ network delivery or wire bandwidth. Message contents are not exported.
 Run browser-independent checks with:
 
 ```sh
-node --test tests/test_dashboard_transport.mjs tests/test_dashboard_graph.mjs tests/test_camera_layout.mjs
+node --test tests/test_dashboard_transport.mjs tests/test_dashboard_graph.mjs tests/test_camera_layout.mjs tests/test_payload_model.mjs
 ```
 
 For a hardware-free visual preview (requires aiohttp and Pillow):

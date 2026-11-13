@@ -1610,3 +1610,201 @@ small {
   user-select: none;
   -webkit-user-select: none;
 }
+
+.payload-view-tabs {
+  display: flex;
+  gap: 0;
+  margin: 0 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.payload-view-tabs button {
+  font-size: 12px;
+  padding: 7px 19px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+.payload-view-tabs button.active {
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+.payload-view-tabs button.active:hover {
+  background: #f1f1ee;
+  color: #191919;
+}
+.payload-block-error {
+  color: #b1251d;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.payload-block-error:empty {
+  display: none;
+}
+.payload-blocks {
+  display: grid;
+  gap: 10px;
+}
+.payload-block-card {
+  border: 1px solid var(--line);
+  border-top: 2px solid #191919;
+  background: white;
+}
+.payload-block-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 10px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+}
+.payload-block-heading::-webkit-details-marker {
+  display: none;
+}
+.payload-step-number {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 11px;
+}
+.payload-step-title {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.payload-step-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: auto;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.payload-step-toggle {
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.payload-block-card[open] .payload-block-heading {
+  background: var(--topic);
+  border-bottom: 1px solid var(--line);
+}
+.payload-block-body {
+  padding: 12px;
+}
+.payload-block-field {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.payload-block-field > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.payload-block-field input {
+  width: 115px;
+  text-align: right;
+  font-size: 12px;
+  padding: 6px;
+}
+.payload-block-field select {
+  max-width: 58%;
+  font-size: 12px;
+  padding: 6px;
+}
+.payload-block-field input[type="text"] {
+  width: 58%;
+  text-align: left;
+}
+.payload-block-field input:invalid {
+  border-color: #d52b22;
+}
+.payload-block-field.full {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+}
+.payload-block-field textarea {
+  font:
+    13px/1.5 Helvetica,
+    Arial,
+    sans-serif;
+  min-height: 75px;
+  background: white;
+  padding: 8px;
+}
+.payload-joint-fields {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.payload-joint-fields .payload-block-field > span {
+  font-size: 11px;
+}
+.payload-vector-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.payload-vector-fields.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.payload-vector-fields .payload-block-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  font-size: 10px;
+}
+.payload-vector-fields input {
+  width: 100%;
+}
+.payload-step-tools {
+  display: flex;
+  gap: 6px;
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.payload-step-tools button {
+  font-size: 10px;
+  padding: 5px 8px;
+}
+.payload-step-tools .remove-step {
+  margin-left: auto;
+  color: #a42d24;
+}
+.add-payload-step {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+  font-size: 12px;
+  border-style: dashed;
+}
+.payload-empty {
+  padding: 20px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+#payload-target-field {
+  font-size: 10px;
+}
+#payload-json-panel textarea {
+  min-height: 220px;
+}
+#payload-json-panel .caption {
+  margin-top: 6px;
+}
+.payload-block-field input[type="number"] {
+  appearance: textfield;
+}
+.payload-block-field input[type="number"]::-webkit-inner-spin-button,
+.payload-block-field input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

@@ -22,7 +22,7 @@ from aiohttp import web
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "soarm-preview-only-not-a-secret"
 HOST, PORT = "127.0.0.1", 8767
-ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js"}
+ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js"}
 
 
 class Preview:

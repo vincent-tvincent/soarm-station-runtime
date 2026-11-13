@@ -103,3 +103,28 @@ with physical task success.
 
 No unresolved P0/P1/P2 visual findings. Very large ROS graphs require pan/zoom
 or optional focused view; no graph relationships are silently dropped.
+
+## Queued Blocks/JSON addition — final browser check
+
+The user requested this after the core deployment, and work started only after
+that deployment's read-only native smoke passed. `payload-blocks.jpg` and
+`payload-json.jpg` under `docs/dashboard-images/` capture the new subtabs at the
+same 1829 × 1750 review viewport. They reuse the existing Helvetica typography,
+neutral rectangular cards, black top rules and red Operations accent. No
+additional visual theme was introduced.
+
+Browser checks verified edits flowing into JSON, two-way view switching without
+changing text or the expanded row, add/reorder behavior with cumulative times,
+MODEL sequences with omitted durations, single-target continuous modes,
+Cartesian XYZ editing in a capability-enabled mock, and malformed JSON showing
+no stale blocks. Arbitrary finite joint precision remains valid; no numeric
+step quantization was introduced. A separate mock verified the optional current
+column with 0.125 A while the native adapter still reports null. Canonical
+motor_status takes precedence over legacy fixture aliases.
+
+The full frontend suite now has **46 passing checks**: 20 transport, 12 editor,
+6 graph and 8 camera geometry. Shared draft validation was checked to perform
+no request/arming/operation. Browser console reported no errors. The new editor
+was tested without physical motion. No unresolved P0/P1/P2 visual finding.
+
+final result: passed

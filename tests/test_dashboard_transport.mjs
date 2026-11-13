@@ -818,3 +818,55 @@ test("camera URLs decode before publication, retire after display boundary, and 
   assert.equal(new Set(f.revoked).size, f.revoked.length);
   await f.client.disconnect();
 });
+
+test("draft validation shares submission checks without sending or acquiring permission", async () => {
+  const f = fixture();
+  await f.client.connect(TOKEN);
+  const before = f.calls.length;
+  const body = {
+    points: [
+      {
+        time_s: 1,
+        positions: { shoulder_pan: 0, elbow_flex: 0.1 },
+        gripper: 40,
+      },
+    ],
+  };
+  assert.deepEqual(
+    f.client.validatePayload("arm1", "DIRECT", "INLINE", body),
+    body,
+  );
+  assert.throws(() =>
+    f.client.validatePayload("arm1", "MODEL", "INLINE", {
+      model_steps: [{ instruction: "task", duration_s: -1 }],
+    }),
+  );
+  const target = {
+    positions: { shoulder_pan: 0, elbow_flex: 0.1 },
+    gripper: 40,
+  };
+  assert.equal(
+    f.client.validatePayload("arm1", "DIRECT", "STREAM", target).gripper_unit,
+    "percent",
+  );
+  for (const mode of ["INLINE", "STREAM"]) {
+    assert.equal(
+      f.client.validatePayload("arm1", "TRAJECTORY", mode, {
+        points: [{ time_s: 1, positions: target.positions }],
+      }).points.length,
+      1,
+    );
+    const model =
+      mode === "INLINE"
+        ? { model_steps: [{ instruction: "task" }] }
+        : { instruction: "task" };
+    assert.deepEqual(
+      f.client.validatePayload("arm1", "MODEL", mode, model),
+      model,
+    );
+  }
+  assert.equal(f.calls.length, before);
+  assert.equal(f.sockets.length, 0);
+  assert.equal(f.client.currentOperation, null);
+  await f.client.disconnect();
+});

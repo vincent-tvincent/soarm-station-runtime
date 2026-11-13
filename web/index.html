@@ -254,17 +254,73 @@
                   </select></label
                 >
                 <div class="editor-heading">
-                  <label for="payload-editor">Semantic payload</label
+                  <span>Payload</span
                   ><button id="load-example" class="text-button">
                     Use current pose
                   </button>
                 </div>
-                <textarea
-                  id="payload-editor"
-                  spellcheck="false"
-                  aria-label="Semantic payload"
-                  rows="10"
-                ></textarea>
+                <div
+                  class="payload-view-tabs"
+                  role="tablist"
+                  aria-label="Payload editor"
+                >
+                  <button
+                    id="payload-tab-blocks"
+                    data-payload-view="blocks"
+                    class="active"
+                    role="tab"
+                    aria-selected="true"
+                    aria-controls="payload-blocks-panel"
+                  >
+                    Blocks
+                  </button>
+                  <button
+                    id="payload-tab-json"
+                    data-payload-view="json"
+                    role="tab"
+                    aria-selected="false"
+                    aria-controls="payload-json-panel"
+                  >
+                    JSON
+                  </button>
+                </div>
+                <section
+                  id="payload-blocks-panel"
+                  role="tabpanel"
+                  aria-labelledby="payload-tab-blocks"
+                >
+                  <label id="payload-target-field" class="field-label" hidden
+                    >Target representation<select id="payload-target-kind">
+                      <option value="joints">Joint waypoints</option>
+                      <option value="cartesian">Cartesian endpoints</option>
+                    </select></label
+                  >
+                  <div
+                    id="payload-block-error"
+                    class="payload-block-error"
+                    role="status"
+                  ></div>
+                  <div id="payload-blocks" class="payload-blocks"></div>
+                  <button id="add-payload-step" class="add-payload-step">
+                    Add step
+                  </button>
+                </section>
+                <section
+                  id="payload-json-panel"
+                  role="tabpanel"
+                  aria-labelledby="payload-tab-json"
+                  hidden
+                >
+                  <textarea
+                    id="payload-editor"
+                    spellcheck="false"
+                    aria-label="Semantic payload"
+                    rows="10"
+                  ></textarea>
+                  <p class="caption">
+                    The same draft is used by Blocks and JSON.
+                  </p>
+                </section>
                 <div id="payload-help" class="detail-note"></div>
                 <div class="button-row">
                   <button id="validate-payload">Validate draft</button
