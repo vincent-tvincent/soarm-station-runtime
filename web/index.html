@@ -1,26 +1,389 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SOArm Station</title>
-<style>:root{color-scheme:dark;font:15px system-ui;background:#11181d;color:#e9f1ed}body{max-width:1400px;margin:32px auto;padding:0 24px}header{display:flex;justify-content:space-between;align-items:center}h1{font-size:25px;letter-spacing:-.5px}.muted{color:#93a7ab}button,input,select{font:inherit;border:1px solid #405255;border-radius:6px;background:#223236;color:inherit;padding:9px 13px}button{cursor:pointer}button:hover{background:#38514b}.hold{background:#8b3e32}section{background:#1a262c;border:1px solid #2e4147;border-radius:10px;padding:20px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}img{width:100%;border-radius:6px}pre{white-space:pre-wrap;font-size:12px}.metric{font:28px ui-monospace}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px;border-bottom:1px solid #314046}.pill{color:#77d2a3}canvas{width:100%;height:180px}label{display:block;margin:8px 0}input[type=range]{width:60%}.alert{color:#ffc38e}#login{display:flex;gap:8px}</style>
-<header><div><h1>SOArm Station</h1><div id="device" class="muted">Robot state · cameras · durable history</div></div><span id="connection">Disconnected</span></header>
-<section id="login"><input id="token" type="password" placeholder="Operator token" autocomplete="off"><button id="connect">Connect</button></section>
-<section><div class="grid"><div><span class="muted">Locally committed</span><div id="local" class="metric">—</div></div><div><span class="muted">Remotely committed</span><div id="remote" class="metric">—</div></div><div><span class="muted">Queued for upload</span><div id="queued" class="metric">—</div></div></div><p id="uploadError" class="alert"></p></section>
-<div id="arms" class="grid"></div><div id="cameras" class="grid"></div>
-<section><h2>Measured history</h2><select id="historyArm"></select><button id="loadHistory">Refresh</button><canvas id="chart" width="1100" height="220"></canvas><div class="muted">Measured joint positions in radians · invalid samples remain gaps</div></section>
-<section><h2>Incidents and decisions</h2><pre id="events">No incidents received</pre></section>
-<script>
-let token='',state={},built=false,control=null,grant=null,seq=0,armControl='',target={},gripper=50,principal='browser-'+crypto.randomUUID(),timer=null;
-const $=x=>document.getElementById(x);const headers=()=>({'Authorization':'Bearer '+token,'Content-Type':'application/json'});
-async function api(path,body){const r=await fetch(path,{headers:headers(),method:body?'POST':'GET',body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error(await r.text());return r.json()}
-$('connect').onclick=async()=>{token=$('token').value;try{state=await api('/api/status');$('login').style.display='none';setInterval(refresh,100);setInterval(images,150);refresh()}catch(e){alert(e.message)}};
-async function refresh(){try{state=await api('/api/status');$('connection').textContent='Connected';$('device').textContent=state.device_id;for(const [k,v]of Object.entries({local:'local_committed',remote:'remote_committed',queued:'queued'}))$(k).textContent=state.upload[v]??'—';$('uploadError').textContent=state.upload.error||'';
-if(!built&&Object.keys(state.arms).length){for(const n of Object.keys(state.arms)){const s=document.createElement('section');s.innerHTML=`<h2>${n}</h2><div id="status-${n}"></div><table id="joints-${n}"></table><p><button onclick="enable('${n}')">Enable control</button> <button class="hold" onclick="hold('${n}')">Hold / disable control</button></p><button onclick="manual('${n}')">Start manual stream</button><div id="sliders-${n}"></div>`;$('arms').append(s);$('historyArm').add(new Option(n,n))}for(const n of state.cameras){const s=document.createElement('section');s.innerHTML=`<h3>${n}</h3><img id="image-${n}" alt="${n} camera">`;$('cameras').append(s)}built=true}
-for(const[n,s]of Object.entries(state.arms)){$('status-'+n).textContent=`${s.phase} · permission ${s.permission?(s.phase==='IDLE'?'enabled · waiting for a new operation':'enabled'):'disabled'} · torque ${s.measured_torque} · age ${s.feedback_age_ms} ms · ${s.measured_hz.toFixed(1)} Hz ${s.fault||''}${s.operation_type==='MODEL'?' · model '+(state.inference[n]?.status[0]?.message||'WAIT')+' '+(state.inference[n]?.status[0]?.values?.find(x=>x.key==='reason')?.value||''):''}`;const j=state.joints[n];if(j)$('joints-'+n).innerHTML=j.name.map((name,i)=>`<tr><td>${name.split('/').pop()}</td><td>${(j.position[i]*180/Math.PI).toFixed(1)}°</td></tr>`).join('')}
-$('events').textContent=JSON.stringify([...state.events,...state.decisions].slice(-15),null,2)||'No incidents';}catch(e){$('connection').textContent='Connection unavailable'}}
-async function images(){for(const n of state.cameras||[]){const r=await fetch('/api/cameras/'+n+'.jpg',{headers:headers()});if(r.ok){const el=$('image-'+n);if(el){const old=el.src;el.src=URL.createObjectURL(await r.blob());if(old.startsWith('blob:'))URL.revokeObjectURL(old)}}}}
-async function enable(n){const s=state.arms[n];const result=await api('/api/permission',{arm_id:n,controller_session:s.controller_session,operator_session_id:principal,enable:true});if(!result.accepted)alert(result.reason)}
-async function hold(n){if(control)control.close();clearInterval(timer);await api('/api/hold',{arm_id:n})}
-async function manual(n){if(control)control.close();clearInterval(timer);const j=state.joints[n];target=Object.fromEntries(j.name.map((x,i)=>[x.split('/').pop(),j.position[i]]));gripper=state.arms[n].gripper_percent;armControl=n;grant=null;seq=0;const box=$('sliders-'+n);box.innerHTML='';for(const[k,v]of Object.entries(target)){const l=document.createElement('label');l.textContent=k+' ';const input=document.createElement('input');input.type='range';input.min='-3.14';input.max='3.14';input.step='.005';input.value=v;input.oninput=()=>target[k]=+input.value;l.append(input);box.append(l)}
-// The token is sent in the authenticated WebSocket handshake, never in a URL.
-control=new WebSocket(location.origin.replace('https','wss')+'/ws/control',['soarm_station',token]);control.onopen=()=>control.send(JSON.stringify({arm_id:n,runtime_boot_id:state.arms[n].runtime_boot_id,controller_session:state.arms[n].controller_session,operator_session_id:principal,operation_type:'DIRECT',mode:'STREAM'}));control.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='grant')grant=d.grant;if(d.type==='error')alert(d.reason)};
-timer=setInterval(()=>{if(!grant||!control||control.readyState!==1)return;control.send(JSON.stringify({...grant,arm_id:n,frame_kind:'COMMAND',sequence:++seq,input_id:crypto.randomUUID(),body:{positions:{...target},gripper,gripper_unit:'percent'}}))},10)}
-$('loadHistory').onclick=async()=>{const data=await api('/api/history?arm='+$('historyArm').value+'&limit=500');const c=$('chart'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);const rows=data.records;if(!rows.length)return;const colors=['#77d2a3','#efb873','#79b9ed','#ca9cdb','#ec8c90'];for(let j=0;j<5;j++){ctx.strokeStyle=colors[j];ctx.beginPath();let pen=false;rows.forEach((r,i)=>{const q=r.sample.measured_joints.position[j];if(!r.sample.valid||q===undefined){pen=false;return}const x=i/(rows.length-1||1)*c.width,y=c.height/2-q*30;if(pen)ctx.lineTo(x,y);else ctx.moveTo(x,y);pen=true});ctx.stroke()}};
-</script></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>SOArm Station</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div id="app" data-view="operations">
+      <header class="masthead">
+        <a class="brand" href="#operations">SOARM / STATION</a>
+        <nav aria-label="Workspace">
+          <button class="nav-item active" data-page="operations">
+            01 Operations</button
+          ><button class="nav-item" data-page="graph">02 ROS graph</button>
+        </nav>
+        <div class="connection">
+          <span id="environment"></span><span id="connection">Disconnected</span
+          ><button id="disconnect" class="text-button" hidden>
+            Disconnect
+          </button>
+        </div>
+      </header>
+      <div class="page-heading">
+        <div>
+          <h1 id="page-title">Robot operations</h1>
+          <div class="title-rule"></div>
+        </div>
+        <span id="page-series">CONTROL / 01</span>
+      </div>
+      <form id="login" class="login-panel">
+        <div>
+          <h2>Connect to your station</h2>
+          <p>Sign in to view cameras, motor status and the ROS graph.</p>
+        </div>
+        <label
+          >Operator token<input
+            id="token"
+            type="password"
+            autocomplete="off"
+            required /></label
+        ><button class="primary" type="submit" disabled>Connect</button
+        ><span id="login-error" role="alert"></span>
+      </form>
+      <main id="operations" class="page">
+        <div class="arm-toolbar">
+          <label class="inline-label"
+            >Arm
+            <select id="arm-select" aria-label="Selected arm">
+              <option value="">Select an arm</option>
+            </select></label
+          ><span id="torque-badge" class="badge">Torque —</span
+          ><span id="permission-badge" class="badge">Control disabled</span>
+          <div class="spacer"></div>
+          <button id="enable-control" class="primary" disabled>
+            Enable control</button
+          ><button id="hold" class="danger" disabled>Hold / disable</button>
+        </div>
+        <div class="metrics">
+          <div>
+            <span>Joint feedback</span><strong id="feedback-hz">—</strong
+            ><small>Hz</small>
+          </div>
+          <div>
+            <span>Feedback age</span><strong id="feedback-age">—</strong
+            ><small>ms</small>
+          </div>
+          <div>
+            <span id="upload-label">History upload</span
+            ><strong id="queued">—</strong><small>records queued</small>
+          </div>
+        </div>
+        <div class="operations-workspace">
+          <section class="observation">
+            <div class="section-heading">
+              <h2><b>01</b> Observation</h2>
+              <div
+                class="segmented compact"
+                role="group"
+                aria-label="Camera layout"
+              >
+                <button data-layout="equal">Equal</button
+                ><button data-layout="primary" class="active">Primary</button
+                ><button data-layout="floating">Floating</button>
+              </div>
+              <button id="camera-fullscreen" class="text-button">Expand</button>
+            </div>
+            <div id="camera-stage" class="camera-stage layout-primary">
+              <div class="empty-state">
+                Camera views will appear after connecting.
+              </div>
+            </div>
+            <div class="camera-footnote">
+              <span id="camera-count">No camera feeds</span
+              ><span>Fit · original aspect ratio</span>
+            </div>
+          </section>
+          <aside class="operation-panel">
+            <div class="section-heading">
+              <h2><b>02</b> Operator panel</h2>
+            </div>
+            <div class="panel-tabs" role="tablist" aria-label="Operator panel">
+              <button
+                id="tab-status"
+                data-tab="status"
+                class="active"
+                role="tab"
+                aria-selected="true"
+                aria-controls="panel-status"
+              >
+                Status</button
+              ><button
+                id="tab-manual"
+                data-tab="manual"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-manual"
+              >
+                Manual</button
+              ><button
+                id="tab-payload"
+                data-tab="payload"
+                role="tab"
+                aria-selected="false"
+                aria-controls="panel-payload"
+              >
+                Payload
+              </button>
+            </div>
+            <div class="panel-body">
+              <section
+                id="panel-status"
+                role="tabpanel"
+                aria-labelledby="tab-status"
+              >
+                <div class="small-heading">
+                  Per-motor status
+                  <span id="motor-source">Waiting for telemetry</span>
+                </div>
+                <div class="motor-table-wrap">
+                  <table class="motor-table">
+                    <thead>
+                      <tr>
+                        <th>Motor</th>
+                        <th>Position</th>
+                        <th>Torque</th>
+                        <th>°C</th>
+                        <th>V</th>
+                        <th id="current-heading" hidden>A</th>
+                      </tr>
+                    </thead>
+                    <tbody id="motor-rows">
+                      <tr>
+                        <td colspan="5" class="muted">
+                          Select an arm to inspect its motors.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div id="motor-detail" class="detail-note">
+                  Select a motor for its target and reported fault status.
+                </div>
+                <div class="status-summary">
+                  <dl>
+                    <div>
+                      <dt>Operation</dt>
+                      <dd id="status-phase">—</dd>
+                    </div>
+                    <div>
+                      <dt>Policy</dt>
+                      <dd id="policy-state">—</dd>
+                    </div>
+                    <div>
+                      <dt>Locally committed</dt>
+                      <dd id="local-count">—</dd>
+                    </div>
+                    <div>
+                      <dt>Remotely committed</dt>
+                      <dd id="remote-count">—</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div class="panel-subheading">
+                  <h3>Measured history</h3>
+                  <button id="load-history" class="text-button">Refresh</button>
+                </div>
+                <canvas
+                  id="history-chart"
+                  height="100"
+                  aria-label="Measured joint history"
+                ></canvas>
+                <p id="history-note" class="muted caption">
+                  Positions in radians. Missing samples remain gaps.
+                </p>
+              </section>
+              <section
+                id="panel-manual"
+                role="tabpanel"
+                aria-labelledby="tab-manual"
+                hidden
+              >
+                <div class="small-heading">
+                  Joint targets <span>radians / gripper %</span>
+                </div>
+                <div id="manual-joints" class="manual-joints">
+                  <p class="muted">
+                    Select an arm to load its limits and current position.
+                  </p>
+                </div>
+                <div class="button-row">
+                  <button id="reset-targets">Use measured pose</button
+                  ><button id="start-manual" class="primary" disabled>
+                    Start manual stream
+                  </button>
+                </div>
+                <p id="manual-note" class="detail-note">
+                  Targets stay local until you start the stream.
+                </p>
+              </section>
+              <section
+                id="panel-payload"
+                role="tabpanel"
+                aria-labelledby="tab-payload"
+                hidden
+              >
+                <label class="field-label"
+                  >Operation<select id="operation-type">
+                    <option>DIRECT</option>
+                    <option>TRAJECTORY</option>
+                    <option>MODEL</option>
+                  </select></label
+                >
+                <div class="field-row">
+                  <label class="field-label"
+                    >Delivery<select id="operation-mode">
+                      <option>INLINE</option>
+                      <option>STREAM</option>
+                    </select></label
+                  ><label class="field-label"
+                    >Duration limit · seconds<input
+                      id="duration"
+                      type="number"
+                      min="0.01"
+                      step="0.1"
+                      placeholder="No stream limit"
+                  /></label>
+                </div>
+                <label id="profile-field" class="field-label" hidden
+                  >Policy profile<select id="profile-select">
+                    <option value="">No registered profiles</option>
+                  </select></label
+                >
+                <div class="editor-heading">
+                  <label for="payload-editor">Semantic payload</label
+                  ><button id="load-example" class="text-button">
+                    Use current pose
+                  </button>
+                </div>
+                <textarea
+                  id="payload-editor"
+                  spellcheck="false"
+                  aria-label="Semantic payload"
+                  rows="10"
+                ></textarea>
+                <div id="payload-help" class="detail-note"></div>
+                <div class="button-row">
+                  <button id="validate-payload">Validate draft</button
+                  ><button id="run-payload" class="primary" disabled>
+                    Run direct
+                  </button>
+                </div>
+                <div
+                  class="button-row stream-actions"
+                  id="stream-actions"
+                  hidden
+                >
+                  <button id="send-update">Send updated payload</button
+                  ><button id="end-stream">End stream</button>
+                </div>
+                <p id="validation-message" class="caption" role="status"></p>
+              </section>
+            </div>
+            <div class="active-operation">
+              <span class="eyebrow">Active operation</span
+              ><strong id="active-operation">No active operation</strong
+              ><span id="operation-detail" class="caption muted"
+                >Permission is separate from torque.</span
+              >
+            </div>
+          </aside>
+        </div>
+        <footer class="event-strip">
+          <strong>Recent events</strong
+          ><span id="recent-event">No events received</span
+          ><button id="events-toggle" class="text-button">View log</button>
+        </footer>
+        <div id="event-log" hidden></div>
+      </main>
+      <main id="graph" class="page" hidden>
+        <div class="graph-toolbar">
+          <label class="search-field"
+            ><span class="sr-only">Find a node or topic</span
+            ><input
+              id="graph-search"
+              type="search"
+              placeholder="Find a node, topic or interface…" /></label
+          ><span class="graph-tip"
+            >Click to highlight · double-click to focus</span
+          ><label class="check-label"
+            ><input
+              id="show-infrastructure"
+              type="checkbox"
+            />Infrastructure</label
+          ><button id="refresh-graph">Refresh</button>
+        </div>
+        <div class="graph-summary">
+          <span id="graph-counts">Waiting for ROS discovery</span
+          ><span id="graph-meta">Read only</span>
+        </div>
+        <div class="graph-workspace">
+          <section class="graph-main">
+            <div class="canvas-toolbar">
+              <span id="graph-focus">Focus: none</span>
+              <div>
+                <button id="graph-zoom-out" aria-label="Zoom out">−</button
+                ><button id="graph-fit">Fit</button
+                ><button id="graph-zoom-in" aria-label="Zoom in">+</button
+                ><button id="graph-clear">Clear selection</button
+                ><button id="graph-exit" hidden>Exit focus</button>
+              </div>
+            </div>
+            <div
+              id="graph-canvas"
+              tabindex="0"
+              aria-label="Interactive ROS graph. Drag to pan. Select a block to inspect it."
+            ></div>
+            <div class="graph-legend">
+              <span><i class="node-key"></i>Node</span
+              ><span><i class="topic-key"></i>Typed topic</span
+              ><span><i class="selection-key"></i>Selected</span
+              ><span><i class="line-key warm"></i>Publish</span
+              ><span><i class="line-key cool"></i>Subscribe</span
+              ><span><i class="line-key dashed"></i>Action / service</span>
+            </div>
+            <div
+              class="interface-tabs"
+              role="tablist"
+              aria-label="ROS interfaces"
+            >
+              <button
+                data-interface="topics"
+                class="active"
+                role="tab"
+                aria-selected="true"
+              >
+                Topics</button
+              ><button
+                data-interface="actions"
+                role="tab"
+                aria-selected="false"
+              >
+                Actions</button
+              ><button
+                data-interface="services"
+                role="tab"
+                aria-selected="false"
+              >
+                Services</button
+              ><span id="interface-count"></span>
+            </div>
+            <div id="interface-list" class="interface-list"></div>
+          </section>
+          <aside id="graph-inspector" class="graph-inspector">
+            <div class="empty-state">
+              <span class="eyebrow">Inspector</span>
+              <h2>Select a node or topic</h2>
+              <p>Inspect its type, relationships and observed activity.</p>
+            </div>
+          </aside>
+        </div>
+      </main>
+      <div id="notice" class="notice" role="status" hidden></div>
+    </div>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

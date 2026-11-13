@@ -1,0 +1,4330 @@
+{
+  "schema_version": 1,
+  "preview": {
+    "mode": "MOCK_PREVIEW",
+    "hardware_connected": false,
+    "backend_network_access": false,
+    "camera_source": "Existing historical project JPEGs, November8,2026; never live capture",
+    "token": "soarm-preview-only-not-a-secret",
+    "environment": {
+      "mode": "MOCK_PREVIEW",
+      "mock": true,
+      "hardware_connected": false,
+      "backend_network_access": false,
+      "label": "Hardware-free mock preview",
+      "camera_source": "Historical project references; not live capture"
+    }
+  },
+  "default_scenario": "station",
+  "scenarios": {
+    "station": {
+      "resources": {
+        "schema_version": 1,
+        "device_id": "MOCK \u00b7 workbench station",
+        "arms": [
+          {
+            "id": "arm1",
+            "name": "Workbench arm",
+            "label": "Workbench arm",
+            "kind": "manipulator",
+            "backend": "mock-preview",
+            "base_frame": "arm1_base",
+            "joints": [
+              {
+                "name": "shoulder_pan",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder pan",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 1
+              },
+              {
+                "name": "shoulder_lift",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder lift",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 2
+              },
+              {
+                "name": "elbow_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "elbow flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 3
+              },
+              {
+                "name": "wrist_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 4
+              },
+              {
+                "name": "wrist_roll",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist roll",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 5
+              }
+            ],
+            "gripper": {
+              "name": "gripper",
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "velocity_percent_s": 100,
+              "label": "Gripper",
+              "velocity_limit": 100,
+              "motor_id": 6
+            },
+            "capabilities": {
+              "operation_types": [
+                "DIRECT",
+                "TRAJECTORY",
+                "MODEL"
+              ],
+              "input_modes": [
+                "INLINE",
+                "STREAM"
+              ],
+              "writable": true,
+              "cartesian_endpoints": false
+            },
+            "read_only": false,
+            "profile_ids": [
+              "fixture-policy"
+            ]
+          },
+          {
+            "id": "arm2",
+            "name": "Secondary arm",
+            "label": "Secondary arm",
+            "kind": "manipulator",
+            "backend": "mock-preview",
+            "base_frame": "arm2_base",
+            "joints": [
+              {
+                "name": "shoulder_pan",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder pan",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 1
+              },
+              {
+                "name": "shoulder_lift",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder lift",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 2
+              },
+              {
+                "name": "elbow_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "elbow flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 3
+              },
+              {
+                "name": "wrist_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 4
+              },
+              {
+                "name": "wrist_roll",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist roll",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 5
+              }
+            ],
+            "gripper": {
+              "name": "gripper",
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "velocity_percent_s": 100,
+              "label": "Gripper",
+              "velocity_limit": 100,
+              "motor_id": 6
+            },
+            "capabilities": {
+              "operation_types": [
+                "DIRECT",
+                "TRAJECTORY",
+                "MODEL"
+              ],
+              "input_modes": [
+                "INLINE",
+                "STREAM"
+              ],
+              "writable": false,
+              "cartesian_endpoints": false
+            },
+            "read_only": true,
+            "profile_ids": []
+          }
+        ],
+        "cameras": [
+          {
+            "id": "forward",
+            "name": "Forward view",
+            "role": "forward",
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_check_2026-11-07/baseline-samples/camera1-01.png",
+            "reference_date": "2026-11-07",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/forward.jpg",
+            "label": "Forward view",
+            "requested_fps": 30,
+            "frame_id": "forward_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          },
+          {
+            "id": "overview",
+            "name": "Overview view",
+            "role": "overview",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_light_check_2026-11-08/pi-cameras-20261108-light-640-auto/camera2-sample-05s.jpg",
+            "reference_date": "2026-11-08",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/overview.jpg",
+            "label": "Overview view",
+            "requested_fps": 30,
+            "frame_id": "overview_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          },
+          {
+            "id": "wrist",
+            "name": "Wrist view",
+            "role": "wrist",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "reference_file": "outputs/pi_wrist_camera_check_2026-11-08/wrist-preview.png",
+            "reference_date": "2026-11-08",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/wrist.jpg",
+            "label": "Wrist view",
+            "requested_fps": 30,
+            "frame_id": "wrist_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          }
+        ],
+        "profiles": [
+          {
+            "id": "fixture-policy",
+            "label": "Fixture policy (mock only)",
+            "arm_id": "arm1",
+            "backend": "fixture",
+            "language_conditioned": true,
+            "action_fps": 30
+          }
+        ],
+        "workflows": [
+          {
+            "id": "inspect_station",
+            "name": "Inspect station",
+            "description": "Mock-only workflow result"
+          }
+        ],
+        "capabilities": {
+          "hardware_connected": false,
+          "mock_controls": true,
+          "remote_teleoperation": true
+        },
+        "operation_contract": {
+          "schema_version": 1,
+          "control_websocket": {
+            "operation_type": "DIRECT",
+            "mode": "STREAM"
+          },
+          "stream_endpoint": "/api/stream",
+          "operate_endpoint": "/api/operate",
+          "feedback_endpoint": "/api/operations/{request_id}"
+        }
+      },
+      "status": {
+        "device_id": "MOCK \u00b7 workbench station",
+        "mode": "MOCK_PREVIEW",
+        "arms": {
+          "arm1": {
+            "arm_id": "arm1",
+            "runtime_boot_id": "mock-runtime-boot",
+            "controller_session": "mock-controller-arm1",
+            "phase": "IDLE",
+            "permission": false,
+            "operation_id": "",
+            "operation_epoch": 1,
+            "operation_type": "NONE",
+            "measured_torque": "ON",
+            "feedback_age_ms": 7.4,
+            "measured_hz": 99.8,
+            "gripper_percent": 42.0,
+            "fault": "",
+            "sample_sequence": 24031,
+            "feedback_valid": true
+          },
+          "arm2": {
+            "arm_id": "arm2",
+            "runtime_boot_id": "mock-runtime-boot",
+            "controller_session": "mock-controller-arm2",
+            "phase": "IDLE",
+            "permission": false,
+            "operation_id": "",
+            "operation_epoch": 1,
+            "operation_type": "NONE",
+            "measured_torque": "UNKNOWN",
+            "feedback_age_ms": null,
+            "measured_hz": null,
+            "gripper_percent": null,
+            "fault": "No feedback sample received",
+            "sample_sequence": 0,
+            "feedback_valid": false
+          }
+        },
+        "joints": {
+          "arm1": {
+            "header": {
+              "stamp": {
+                "sec": 0,
+                "nanosec": 0
+              },
+              "frame_id": "arm1_base"
+            },
+            "name": [
+              "arm1/shoulder_pan",
+              "arm1/shoulder_lift",
+              "arm1/elbow_flex",
+              "arm1/wrist_flex",
+              "arm1/wrist_roll"
+            ],
+            "position": [
+              0.12,
+              -0.84,
+              1.21,
+              0.31,
+              -0.16
+            ],
+            "velocity": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "effort": []
+          }
+        },
+        "inference": {
+          "arm1": {
+            "status": [
+              {
+                "name": "mock-policy",
+                "level": 1,
+                "message": "NOT LOADED",
+                "values": [
+                  {
+                    "key": "reason",
+                    "value": "Preview contains no model runtime"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "cameras": [
+          "forward",
+          "overview",
+          "wrist"
+        ],
+        "camera_status": {
+          "forward": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          },
+          "overview": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          },
+          "wrist": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          }
+        },
+        "upload": {
+          "local_committed": 18420,
+          "remote_committed": 18384,
+          "queued": 36,
+          "connected": true,
+          "error": "",
+          "last_ack_age_ms": 840,
+          "rate_hz": 1.0
+        },
+        "events": [
+          {
+            "event_id": "mock-event-1",
+            "severity": "INFO",
+            "source": "preview",
+            "code": "MOCK_PREVIEW",
+            "detail": "Hardware-free fixture. Camera views are historical reference files, not live capture.",
+            "time_ns": 0
+          },
+          {
+            "event_id": "mock-event-2",
+            "severity": "WARN",
+            "source": "arm2",
+            "code": "FEEDBACK_NOT_RECEIVED",
+            "detail": "Second resource intentionally has unknown/no-sample metrics.",
+            "time_ns": 0
+          }
+        ],
+        "workflows": {},
+        "decisions": [],
+        "metrics": {
+          "cpu_percent": 18.6,
+          "memory_percent": 31.2,
+          "memory_used_bytes": 2680059592,
+          "memory_total_bytes": 8589934592,
+          "disk_used_percent": 24.7,
+          "cpu_temperature_c": 49.2,
+          "uptime_s": 7320,
+          "network_rx_bytes_s": 125000,
+          "network_tx_bytes_s": 68000,
+          "control_hz": 99.8,
+          "power_w": null,
+          "current_a": null,
+          "camera_capture_fps": null,
+          "sample_source": "synthetic_fixture"
+        },
+        "motors": {
+          "arm1": [
+            {
+              "name": "shoulder_pan",
+              "joint_name": "shoulder_pan",
+              "position_rad": 0.12,
+              "commanded_rad": 0.12,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 31,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "shoulder_lift",
+              "joint_name": "shoulder_lift",
+              "position_rad": -0.84,
+              "commanded_rad": -0.84,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 32,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "elbow_flex",
+              "joint_name": "elbow_flex",
+              "position_rad": 1.21,
+              "commanded_rad": 1.21,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 33,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "wrist_flex",
+              "joint_name": "wrist_flex",
+              "position_rad": 0.31,
+              "commanded_rad": 0.31,
+              "velocity_rad_s": 0.0,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "PARTIAL"
+            },
+            {
+              "name": "wrist_roll",
+              "joint_name": "wrist_roll",
+              "position_rad": -0.16,
+              "commanded_rad": -0.16,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 35,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "gripper",
+              "joint_name": "gripper",
+              "position_percent": 42.0,
+              "commanded_percent": 42.0,
+              "unit": "percent",
+              "voltage_v": 12.0,
+              "temperature_c": 32.0,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            }
+          ],
+          "arm2": [
+            {
+              "name": "shoulder_pan",
+              "joint_name": "shoulder_pan",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "shoulder_lift",
+              "joint_name": "shoulder_lift",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "elbow_flex",
+              "joint_name": "elbow_flex",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "wrist_flex",
+              "joint_name": "wrist_flex",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "wrist_roll",
+              "joint_name": "wrist_roll",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            }
+          ]
+        },
+        "schema_version": 1,
+        "environment": {
+          "mode": "MOCK_PREVIEW",
+          "mock": true,
+          "hardware_connected": false,
+          "backend_network_access": false,
+          "label": "Hardware-free mock preview",
+          "camera_source": "Historical project references; not live capture"
+        },
+        "resources": {
+          "schema_version": 1,
+          "device_id": "MOCK \u00b7 workbench station",
+          "arms": [
+            {
+              "id": "arm1",
+              "name": "Workbench arm",
+              "label": "Workbench arm",
+              "kind": "manipulator",
+              "backend": "mock-preview",
+              "base_frame": "arm1_base",
+              "joints": [
+                {
+                  "name": "shoulder_pan",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder pan",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 1
+                },
+                {
+                  "name": "shoulder_lift",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder lift",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 2
+                },
+                {
+                  "name": "elbow_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "elbow flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 3
+                },
+                {
+                  "name": "wrist_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 4
+                },
+                {
+                  "name": "wrist_roll",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist roll",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 5
+                }
+              ],
+              "gripper": {
+                "name": "gripper",
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "velocity_percent_s": 100,
+                "label": "Gripper",
+                "velocity_limit": 100,
+                "motor_id": 6
+              },
+              "capabilities": {
+                "operation_types": [
+                  "DIRECT",
+                  "TRAJECTORY",
+                  "MODEL"
+                ],
+                "input_modes": [
+                  "INLINE",
+                  "STREAM"
+                ],
+                "writable": true,
+                "cartesian_endpoints": false
+              },
+              "read_only": false,
+              "profile_ids": [
+                "fixture-policy"
+              ]
+            },
+            {
+              "id": "arm2",
+              "name": "Secondary arm",
+              "label": "Secondary arm",
+              "kind": "manipulator",
+              "backend": "mock-preview",
+              "base_frame": "arm2_base",
+              "joints": [
+                {
+                  "name": "shoulder_pan",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder pan",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 1
+                },
+                {
+                  "name": "shoulder_lift",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder lift",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 2
+                },
+                {
+                  "name": "elbow_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "elbow flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 3
+                },
+                {
+                  "name": "wrist_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 4
+                },
+                {
+                  "name": "wrist_roll",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist roll",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 5
+                }
+              ],
+              "gripper": {
+                "name": "gripper",
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "velocity_percent_s": 100,
+                "label": "Gripper",
+                "velocity_limit": 100,
+                "motor_id": 6
+              },
+              "capabilities": {
+                "operation_types": [
+                  "DIRECT",
+                  "TRAJECTORY",
+                  "MODEL"
+                ],
+                "input_modes": [
+                  "INLINE",
+                  "STREAM"
+                ],
+                "writable": false,
+                "cartesian_endpoints": false
+              },
+              "read_only": true,
+              "profile_ids": []
+            }
+          ],
+          "cameras": [
+            {
+              "id": "forward",
+              "name": "Forward view",
+              "role": "forward",
+              "width": 1920,
+              "height": 1080,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_check_2026-11-07/baseline-samples/camera1-01.png",
+              "reference_date": "2026-11-07",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/forward.jpg",
+              "label": "Forward view",
+              "requested_fps": 30,
+              "frame_id": "forward_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            },
+            {
+              "id": "overview",
+              "name": "Overview view",
+              "role": "overview",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_light_check_2026-11-08/pi-cameras-20261108-light-640-auto/camera2-sample-05s.jpg",
+              "reference_date": "2026-11-08",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/overview.jpg",
+              "label": "Overview view",
+              "requested_fps": 30,
+              "frame_id": "overview_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            },
+            {
+              "id": "wrist",
+              "name": "Wrist view",
+              "role": "wrist",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "reference_file": "outputs/pi_wrist_camera_check_2026-11-08/wrist-preview.png",
+              "reference_date": "2026-11-08",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/wrist.jpg",
+              "label": "Wrist view",
+              "requested_fps": 30,
+              "frame_id": "wrist_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "fixture-policy",
+              "label": "Fixture policy (mock only)",
+              "arm_id": "arm1",
+              "backend": "fixture",
+              "language_conditioned": true,
+              "action_fps": 30
+            }
+          ],
+          "workflows": [
+            {
+              "id": "inspect_station",
+              "name": "Inspect station",
+              "description": "Mock-only workflow result"
+            }
+          ],
+          "capabilities": {
+            "hardware_connected": false,
+            "mock_controls": true,
+            "remote_teleoperation": true
+          },
+          "operation_contract": {
+            "schema_version": 1,
+            "control_websocket": {
+              "operation_type": "DIRECT",
+              "mode": "STREAM"
+            },
+            "stream_endpoint": "/api/stream",
+            "operate_endpoint": "/api/operate",
+            "feedback_endpoint": "/api/operations/{request_id}"
+          }
+        },
+        "motor_status": {
+          "arm1": {
+            "schema_version": 1,
+            "arm_id": "arm1",
+            "state": "simulated",
+            "health_time_ns": null,
+            "health_age_ms": 320.0,
+            "motors": [
+              {
+                "id": 1,
+                "name": "shoulder_pan",
+                "label": "Shoulder Pan",
+                "role": "joint",
+                "unit": "rad",
+                "position": 0.12,
+                "position_time_ns": null,
+                "position_age_ms": 7.4,
+                "goal_position": 0.12,
+                "reference_position": 0.12,
+                "torque_enabled": true,
+                "temperature_c": 31,
+                "voltage_v": 12.0,
+                "source_state": "simulated",
+                "unavailable_fields": []
+              },
+              {
+                "id": 2,
+                "name": "shoulder_lift",
+                "label": "Shoulder Lift",
+                "role": "joint",
+                "unit": "rad",
+                "position": -0.84,
+                "position_time_ns": null,
+                "position_age_ms": 7.4,
+                "goal_position": -0.84,
+                "reference_position": -0.84,
+                "torque_enabled": true,
+                "temperature_c": 32,
+                "voltage_v": 12.0,
+                "source_state": "simulated",
+                "unavailable_fields": []
+              },
+              {
+                "id": 3,
+                "name": "elbow_flex",
+                "label": "Elbow Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": 1.21,
+                "position_time_ns": null,
+                "position_age_ms": 7.4,
+                "goal_position": 1.21,
+                "reference_position": 1.21,
+                "torque_enabled": true,
+                "temperature_c": 33,
+                "voltage_v": 12.0,
+                "source_state": "simulated",
+                "unavailable_fields": []
+              },
+              {
+                "id": 4,
+                "name": "wrist_flex",
+                "label": "Wrist Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": 0.31,
+                "position_time_ns": null,
+                "position_age_ms": 7.4,
+                "goal_position": 0.31,
+                "reference_position": 0.31,
+                "torque_enabled": true,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "simulated",
+                "unavailable_fields": [
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 5,
+                "name": "wrist_roll",
+                "label": "Wrist Roll",
+                "role": "joint",
+                "unit": "rad",
+                "position": -0.16,
+                "position_time_ns": null,
+                "position_age_ms": 7.4,
+                "goal_position": -0.16,
+                "reference_position": -0.16,
+                "torque_enabled": true,
+                "temperature_c": 35,
+                "voltage_v": 12.0,
+                "source_state": "simulated",
+                "unavailable_fields": []
+              },
+              {
+                "id": 6,
+                "name": "gripper",
+                "label": "Gripper",
+                "role": "gripper",
+                "unit": "percent",
+                "position": 42.0,
+                "position_time_ns": null,
+                "position_age_ms": 7.4,
+                "goal_position": 42.0,
+                "reference_position": 42.0,
+                "torque_enabled": true,
+                "temperature_c": 32.0,
+                "voltage_v": 12.0,
+                "source_state": "simulated",
+                "unavailable_fields": []
+              }
+            ]
+          },
+          "arm2": {
+            "schema_version": 1,
+            "arm_id": "arm2",
+            "state": "unavailable",
+            "health_time_ns": null,
+            "health_age_ms": null,
+            "motors": [
+              {
+                "id": 1,
+                "name": "shoulder_pan",
+                "label": "Shoulder Pan",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 2,
+                "name": "shoulder_lift",
+                "label": "Shoulder Lift",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 3,
+                "name": "elbow_flex",
+                "label": "Elbow Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 4,
+                "name": "wrist_flex",
+                "label": "Wrist Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 5,
+                "name": "wrist_roll",
+                "label": "Wrist Roll",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "graph": {
+        "schema_version": 1,
+        "sequence": 1,
+        "captured_at_ns": 0,
+        "age_ms": 0,
+        "state": "ready",
+        "scope": "observer_visible_ros_domain",
+        "consistency": "best_effort_discovery",
+        "nodes": [
+          {
+            "id": "node:/soarm_station/lerobot_node",
+            "name": "lerobot_node",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/lerobot_node",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/soarm_station/workflow_manager",
+            "name": "workflow_manager",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/workflow_manager",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/soarm_station/dashboard_node",
+            "name": "dashboard_node",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/dashboard_node",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/soarm_station/telemetry_node",
+            "name": "telemetry_node",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/telemetry_node",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/soarm_station/robot_state_publisher",
+            "name": "robot_state_publisher",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/robot_state_publisher",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/soarm_station/static_transform_publishers",
+            "name": "static_transform_publishers",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/static_transform_publishers",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/soarm_station/recorder",
+            "name": "recorder",
+            "namespace": "/soarm_station",
+            "fully_qualified_name": "/soarm_station/recorder",
+            "instance_count": 1
+          }
+        ],
+        "topics": [
+          {
+            "id": "topic:/soarm_station/arm1/joint_states",
+            "name": "/soarm_station/arm1/joint_states",
+            "types": [
+              "sensor_msgs/msg/JointState"
+            ],
+            "publishers": [
+              {
+                "id": "publish:0:0",
+                "node_id": "node:/soarm_station/lerobot_node",
+                "type": "sensor_msgs/msg/JointState",
+                "gid": "mock-publish-0-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:0:0",
+                "node_id": "node:/soarm_station/dashboard_node",
+                "type": "sensor_msgs/msg/JointState",
+                "gid": "mock-subscribe-0-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:0:1",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "sensor_msgs/msg/JointState",
+                "gid": "mock-subscribe-0-1",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:0:2",
+                "node_id": "node:/soarm_station/telemetry_node",
+                "type": "sensor_msgs/msg/JointState",
+                "gid": "mock-subscribe-0-2",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:0:3",
+                "node_id": "node:/soarm_station/robot_state_publisher",
+                "type": "sensor_msgs/msg/JointState",
+                "gid": "mock-subscribe-0-3",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:0:4",
+                "node_id": "node:/soarm_station/recorder",
+                "type": "sensor_msgs/msg/JointState",
+                "gid": "mock-subscribe-0-4",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/soarm_station/camera/overview/image_raw/compressed",
+            "name": "/soarm_station/camera/overview/image_raw/compressed",
+            "types": [
+              "sensor_msgs/msg/CompressedImage"
+            ],
+            "publishers": [
+              {
+                "id": "publish:1:0",
+                "node_id": "node:/soarm_station/lerobot_node",
+                "type": "sensor_msgs/msg/CompressedImage",
+                "gid": "mock-publish-1-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:1:0",
+                "node_id": "node:/soarm_station/dashboard_node",
+                "type": "sensor_msgs/msg/CompressedImage",
+                "gid": "mock-subscribe-1-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:1:1",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "sensor_msgs/msg/CompressedImage",
+                "gid": "mock-subscribe-1-1",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:1:2",
+                "node_id": "node:/soarm_station/recorder",
+                "type": "sensor_msgs/msg/CompressedImage",
+                "gid": "mock-subscribe-1-2",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/soarm_station/lerobot/command_stream",
+            "name": "/soarm_station/lerobot/command_stream",
+            "types": [
+              "soarm_station_interfaces/msg/OperationInput"
+            ],
+            "publishers": [
+              {
+                "id": "publish:2:0",
+                "node_id": "node:/soarm_station/dashboard_node",
+                "type": "soarm_station_interfaces/msg/OperationInput",
+                "gid": "mock-publish-2-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:2:1",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "soarm_station_interfaces/msg/OperationInput",
+                "gid": "mock-publish-2-1",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:2:0",
+                "node_id": "node:/soarm_station/lerobot_node",
+                "type": "soarm_station_interfaces/msg/OperationInput",
+                "gid": "mock-subscribe-2-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/soarm_station/arm1/lerobot/status",
+            "name": "/soarm_station/arm1/lerobot/status",
+            "types": [
+              "soarm_station_interfaces/msg/OperationStatus"
+            ],
+            "publishers": [
+              {
+                "id": "publish:3:0",
+                "node_id": "node:/soarm_station/lerobot_node",
+                "type": "soarm_station_interfaces/msg/OperationStatus",
+                "gid": "mock-publish-3-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:3:0",
+                "node_id": "node:/soarm_station/dashboard_node",
+                "type": "soarm_station_interfaces/msg/OperationStatus",
+                "gid": "mock-subscribe-3-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:3:1",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "soarm_station_interfaces/msg/OperationStatus",
+                "gid": "mock-subscribe-3-1",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:3:2",
+                "node_id": "node:/soarm_station/telemetry_node",
+                "type": "soarm_station_interfaces/msg/OperationStatus",
+                "gid": "mock-subscribe-3-2",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/tf",
+            "name": "/tf",
+            "types": [
+              "tf2_msgs/msg/TFMessage"
+            ],
+            "publishers": [
+              {
+                "id": "publish:4:0",
+                "node_id": "node:/soarm_station/robot_state_publisher",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-publish-4-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:4:0",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-subscribe-4-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:4:1",
+                "node_id": "node:/soarm_station/recorder",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-subscribe-4-1",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/tf_static",
+            "name": "/tf_static",
+            "types": [
+              "tf2_msgs/msg/TFMessage"
+            ],
+            "publishers": [
+              {
+                "id": "publish:5:0",
+                "node_id": "node:/soarm_station/robot_state_publisher",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-publish-5-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "TRANSIENT_LOCAL",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:5:1",
+                "node_id": "node:/soarm_station/static_transform_publishers",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-publish-5-1",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "TRANSIENT_LOCAL",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:5:0",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-subscribe-5-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "TRANSIENT_LOCAL",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:5:1",
+                "node_id": "node:/soarm_station/recorder",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-subscribe-5-1",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "TRANSIENT_LOCAL",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/soarm_station/diagnostics",
+            "name": "/soarm_station/diagnostics",
+            "types": [
+              "diagnostic_msgs/msg/DiagnosticArray"
+            ],
+            "publishers": [
+              {
+                "id": "publish:6:0",
+                "node_id": "node:/soarm_station/lerobot_node",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:6:1",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-1",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:6:2",
+                "node_id": "node:/soarm_station/dashboard_node",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-2",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:6:3",
+                "node_id": "node:/soarm_station/telemetry_node",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-3",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:6:4",
+                "node_id": "node:/soarm_station/robot_state_publisher",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-4",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:6:5",
+                "node_id": "node:/soarm_station/static_transform_publishers",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-5",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:6:6",
+                "node_id": "node:/soarm_station/recorder",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-publish-6-6",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:6:0",
+                "node_id": "node:/soarm_station/lerobot_node",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-subscribe-6-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:6:1",
+                "node_id": "node:/soarm_station/workflow_manager",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-subscribe-6-1",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:6:2",
+                "node_id": "node:/soarm_station/telemetry_node",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-subscribe-6-2",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:6:3",
+                "node_id": "node:/soarm_station/dashboard_node",
+                "type": "diagnostic_msgs/msg/DiagnosticArray",
+                "gid": "mock-subscribe-6-3",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          }
+        ],
+        "services": [
+          {
+            "id": "service:/soarm_station/lerobot/hold",
+            "name": "/soarm_station/lerobot/hold",
+            "types": [
+              "soarm_station_interfaces/srv/Hold"
+            ],
+            "servers": [
+              "node:/soarm_station/lerobot_node"
+            ],
+            "clients": [
+              "node:/soarm_station/dashboard_node",
+              "node:/soarm_station/workflow_manager"
+            ]
+          },
+          {
+            "id": "service:/soarm_station/telemetry/query_history",
+            "name": "/soarm_station/telemetry/query_history",
+            "types": [
+              "soarm_station_interfaces/srv/QueryHistory"
+            ],
+            "servers": [
+              "node:/soarm_station/telemetry_node"
+            ],
+            "clients": [
+              "node:/soarm_station/dashboard_node"
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "id": "action:/soarm_station/lerobot/operate",
+            "name": "/soarm_station/lerobot/operate",
+            "types": [
+              "soarm_station_interfaces/action/ExecuteOperation"
+            ],
+            "servers": [
+              "node:/soarm_station/lerobot_node"
+            ],
+            "clients": [
+              "node:/soarm_station/workflow_manager",
+              "node:/soarm_station/dashboard_node"
+            ]
+          },
+          {
+            "id": "action:/soarm_station/workflows/execute",
+            "name": "/soarm_station/workflows/execute",
+            "types": [
+              "soarm_station_interfaces/action/ExecuteWorkflow"
+            ],
+            "servers": [
+              "node:/soarm_station/workflow_manager"
+            ],
+            "clients": [
+              "node:/soarm_station/dashboard_node"
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge:publish:0:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/lerobot_node",
+            "to": "topic:/soarm_station/arm1/joint_states",
+            "endpoint_id": "publish:0:0"
+          },
+          {
+            "id": "edge:subscribe:0:0",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/joint_states",
+            "to": "node:/soarm_station/dashboard_node",
+            "endpoint_id": "subscribe:0:0"
+          },
+          {
+            "id": "edge:subscribe:0:1",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/joint_states",
+            "to": "node:/soarm_station/workflow_manager",
+            "endpoint_id": "subscribe:0:1"
+          },
+          {
+            "id": "edge:subscribe:0:2",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/joint_states",
+            "to": "node:/soarm_station/telemetry_node",
+            "endpoint_id": "subscribe:0:2"
+          },
+          {
+            "id": "edge:subscribe:0:3",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/joint_states",
+            "to": "node:/soarm_station/robot_state_publisher",
+            "endpoint_id": "subscribe:0:3"
+          },
+          {
+            "id": "edge:subscribe:0:4",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/joint_states",
+            "to": "node:/soarm_station/recorder",
+            "endpoint_id": "subscribe:0:4"
+          },
+          {
+            "id": "edge:publish:1:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/lerobot_node",
+            "to": "topic:/soarm_station/camera/overview/image_raw/compressed",
+            "endpoint_id": "publish:1:0"
+          },
+          {
+            "id": "edge:subscribe:1:0",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/camera/overview/image_raw/compressed",
+            "to": "node:/soarm_station/dashboard_node",
+            "endpoint_id": "subscribe:1:0"
+          },
+          {
+            "id": "edge:subscribe:1:1",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/camera/overview/image_raw/compressed",
+            "to": "node:/soarm_station/workflow_manager",
+            "endpoint_id": "subscribe:1:1"
+          },
+          {
+            "id": "edge:subscribe:1:2",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/camera/overview/image_raw/compressed",
+            "to": "node:/soarm_station/recorder",
+            "endpoint_id": "subscribe:1:2"
+          },
+          {
+            "id": "edge:publish:2:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/dashboard_node",
+            "to": "topic:/soarm_station/lerobot/command_stream",
+            "endpoint_id": "publish:2:0"
+          },
+          {
+            "id": "edge:publish:2:1",
+            "kind": "publish",
+            "from": "node:/soarm_station/workflow_manager",
+            "to": "topic:/soarm_station/lerobot/command_stream",
+            "endpoint_id": "publish:2:1"
+          },
+          {
+            "id": "edge:subscribe:2:0",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/lerobot/command_stream",
+            "to": "node:/soarm_station/lerobot_node",
+            "endpoint_id": "subscribe:2:0"
+          },
+          {
+            "id": "edge:publish:3:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/lerobot_node",
+            "to": "topic:/soarm_station/arm1/lerobot/status",
+            "endpoint_id": "publish:3:0"
+          },
+          {
+            "id": "edge:subscribe:3:0",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/lerobot/status",
+            "to": "node:/soarm_station/dashboard_node",
+            "endpoint_id": "subscribe:3:0"
+          },
+          {
+            "id": "edge:subscribe:3:1",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/lerobot/status",
+            "to": "node:/soarm_station/workflow_manager",
+            "endpoint_id": "subscribe:3:1"
+          },
+          {
+            "id": "edge:subscribe:3:2",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/arm1/lerobot/status",
+            "to": "node:/soarm_station/telemetry_node",
+            "endpoint_id": "subscribe:3:2"
+          },
+          {
+            "id": "edge:publish:4:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/robot_state_publisher",
+            "to": "topic:/tf",
+            "endpoint_id": "publish:4:0"
+          },
+          {
+            "id": "edge:subscribe:4:0",
+            "kind": "subscribe",
+            "from": "topic:/tf",
+            "to": "node:/soarm_station/workflow_manager",
+            "endpoint_id": "subscribe:4:0"
+          },
+          {
+            "id": "edge:subscribe:4:1",
+            "kind": "subscribe",
+            "from": "topic:/tf",
+            "to": "node:/soarm_station/recorder",
+            "endpoint_id": "subscribe:4:1"
+          },
+          {
+            "id": "edge:publish:5:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/robot_state_publisher",
+            "to": "topic:/tf_static",
+            "endpoint_id": "publish:5:0"
+          },
+          {
+            "id": "edge:publish:5:1",
+            "kind": "publish",
+            "from": "node:/soarm_station/static_transform_publishers",
+            "to": "topic:/tf_static",
+            "endpoint_id": "publish:5:1"
+          },
+          {
+            "id": "edge:subscribe:5:0",
+            "kind": "subscribe",
+            "from": "topic:/tf_static",
+            "to": "node:/soarm_station/workflow_manager",
+            "endpoint_id": "subscribe:5:0"
+          },
+          {
+            "id": "edge:subscribe:5:1",
+            "kind": "subscribe",
+            "from": "topic:/tf_static",
+            "to": "node:/soarm_station/recorder",
+            "endpoint_id": "subscribe:5:1"
+          },
+          {
+            "id": "edge:publish:6:0",
+            "kind": "publish",
+            "from": "node:/soarm_station/lerobot_node",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:0"
+          },
+          {
+            "id": "edge:publish:6:1",
+            "kind": "publish",
+            "from": "node:/soarm_station/workflow_manager",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:1"
+          },
+          {
+            "id": "edge:publish:6:2",
+            "kind": "publish",
+            "from": "node:/soarm_station/dashboard_node",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:2"
+          },
+          {
+            "id": "edge:publish:6:3",
+            "kind": "publish",
+            "from": "node:/soarm_station/telemetry_node",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:3"
+          },
+          {
+            "id": "edge:publish:6:4",
+            "kind": "publish",
+            "from": "node:/soarm_station/robot_state_publisher",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:4"
+          },
+          {
+            "id": "edge:publish:6:5",
+            "kind": "publish",
+            "from": "node:/soarm_station/static_transform_publishers",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:5"
+          },
+          {
+            "id": "edge:publish:6:6",
+            "kind": "publish",
+            "from": "node:/soarm_station/recorder",
+            "to": "topic:/soarm_station/diagnostics",
+            "endpoint_id": "publish:6:6"
+          },
+          {
+            "id": "edge:subscribe:6:0",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/diagnostics",
+            "to": "node:/soarm_station/lerobot_node",
+            "endpoint_id": "subscribe:6:0"
+          },
+          {
+            "id": "edge:subscribe:6:1",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/diagnostics",
+            "to": "node:/soarm_station/workflow_manager",
+            "endpoint_id": "subscribe:6:1"
+          },
+          {
+            "id": "edge:subscribe:6:2",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/diagnostics",
+            "to": "node:/soarm_station/telemetry_node",
+            "endpoint_id": "subscribe:6:2"
+          },
+          {
+            "id": "edge:subscribe:6:3",
+            "kind": "subscribe",
+            "from": "topic:/soarm_station/diagnostics",
+            "to": "node:/soarm_station/dashboard_node",
+            "endpoint_id": "subscribe:6:3"
+          },
+          {
+            "id": "action_client:node:/soarm_station/workflow_manager:action:/soarm_station/lerobot/operate",
+            "kind": "action_client",
+            "from": "node:/soarm_station/workflow_manager",
+            "to": "action:/soarm_station/lerobot/operate"
+          },
+          {
+            "id": "action_client:node:/soarm_station/dashboard_node:action:/soarm_station/lerobot/operate",
+            "kind": "action_client",
+            "from": "node:/soarm_station/dashboard_node",
+            "to": "action:/soarm_station/lerobot/operate"
+          },
+          {
+            "id": "action_server:node:/soarm_station/lerobot_node:action:/soarm_station/lerobot/operate",
+            "kind": "action_server",
+            "from": "action:/soarm_station/lerobot/operate",
+            "to": "node:/soarm_station/lerobot_node"
+          },
+          {
+            "id": "action_client:node:/soarm_station/dashboard_node:action:/soarm_station/workflows/execute",
+            "kind": "action_client",
+            "from": "node:/soarm_station/dashboard_node",
+            "to": "action:/soarm_station/workflows/execute"
+          },
+          {
+            "id": "action_server:node:/soarm_station/workflow_manager:action:/soarm_station/workflows/execute",
+            "kind": "action_server",
+            "from": "action:/soarm_station/workflows/execute",
+            "to": "node:/soarm_station/workflow_manager"
+          },
+          {
+            "id": "service_client:node:/soarm_station/dashboard_node:service:/soarm_station/lerobot/hold",
+            "kind": "service_client",
+            "from": "node:/soarm_station/dashboard_node",
+            "to": "service:/soarm_station/lerobot/hold"
+          },
+          {
+            "id": "service_client:node:/soarm_station/workflow_manager:service:/soarm_station/lerobot/hold",
+            "kind": "service_client",
+            "from": "node:/soarm_station/workflow_manager",
+            "to": "service:/soarm_station/lerobot/hold"
+          },
+          {
+            "id": "service_server:node:/soarm_station/lerobot_node:service:/soarm_station/lerobot/hold",
+            "kind": "service_server",
+            "from": "service:/soarm_station/lerobot/hold",
+            "to": "node:/soarm_station/lerobot_node"
+          },
+          {
+            "id": "service_client:node:/soarm_station/dashboard_node:service:/soarm_station/telemetry/query_history",
+            "kind": "service_client",
+            "from": "node:/soarm_station/dashboard_node",
+            "to": "service:/soarm_station/telemetry/query_history"
+          },
+          {
+            "id": "service_server:node:/soarm_station/telemetry_node:service:/soarm_station/telemetry/query_history",
+            "kind": "service_server",
+            "from": "service:/soarm_station/telemetry/query_history",
+            "to": "node:/soarm_station/telemetry_node"
+          }
+        ],
+        "coverage": {
+          "nodes": "complete",
+          "topics": "complete",
+          "services": "complete",
+          "actions": "complete"
+        },
+        "errors": [],
+        "sampling": {
+          "enabled": true,
+          "max_topics": 2,
+          "max_duration_s": 10,
+          "payload_export": false
+        },
+        "environment": {
+          "mode": "MOCK_PREVIEW",
+          "mock": true,
+          "hardware_connected": false,
+          "backend_network_access": false,
+          "label": "Hardware-free mock preview",
+          "camera_source": "Historical project references; not live capture"
+        },
+        "mock": true
+      }
+    },
+    "mobile": {
+      "resources": {
+        "schema_version": 1,
+        "device_id": "MOCK \u00b7 generic rover",
+        "arms": [],
+        "cameras": [
+          {
+            "id": "forward",
+            "name": "Forward view",
+            "role": "forward",
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_check_2026-11-07/baseline-samples/camera1-01.png",
+            "reference_date": "2026-11-07",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/forward.jpg",
+            "label": "Forward view",
+            "requested_fps": 30,
+            "frame_id": "forward_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          },
+          {
+            "id": "overview",
+            "name": "Overview view",
+            "role": "overview",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_light_check_2026-11-08/pi-cameras-20261108-light-640-auto/camera2-sample-05s.jpg",
+            "reference_date": "2026-11-08",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/overview.jpg",
+            "label": "Overview view",
+            "requested_fps": 30,
+            "frame_id": "overview_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          },
+          {
+            "id": "wrist",
+            "name": "Wrist view",
+            "role": "wrist",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "reference_file": "outputs/pi_wrist_camera_check_2026-11-08/wrist-preview.png",
+            "reference_date": "2026-11-08",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/wrist.jpg",
+            "label": "Wrist view",
+            "requested_fps": 30,
+            "frame_id": "wrist_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          }
+        ],
+        "profiles": [
+          {
+            "id": "fixture-policy",
+            "label": "Fixture policy (mock only)",
+            "arm_id": "arm1",
+            "backend": "fixture",
+            "language_conditioned": true,
+            "action_fps": 30
+          }
+        ],
+        "workflows": [
+          {
+            "id": "inspect_station",
+            "name": "Inspect station",
+            "description": "Mock-only workflow result"
+          }
+        ],
+        "capabilities": {
+          "hardware_connected": false,
+          "mock_controls": true,
+          "remote_teleoperation": true
+        },
+        "operation_contract": {
+          "schema_version": 1,
+          "control_websocket": {
+            "operation_type": "DIRECT",
+            "mode": "STREAM"
+          },
+          "stream_endpoint": "/api/stream",
+          "operate_endpoint": "/api/operate",
+          "feedback_endpoint": "/api/operations/{request_id}"
+        }
+      },
+      "status": {
+        "device_id": "MOCK \u00b7 generic rover",
+        "mode": "MOCK_PREVIEW",
+        "arms": {},
+        "joints": {},
+        "inference": {
+          "arm1": {
+            "status": [
+              {
+                "name": "mock-policy",
+                "level": 1,
+                "message": "NOT LOADED",
+                "values": [
+                  {
+                    "key": "reason",
+                    "value": "Preview contains no model runtime"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "cameras": [
+          "forward",
+          "overview",
+          "wrist"
+        ],
+        "camera_status": {
+          "forward": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          },
+          "overview": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          },
+          "wrist": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          }
+        },
+        "upload": {
+          "local_committed": 18420,
+          "remote_committed": 18384,
+          "queued": 36,
+          "connected": true,
+          "error": "",
+          "last_ack_age_ms": 840,
+          "rate_hz": 1.0
+        },
+        "events": [
+          {
+            "event_id": "mock-event-1",
+            "severity": "INFO",
+            "source": "preview",
+            "code": "MOCK_PREVIEW",
+            "detail": "Hardware-free fixture. Camera views are historical reference files, not live capture.",
+            "time_ns": 0
+          },
+          {
+            "event_id": "mock-event-2",
+            "severity": "WARN",
+            "source": "arm2",
+            "code": "FEEDBACK_NOT_RECEIVED",
+            "detail": "Second resource intentionally has unknown/no-sample metrics.",
+            "time_ns": 0
+          }
+        ],
+        "workflows": {},
+        "decisions": [],
+        "metrics": {
+          "cpu_percent": 18.6,
+          "memory_percent": 31.2,
+          "memory_used_bytes": 2680059592,
+          "memory_total_bytes": 8589934592,
+          "disk_used_percent": 24.7,
+          "cpu_temperature_c": 49.2,
+          "uptime_s": 7320,
+          "network_rx_bytes_s": 125000,
+          "network_tx_bytes_s": 68000,
+          "control_hz": 99.8,
+          "power_w": null,
+          "current_a": null,
+          "camera_capture_fps": null,
+          "sample_source": "synthetic_fixture"
+        },
+        "motors": {},
+        "schema_version": 1,
+        "environment": {
+          "mode": "MOCK_PREVIEW",
+          "mock": true,
+          "hardware_connected": false,
+          "backend_network_access": false,
+          "label": "Hardware-free mock preview",
+          "camera_source": "Historical project references; not live capture"
+        },
+        "resources": {
+          "schema_version": 1,
+          "device_id": "MOCK \u00b7 generic rover",
+          "arms": [],
+          "cameras": [
+            {
+              "id": "forward",
+              "name": "Forward view",
+              "role": "forward",
+              "width": 1920,
+              "height": 1080,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_check_2026-11-07/baseline-samples/camera1-01.png",
+              "reference_date": "2026-11-07",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/forward.jpg",
+              "label": "Forward view",
+              "requested_fps": 30,
+              "frame_id": "forward_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            },
+            {
+              "id": "overview",
+              "name": "Overview view",
+              "role": "overview",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_light_check_2026-11-08/pi-cameras-20261108-light-640-auto/camera2-sample-05s.jpg",
+              "reference_date": "2026-11-08",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/overview.jpg",
+              "label": "Overview view",
+              "requested_fps": 30,
+              "frame_id": "overview_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            },
+            {
+              "id": "wrist",
+              "name": "Wrist view",
+              "role": "wrist",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "reference_file": "outputs/pi_wrist_camera_check_2026-11-08/wrist-preview.png",
+              "reference_date": "2026-11-08",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/wrist.jpg",
+              "label": "Wrist view",
+              "requested_fps": 30,
+              "frame_id": "wrist_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "fixture-policy",
+              "label": "Fixture policy (mock only)",
+              "arm_id": "arm1",
+              "backend": "fixture",
+              "language_conditioned": true,
+              "action_fps": 30
+            }
+          ],
+          "workflows": [
+            {
+              "id": "inspect_station",
+              "name": "Inspect station",
+              "description": "Mock-only workflow result"
+            }
+          ],
+          "capabilities": {
+            "hardware_connected": false,
+            "mock_controls": true,
+            "remote_teleoperation": true
+          },
+          "operation_contract": {
+            "schema_version": 1,
+            "control_websocket": {
+              "operation_type": "DIRECT",
+              "mode": "STREAM"
+            },
+            "stream_endpoint": "/api/stream",
+            "operate_endpoint": "/api/operate",
+            "feedback_endpoint": "/api/operations/{request_id}"
+          }
+        },
+        "motor_status": {}
+      },
+      "graph": {
+        "schema_version": 1,
+        "sequence": 1,
+        "captured_at_ns": 0,
+        "age_ms": 0,
+        "state": "ready",
+        "scope": "observer_visible_ros_domain",
+        "consistency": "best_effort_discovery",
+        "nodes": [
+          {
+            "id": "node:/rover/navigation",
+            "name": "navigation",
+            "namespace": "/rover",
+            "fully_qualified_name": "/rover/navigation",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/rover/localizer",
+            "name": "localizer",
+            "namespace": "/rover",
+            "fully_qualified_name": "/rover/localizer",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/rover/lidar",
+            "name": "lidar",
+            "namespace": "/rover",
+            "fully_qualified_name": "/rover/lidar",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/rover/base_driver",
+            "name": "base_driver",
+            "namespace": "/rover",
+            "fully_qualified_name": "/rover/base_driver",
+            "instance_count": 1
+          },
+          {
+            "id": "node:/rover/joystick_bridge",
+            "name": "joystick_bridge",
+            "namespace": "/rover",
+            "fully_qualified_name": "/rover/joystick_bridge",
+            "instance_count": 1
+          }
+        ],
+        "topics": [
+          {
+            "id": "topic:/rover/scan",
+            "name": "/rover/scan",
+            "types": [
+              "sensor_msgs/msg/LaserScan"
+            ],
+            "publishers": [
+              {
+                "id": "publish:0:0",
+                "node_id": "node:/rover/lidar",
+                "type": "sensor_msgs/msg/LaserScan",
+                "gid": "mock-publish-0-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:0:0",
+                "node_id": "node:/rover/localizer",
+                "type": "sensor_msgs/msg/LaserScan",
+                "gid": "mock-subscribe-0-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/rover/odom",
+            "name": "/rover/odom",
+            "types": [
+              "nav_msgs/msg/Odometry"
+            ],
+            "publishers": [
+              {
+                "id": "publish:1:0",
+                "node_id": "node:/rover/base_driver",
+                "type": "nav_msgs/msg/Odometry",
+                "gid": "mock-publish-1-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:1:0",
+                "node_id": "node:/rover/navigation",
+                "type": "nav_msgs/msg/Odometry",
+                "gid": "mock-subscribe-1-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "subscribe:1:1",
+                "node_id": "node:/rover/localizer",
+                "type": "nav_msgs/msg/Odometry",
+                "gid": "mock-subscribe-1-1",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/rover/cmd_vel",
+            "name": "/rover/cmd_vel",
+            "types": [
+              "geometry_msgs/msg/Twist"
+            ],
+            "publishers": [
+              {
+                "id": "publish:2:0",
+                "node_id": "node:/rover/navigation",
+                "type": "geometry_msgs/msg/Twist",
+                "gid": "mock-publish-2-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              },
+              {
+                "id": "publish:2:1",
+                "node_id": "node:/rover/joystick_bridge",
+                "type": "geometry_msgs/msg/Twist",
+                "gid": "mock-publish-2-1",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:2:0",
+                "node_id": "node:/rover/base_driver",
+                "type": "geometry_msgs/msg/Twist",
+                "gid": "mock-subscribe-2-0",
+                "qos": {
+                  "reliability": "BEST_EFFORT",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 1,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          },
+          {
+            "id": "topic:/tf",
+            "name": "/tf",
+            "types": [
+              "tf2_msgs/msg/TFMessage"
+            ],
+            "publishers": [
+              {
+                "id": "publish:3:0",
+                "node_id": "node:/rover/localizer",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-publish-3-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "subscriptions": [
+              {
+                "id": "subscribe:3:0",
+                "node_id": "node:/rover/navigation",
+                "type": "tf2_msgs/msg/TFMessage",
+                "gid": "mock-subscribe-3-0",
+                "qos": {
+                  "reliability": "RELIABLE",
+                  "durability": "VOLATILE",
+                  "history": "KEEP_LAST",
+                  "depth": 10,
+                  "deadline_ns": null,
+                  "lifespan_ns": null,
+                  "liveliness": "AUTOMATIC",
+                  "liveliness_lease_duration_ns": null
+                }
+              }
+            ],
+            "traffic": {
+              "state": "not_sampled",
+              "sample_id": null,
+              "messages": null,
+              "bytes": null,
+              "rate_hz": null,
+              "bytes_per_second": null,
+              "last_message_age_ms": null,
+              "history": [],
+              "reason": "No sampling requested; preview is synthetic"
+            }
+          }
+        ],
+        "services": [
+          {
+            "id": "service:/rover/reset_localization",
+            "name": "/rover/reset_localization",
+            "types": [
+              "std_srvs/srv/Trigger"
+            ],
+            "servers": [
+              "node:/rover/localizer"
+            ],
+            "clients": [
+              "node:/rover/navigation"
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "id": "action:/rover/navigate_to_pose",
+            "name": "/rover/navigate_to_pose",
+            "types": [
+              "nav2_msgs/action/NavigateToPose"
+            ],
+            "servers": [
+              "node:/rover/navigation"
+            ],
+            "clients": [
+              "node:/rover/joystick_bridge"
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge:publish:0:0",
+            "kind": "publish",
+            "from": "node:/rover/lidar",
+            "to": "topic:/rover/scan",
+            "endpoint_id": "publish:0:0"
+          },
+          {
+            "id": "edge:subscribe:0:0",
+            "kind": "subscribe",
+            "from": "topic:/rover/scan",
+            "to": "node:/rover/localizer",
+            "endpoint_id": "subscribe:0:0"
+          },
+          {
+            "id": "edge:publish:1:0",
+            "kind": "publish",
+            "from": "node:/rover/base_driver",
+            "to": "topic:/rover/odom",
+            "endpoint_id": "publish:1:0"
+          },
+          {
+            "id": "edge:subscribe:1:0",
+            "kind": "subscribe",
+            "from": "topic:/rover/odom",
+            "to": "node:/rover/navigation",
+            "endpoint_id": "subscribe:1:0"
+          },
+          {
+            "id": "edge:subscribe:1:1",
+            "kind": "subscribe",
+            "from": "topic:/rover/odom",
+            "to": "node:/rover/localizer",
+            "endpoint_id": "subscribe:1:1"
+          },
+          {
+            "id": "edge:publish:2:0",
+            "kind": "publish",
+            "from": "node:/rover/navigation",
+            "to": "topic:/rover/cmd_vel",
+            "endpoint_id": "publish:2:0"
+          },
+          {
+            "id": "edge:publish:2:1",
+            "kind": "publish",
+            "from": "node:/rover/joystick_bridge",
+            "to": "topic:/rover/cmd_vel",
+            "endpoint_id": "publish:2:1"
+          },
+          {
+            "id": "edge:subscribe:2:0",
+            "kind": "subscribe",
+            "from": "topic:/rover/cmd_vel",
+            "to": "node:/rover/base_driver",
+            "endpoint_id": "subscribe:2:0"
+          },
+          {
+            "id": "edge:publish:3:0",
+            "kind": "publish",
+            "from": "node:/rover/localizer",
+            "to": "topic:/tf",
+            "endpoint_id": "publish:3:0"
+          },
+          {
+            "id": "edge:subscribe:3:0",
+            "kind": "subscribe",
+            "from": "topic:/tf",
+            "to": "node:/rover/navigation",
+            "endpoint_id": "subscribe:3:0"
+          },
+          {
+            "id": "action_client:node:/rover/joystick_bridge:action:/rover/navigate_to_pose",
+            "kind": "action_client",
+            "from": "node:/rover/joystick_bridge",
+            "to": "action:/rover/navigate_to_pose"
+          },
+          {
+            "id": "action_server:node:/rover/navigation:action:/rover/navigate_to_pose",
+            "kind": "action_server",
+            "from": "action:/rover/navigate_to_pose",
+            "to": "node:/rover/navigation"
+          },
+          {
+            "id": "service_client:node:/rover/navigation:service:/rover/reset_localization",
+            "kind": "service_client",
+            "from": "node:/rover/navigation",
+            "to": "service:/rover/reset_localization"
+          },
+          {
+            "id": "service_server:node:/rover/localizer:service:/rover/reset_localization",
+            "kind": "service_server",
+            "from": "service:/rover/reset_localization",
+            "to": "node:/rover/localizer"
+          }
+        ],
+        "coverage": {
+          "nodes": "complete",
+          "topics": "complete",
+          "services": "complete",
+          "actions": "complete"
+        },
+        "errors": [],
+        "sampling": {
+          "enabled": true,
+          "max_topics": 2,
+          "max_duration_s": 10,
+          "payload_export": false
+        },
+        "environment": {
+          "mode": "MOCK_PREVIEW",
+          "mock": true,
+          "hardware_connected": false,
+          "backend_network_access": false,
+          "label": "Hardware-free mock preview",
+          "camera_source": "Historical project references; not live capture"
+        },
+        "mock": true
+      }
+    },
+    "unknown": {
+      "resources": {
+        "schema_version": 1,
+        "device_id": "MOCK \u00b7 workbench station",
+        "arms": [
+          {
+            "id": "arm1",
+            "name": "Workbench arm",
+            "label": "Workbench arm",
+            "kind": "manipulator",
+            "backend": "mock-preview",
+            "base_frame": "arm1_base",
+            "joints": [
+              {
+                "name": "shoulder_pan",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder pan",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 1
+              },
+              {
+                "name": "shoulder_lift",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder lift",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 2
+              },
+              {
+                "name": "elbow_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "elbow flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 3
+              },
+              {
+                "name": "wrist_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 4
+              },
+              {
+                "name": "wrist_roll",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist roll",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 5
+              }
+            ],
+            "gripper": {
+              "name": "gripper",
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "velocity_percent_s": 100,
+              "label": "Gripper",
+              "velocity_limit": 100,
+              "motor_id": 6
+            },
+            "capabilities": {
+              "operation_types": [
+                "DIRECT",
+                "TRAJECTORY",
+                "MODEL"
+              ],
+              "input_modes": [
+                "INLINE",
+                "STREAM"
+              ],
+              "writable": true,
+              "cartesian_endpoints": false
+            },
+            "read_only": false,
+            "profile_ids": [
+              "fixture-policy"
+            ]
+          },
+          {
+            "id": "arm2",
+            "name": "Secondary arm",
+            "label": "Secondary arm",
+            "kind": "manipulator",
+            "backend": "mock-preview",
+            "base_frame": "arm2_base",
+            "joints": [
+              {
+                "name": "shoulder_pan",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder pan",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 1
+              },
+              {
+                "name": "shoulder_lift",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "shoulder lift",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 2
+              },
+              {
+                "name": "elbow_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "elbow flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 3
+              },
+              {
+                "name": "wrist_flex",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist flex",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 4
+              },
+              {
+                "name": "wrist_roll",
+                "min_rad": -2.8,
+                "max_rad": 2.8,
+                "velocity_rad_s": 1.5,
+                "unit": "rad",
+                "label": "wrist roll",
+                "min": -2.8,
+                "max": 2.8,
+                "velocity_limit": 1.5,
+                "motor_id": 5
+              }
+            ],
+            "gripper": {
+              "name": "gripper",
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "velocity_percent_s": 100,
+              "label": "Gripper",
+              "velocity_limit": 100,
+              "motor_id": 6
+            },
+            "capabilities": {
+              "operation_types": [
+                "DIRECT",
+                "TRAJECTORY",
+                "MODEL"
+              ],
+              "input_modes": [
+                "INLINE",
+                "STREAM"
+              ],
+              "writable": false,
+              "cartesian_endpoints": false
+            },
+            "read_only": true,
+            "profile_ids": []
+          }
+        ],
+        "cameras": [
+          {
+            "id": "forward",
+            "name": "Forward view",
+            "role": "forward",
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_check_2026-11-07/baseline-samples/camera1-01.png",
+            "reference_date": "2026-11-07",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/forward.jpg",
+            "label": "Forward view",
+            "requested_fps": 30,
+            "frame_id": "forward_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          },
+          {
+            "id": "overview",
+            "name": "Overview view",
+            "role": "overview",
+            "width": 640,
+            "height": 480,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_light_check_2026-11-08/pi-cameras-20261108-light-640-auto/camera2-sample-05s.jpg",
+            "reference_date": "2026-11-08",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/overview.jpg",
+            "label": "Overview view",
+            "requested_fps": 30,
+            "frame_id": "overview_optical",
+            "calibrated": false,
+            "reference_kind": "historical_single_camera"
+          },
+          {
+            "id": "reference-montage",
+            "name": "Historical comparison montage",
+            "role": "reference-montage",
+            "width": 1920,
+            "height": 530,
+            "fps": 30,
+            "reference_file": "outputs/pi_camera_light_check_2026-11-08/current_lighting_comparison.png",
+            "reference_date": "2026-11-08",
+            "timestamp_source": "historical_reference",
+            "preview_url": "/api/cameras/reference-montage.jpg",
+            "label": "Historical comparison montage",
+            "requested_fps": 30,
+            "frame_id": "reference_montage",
+            "calibrated": false,
+            "reference_kind": "historical_camera_comparison_montage"
+          }
+        ],
+        "profiles": [
+          {
+            "id": "fixture-policy",
+            "label": "Fixture policy (mock only)",
+            "arm_id": "arm1",
+            "backend": "fixture",
+            "language_conditioned": true,
+            "action_fps": 30
+          }
+        ],
+        "workflows": [
+          {
+            "id": "inspect_station",
+            "name": "Inspect station",
+            "description": "Mock-only workflow result"
+          }
+        ],
+        "capabilities": {
+          "hardware_connected": false,
+          "mock_controls": true,
+          "remote_teleoperation": true
+        },
+        "operation_contract": {
+          "schema_version": 1,
+          "control_websocket": {
+            "operation_type": "DIRECT",
+            "mode": "STREAM"
+          },
+          "stream_endpoint": "/api/stream",
+          "operate_endpoint": "/api/operate",
+          "feedback_endpoint": "/api/operations/{request_id}"
+        }
+      },
+      "status": {
+        "device_id": "MOCK \u00b7 awaiting samples",
+        "mode": "MOCK_PREVIEW",
+        "arms": {
+          "arm1": {
+            "arm_id": "arm1",
+            "runtime_boot_id": "mock-runtime-boot",
+            "controller_session": "mock-controller-arm1",
+            "phase": "IDLE",
+            "permission": false,
+            "operation_id": "",
+            "operation_epoch": 1,
+            "operation_type": "NONE",
+            "measured_torque": "UNKNOWN",
+            "feedback_age_ms": null,
+            "measured_hz": null,
+            "gripper_percent": null,
+            "fault": "Waiting for first sample",
+            "sample_sequence": 0,
+            "feedback_valid": false
+          },
+          "arm2": {
+            "arm_id": "arm2",
+            "runtime_boot_id": "mock-runtime-boot",
+            "controller_session": "mock-controller-arm2",
+            "phase": "IDLE",
+            "permission": false,
+            "operation_id": "",
+            "operation_epoch": 1,
+            "operation_type": "NONE",
+            "measured_torque": "UNKNOWN",
+            "feedback_age_ms": null,
+            "measured_hz": null,
+            "gripper_percent": null,
+            "fault": "Waiting for first sample",
+            "sample_sequence": 0,
+            "feedback_valid": false
+          }
+        },
+        "joints": {},
+        "inference": {
+          "arm1": {
+            "status": [
+              {
+                "name": "mock-policy",
+                "level": 1,
+                "message": "NOT LOADED",
+                "values": [
+                  {
+                    "key": "reason",
+                    "value": "Preview contains no model runtime"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "cameras": [
+          "forward",
+          "overview",
+          "reference-montage"
+        ],
+        "camera_status": {
+          "forward": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          },
+          "overview": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 640,
+            "height": 480
+          },
+          "reference-montage": {
+            "available": true,
+            "mock": true,
+            "reference_only": true,
+            "capture_fps": null,
+            "published_hz": null,
+            "age_ms": null,
+            "timestamp_source": "historical_reference",
+            "source_time_ns": null,
+            "frame_sequence": null,
+            "width": 1920,
+            "height": 530
+          }
+        },
+        "upload": {
+          "local_committed": null,
+          "remote_committed": null,
+          "queued": null,
+          "connected": null,
+          "last_ack_age_ms": null,
+          "rate_hz": null
+        },
+        "events": [
+          {
+            "event_id": "mock-event-1",
+            "severity": "INFO",
+            "source": "preview",
+            "code": "MOCK_PREVIEW",
+            "detail": "Hardware-free fixture. Camera views are historical reference files, not live capture.",
+            "time_ns": 0
+          },
+          {
+            "event_id": "mock-event-2",
+            "severity": "WARN",
+            "source": "arm2",
+            "code": "FEEDBACK_NOT_RECEIVED",
+            "detail": "Second resource intentionally has unknown/no-sample metrics.",
+            "time_ns": 0
+          }
+        ],
+        "workflows": {},
+        "decisions": [],
+        "metrics": {
+          "cpu_percent": null,
+          "memory_percent": null,
+          "memory_used_bytes": null,
+          "memory_total_bytes": null,
+          "disk_used_percent": null,
+          "cpu_temperature_c": null,
+          "uptime_s": null,
+          "network_rx_bytes_s": null,
+          "network_tx_bytes_s": null,
+          "control_hz": null,
+          "power_w": null,
+          "current_a": null,
+          "camera_capture_fps": null,
+          "sample_source": "no_samples"
+        },
+        "motors": {
+          "arm1": [
+            {
+              "name": "shoulder_pan",
+              "joint_name": "shoulder_pan",
+              "position_rad": 0.12,
+              "commanded_rad": 0.12,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 31,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "shoulder_lift",
+              "joint_name": "shoulder_lift",
+              "position_rad": -0.84,
+              "commanded_rad": -0.84,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 32,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "elbow_flex",
+              "joint_name": "elbow_flex",
+              "position_rad": 1.21,
+              "commanded_rad": 1.21,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 33,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "wrist_flex",
+              "joint_name": "wrist_flex",
+              "position_rad": 0.31,
+              "commanded_rad": 0.31,
+              "velocity_rad_s": 0.0,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "PARTIAL"
+            },
+            {
+              "name": "wrist_roll",
+              "joint_name": "wrist_roll",
+              "position_rad": -0.16,
+              "commanded_rad": -0.16,
+              "velocity_rad_s": 0.0,
+              "voltage_v": 12.0,
+              "temperature_c": 35,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            },
+            {
+              "name": "gripper",
+              "joint_name": "gripper",
+              "position_percent": 42.0,
+              "commanded_percent": 42.0,
+              "unit": "percent",
+              "voltage_v": 12.0,
+              "temperature_c": 32.0,
+              "torque": "ON",
+              "torque_enabled": true,
+              "load_raw": null,
+              "feedback_age_ms": 7.4,
+              "valid": true,
+              "status": "OK"
+            }
+          ],
+          "arm2": [
+            {
+              "name": "shoulder_pan",
+              "joint_name": "shoulder_pan",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "shoulder_lift",
+              "joint_name": "shoulder_lift",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "elbow_flex",
+              "joint_name": "elbow_flex",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "wrist_flex",
+              "joint_name": "wrist_flex",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            },
+            {
+              "name": "wrist_roll",
+              "joint_name": "wrist_roll",
+              "position_rad": null,
+              "commanded_rad": null,
+              "velocity_rad_s": null,
+              "voltage_v": null,
+              "temperature_c": null,
+              "torque": "UNKNOWN",
+              "torque_enabled": null,
+              "load_raw": null,
+              "feedback_age_ms": null,
+              "valid": false,
+              "status": "NO_SAMPLE"
+            }
+          ]
+        },
+        "schema_version": 1,
+        "environment": {
+          "mode": "MOCK_PREVIEW",
+          "mock": true,
+          "hardware_connected": false,
+          "backend_network_access": false,
+          "label": "Hardware-free mock preview",
+          "camera_source": "Historical project references; not live capture"
+        },
+        "resources": {
+          "schema_version": 1,
+          "device_id": "MOCK \u00b7 workbench station",
+          "arms": [
+            {
+              "id": "arm1",
+              "name": "Workbench arm",
+              "label": "Workbench arm",
+              "kind": "manipulator",
+              "backend": "mock-preview",
+              "base_frame": "arm1_base",
+              "joints": [
+                {
+                  "name": "shoulder_pan",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder pan",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 1
+                },
+                {
+                  "name": "shoulder_lift",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder lift",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 2
+                },
+                {
+                  "name": "elbow_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "elbow flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 3
+                },
+                {
+                  "name": "wrist_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 4
+                },
+                {
+                  "name": "wrist_roll",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist roll",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 5
+                }
+              ],
+              "gripper": {
+                "name": "gripper",
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "velocity_percent_s": 100,
+                "label": "Gripper",
+                "velocity_limit": 100,
+                "motor_id": 6
+              },
+              "capabilities": {
+                "operation_types": [
+                  "DIRECT",
+                  "TRAJECTORY",
+                  "MODEL"
+                ],
+                "input_modes": [
+                  "INLINE",
+                  "STREAM"
+                ],
+                "writable": true,
+                "cartesian_endpoints": false
+              },
+              "read_only": false,
+              "profile_ids": [
+                "fixture-policy"
+              ]
+            },
+            {
+              "id": "arm2",
+              "name": "Secondary arm",
+              "label": "Secondary arm",
+              "kind": "manipulator",
+              "backend": "mock-preview",
+              "base_frame": "arm2_base",
+              "joints": [
+                {
+                  "name": "shoulder_pan",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder pan",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 1
+                },
+                {
+                  "name": "shoulder_lift",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "shoulder lift",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 2
+                },
+                {
+                  "name": "elbow_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "elbow flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 3
+                },
+                {
+                  "name": "wrist_flex",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist flex",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 4
+                },
+                {
+                  "name": "wrist_roll",
+                  "min_rad": -2.8,
+                  "max_rad": 2.8,
+                  "velocity_rad_s": 1.5,
+                  "unit": "rad",
+                  "label": "wrist roll",
+                  "min": -2.8,
+                  "max": 2.8,
+                  "velocity_limit": 1.5,
+                  "motor_id": 5
+                }
+              ],
+              "gripper": {
+                "name": "gripper",
+                "unit": "percent",
+                "min": 0,
+                "max": 100,
+                "velocity_percent_s": 100,
+                "label": "Gripper",
+                "velocity_limit": 100,
+                "motor_id": 6
+              },
+              "capabilities": {
+                "operation_types": [
+                  "DIRECT",
+                  "TRAJECTORY",
+                  "MODEL"
+                ],
+                "input_modes": [
+                  "INLINE",
+                  "STREAM"
+                ],
+                "writable": false,
+                "cartesian_endpoints": false
+              },
+              "read_only": true,
+              "profile_ids": []
+            }
+          ],
+          "cameras": [
+            {
+              "id": "forward",
+              "name": "Forward view",
+              "role": "forward",
+              "width": 1920,
+              "height": 1080,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_check_2026-11-07/baseline-samples/camera1-01.png",
+              "reference_date": "2026-11-07",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/forward.jpg",
+              "label": "Forward view",
+              "requested_fps": 30,
+              "frame_id": "forward_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            },
+            {
+              "id": "overview",
+              "name": "Overview view",
+              "role": "overview",
+              "width": 640,
+              "height": 480,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_light_check_2026-11-08/pi-cameras-20261108-light-640-auto/camera2-sample-05s.jpg",
+              "reference_date": "2026-11-08",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/overview.jpg",
+              "label": "Overview view",
+              "requested_fps": 30,
+              "frame_id": "overview_optical",
+              "calibrated": false,
+              "reference_kind": "historical_single_camera"
+            },
+            {
+              "id": "reference-montage",
+              "name": "Historical comparison montage",
+              "role": "reference-montage",
+              "width": 1920,
+              "height": 530,
+              "fps": 30,
+              "reference_file": "outputs/pi_camera_light_check_2026-11-08/current_lighting_comparison.png",
+              "reference_date": "2026-11-08",
+              "timestamp_source": "historical_reference",
+              "preview_url": "/api/cameras/reference-montage.jpg",
+              "label": "Historical comparison montage",
+              "requested_fps": 30,
+              "frame_id": "reference_montage",
+              "calibrated": false,
+              "reference_kind": "historical_camera_comparison_montage"
+            }
+          ],
+          "profiles": [
+            {
+              "id": "fixture-policy",
+              "label": "Fixture policy (mock only)",
+              "arm_id": "arm1",
+              "backend": "fixture",
+              "language_conditioned": true,
+              "action_fps": 30
+            }
+          ],
+          "workflows": [
+            {
+              "id": "inspect_station",
+              "name": "Inspect station",
+              "description": "Mock-only workflow result"
+            }
+          ],
+          "capabilities": {
+            "hardware_connected": false,
+            "mock_controls": true,
+            "remote_teleoperation": true
+          },
+          "operation_contract": {
+            "schema_version": 1,
+            "control_websocket": {
+              "operation_type": "DIRECT",
+              "mode": "STREAM"
+            },
+            "stream_endpoint": "/api/stream",
+            "operate_endpoint": "/api/operate",
+            "feedback_endpoint": "/api/operations/{request_id}"
+          }
+        },
+        "motor_status": {
+          "arm1": {
+            "schema_version": 1,
+            "arm_id": "arm1",
+            "state": "unavailable",
+            "health_time_ns": null,
+            "health_age_ms": null,
+            "motors": [
+              {
+                "id": 1,
+                "name": "shoulder_pan",
+                "label": "Shoulder Pan",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 2,
+                "name": "shoulder_lift",
+                "label": "Shoulder Lift",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 3,
+                "name": "elbow_flex",
+                "label": "Elbow Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 4,
+                "name": "wrist_flex",
+                "label": "Wrist Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 5,
+                "name": "wrist_roll",
+                "label": "Wrist Roll",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 6,
+                "name": "gripper",
+                "label": "Gripper",
+                "role": "gripper",
+                "unit": "percent",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              }
+            ]
+          },
+          "arm2": {
+            "schema_version": 1,
+            "arm_id": "arm2",
+            "state": "unavailable",
+            "health_time_ns": null,
+            "health_age_ms": null,
+            "motors": [
+              {
+                "id": 1,
+                "name": "shoulder_pan",
+                "label": "Shoulder Pan",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 2,
+                "name": "shoulder_lift",
+                "label": "Shoulder Lift",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 3,
+                "name": "elbow_flex",
+                "label": "Elbow Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 4,
+                "name": "wrist_flex",
+                "label": "Wrist Flex",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              },
+              {
+                "id": 5,
+                "name": "wrist_roll",
+                "label": "Wrist Roll",
+                "role": "joint",
+                "unit": "rad",
+                "position": null,
+                "position_time_ns": null,
+                "position_age_ms": null,
+                "goal_position": null,
+                "reference_position": null,
+                "torque_enabled": null,
+                "temperature_c": null,
+                "voltage_v": null,
+                "source_state": "unavailable",
+                "unavailable_fields": [
+                  "position",
+                  "goal_position",
+                  "reference_position",
+                  "torque_enabled",
+                  "temperature_c",
+                  "voltage_v"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "graph": {
+        "schema_version": 1,
+        "sequence": 0,
+        "captured_at_ns": null,
+        "age_ms": null,
+        "state": "unavailable",
+        "scope": "observer_visible_ros_domain",
+        "consistency": "best_effort_discovery",
+        "nodes": [],
+        "topics": [],
+        "services": [],
+        "actions": [],
+        "edges": [],
+        "coverage": {
+          "nodes": "partial",
+          "topics": "partial",
+          "services": "partial",
+          "actions": "partial"
+        },
+        "errors": [
+          {
+            "scope": "discovery",
+            "reason": "Synthetic no-sample scenario"
+          }
+        ],
+        "sampling": {
+          "enabled": true,
+          "max_topics": 2,
+          "max_duration_s": 10,
+          "payload_export": false
+        },
+        "environment": {
+          "mode": "MOCK_PREVIEW",
+          "mock": true,
+          "hardware_connected": false,
+          "backend_network_access": false,
+          "label": "Hardware-free mock preview",
+          "camera_source": "Historical project references; not live capture"
+        },
+        "mock": true
+      }
+    }
+  }
+}

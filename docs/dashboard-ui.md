@@ -1,0 +1,98 @@
+# Station dashboards
+
+The browser UI uses the existing authenticated station gateway. Open `/` for
+Operations or `/#graph` for the generic ROS explorer. Static assets contain no
+credentials or robot state. Sign in with the existing operator token; the token
+stays in browser memory and is never placed in a URL or local storage.
+
+## Operations
+
+Select an arm explicitly. The right panel switches between **Status**, **Manual**
+and **Payload**, leaving the camera region wide. Status lists each motor's
+position, torque, temperature and voltage. A current column appears only when
+at least one current reading is supplied. Null values stay unavailable, and
+source/staleness is visible. Clicking a motor reveals its reported goal and
+fault availability. The SO-101 adapter currently reports no electrical current;
+raw servo load is not labeled as amperes.
+
+Camera layouts preserve native image ratios and never crop:
+
+- **Equal** maximizes a common image area using row/column packing. Same-ratio
+  feeds have identical dimensions; mixed-ratio feeds have equal image area.
+  Window boundaries follow the image and its caption, rather than stretching
+  a black container. The packing algorithm responds to available width/height.
+- **Primary** places the supplementary feeds in a horizontal dock immediately
+  above the primary image. Click a feed to promote it. Extra feeds scroll in
+  the dock.
+- **Floating** places supplementary windows inside the primary image. Drag
+  them, or use arrow keys when focused; positions remain bounded on resize.
+  A click promotes the feed; a drag does not. Positions are kept per camera
+  for the current page session.
+
+Camera FPS describes browser receipt, not source capture timing. No frame for
+more than two seconds is labeled explicitly. Cameras and control use separate
+WebSockets. Changing a layout does not open USB devices or restart capture.
+
+Manual controls use named joint bounds and measured pickup. Payload supports
+DIRECT, TRAJECTORY and MODEL in INLINE/STREAM modes. The JSON editor contains
+semantic intent; the transport adds current owner/session/window identities.
+MODEL requires a registered profile. Existing configured Cartesian endpoints
+are accepted only for TRAJECTORY INLINE. Unsupported fields reject rather than
+being silently ignored. Starting a stream admits it once; subsequent **Send
+updated payload** operations replace its intent. **End stream** and **Hold**
+release permission. Normal INLINE completion retains the healthy permission
+as before. Display updates are decimated independently of the 100-Hz browser
+manual sender and existing owner loop.
+
+## Generic ROS graph
+
+`web/graph.js` consumes schema-version-1 graph JSON through an injected request
+function. It contains no arm names, camera names or permanent hardware-role
+colors. The backend contract is documented separately with the graph observer.
+
+Single-click selects and highlights without moving or removing blocks. The
+selection is white on black; related publishers are red only while relevant.
+Publish/subscribe paths use warm/cool hues. Double-click (or Shift+Enter) opens
+an isolated neighborhood. **Exit focus** restores the overview and its prior
+pan/zoom. Search and infrastructure filtering are explicit, with visible/total
+counts. Each discovered node appears once; duplicate FQNs and unresolved
+endpoint owners retain their backend-provided discovery metadata.
+
+Node boxes retain their strong top rule and comment/metadata area. Topic boxes
+show a shortened name/type, observed-rate label and sample-history sparkline;
+the inspector retains the exact fully qualified name, type and endpoint QoS.
+Comments are local to the current view. Actions/services use subdued dashed
+links and can be inspected from the interface list. Crossings never join.
+
+Sampling is an explicit, bounded observer operation, not a robot command.
+Unsampled, unavailable and measured-zero states are different. Counts and
+serialized bytes describe only that observer subscription, not guaranteed
+network delivery or wire bandwidth. Message contents are not exported.
+
+## Files and verification
+
+- `web/app.js`: operations UI and camera interaction integration.
+- `web/styles.css`, `web/index.html`: common Swiss visual system and markup.
+- `web/camera-layout.js`: pure aspect-preserving packing functions.
+- `web/transport.js`: authenticated typed transport, with no automatic arming,
+  replay or operation reconnection.
+- `web/graph.js`: generic graph normalization, rendering and inspection.
+
+Run browser-independent checks with:
+
+```sh
+node --test tests/test_dashboard_transport.mjs tests/test_dashboard_graph.mjs tests/test_camera_layout.mjs
+```
+
+For a hardware-free visual preview (requires aiohttp and Pillow):
+
+```sh
+python scripts/preview-dashboard.py --port 8767 --reference-root /path/to/so-arm
+```
+
+The preview is loopback-only, prominently marked as mock, and uses historical
+camera references from the supplied project directory. Its controls affect
+in-memory fixtures only. It never imports the robot runtime, opens a device or
+connects to a production backend. The mock token is printed by that script.
+See `design-qa.md` for browser evidence and intentional refinements to the
+original visual targets.
