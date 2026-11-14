@@ -1,5 +1,5 @@
 [Unit]
-Description=SOArm Station ROS 2 workstation
+Description=SO-Arm Station ROS 2 workstation
 After=network-online.target
 Wants=network-online.target
 [Service]

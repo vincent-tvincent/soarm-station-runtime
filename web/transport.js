@@ -1,4 +1,4 @@
-/** Authenticated browser transport for the existing SOArm Station gateway.
+/** Authenticated browser transport for the existing SO-Arm Station gateway.
  * No permission grant, operation reconnect, or command replay is automatic.
  * Positions are radians; gripper targets are explicit calibrated percentages.
  */

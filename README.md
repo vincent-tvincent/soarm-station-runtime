@@ -1,8 +1,8 @@
-# SOArm Station Runtime
+# SO-Arm Station Runtime
 
-SOArm Station is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, a private-network web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
+SO-Arm Station is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, a private-network web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
 
-The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SOArm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
+The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SO-Arm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
 
 Repository: [vincent-tvincent/soarm-station-runtime](https://github.com/vincent-tvincent/soarm-station-runtime). Companion repository: `soarm-station-training` (separate).
 

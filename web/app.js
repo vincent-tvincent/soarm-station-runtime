@@ -193,7 +193,7 @@ async function setPage(value, { fromHash = false, initial = false } = {}) {
     .querySelectorAll("[data-page]")
     .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
   document.querySelector(".brand").textContent =
-    page === "graph" ? "ROS / GRAPH EXPLORER" : "SOARM / STATION";
+    page === "graph" ? "ROS / GRAPH EXPLORER" : "SO-ARM / STATION";
   $("operations").hidden = page !== "operations";
   $("graph").hidden = page !== "graph";
   $("policies").hidden = page !== "policies";

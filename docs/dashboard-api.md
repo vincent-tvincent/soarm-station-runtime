@@ -1,4 +1,4 @@
-# SOArm Station dashboard backend API v1
+# SO-Arm Station dashboard backend API v1
 
 JSON contracts for resource descriptors, cached motor telemetry and generic ROS graph discovery. Access uses the trusted-peer/bearer policy below. Existing control authority stays with the runtime owner. Null denotes an unavailable value. For the complete route inventory and external control examples, see the [README API tables](../README.md#web-api-tables) and [integration guide](web-api.md).
 
@@ -42,7 +42,7 @@ GET `/api/resources` returns the `resources` object with top-level `schema_versi
 
 ## GET /api/graph (also GET /api/v1/ros/graph)
 
-Generic ROS graph metadata, no SOArm-specific discovery filter or assumed node roles:
+Generic ROS graph metadata, no SO-Arm-specific discovery filter or assumed node roles:
 
 ```json
 {

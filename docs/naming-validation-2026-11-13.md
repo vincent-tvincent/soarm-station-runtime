@@ -1,4 +1,4 @@
-# SOArm Station naming validation — November 13, 2026
+# SO-Arm Station naming validation — November 13, 2026
 
 The coordinated rename updates the runtime/training distributions, Python modules, ROS packages/types/namespace, shell environment variables, CLIs, WebSocket subprotocol, dashboard branding and user service. See [name migration](name-migration.md) for the public mapping and [startup](startup-and-debug.md) for current developer commands. SO-101 hardware model identities and deployment directory roles are unchanged.
 
@@ -12,7 +12,7 @@ The coordinated rename updates the runtime/training distributions, Python module
 
 ## Foreground mock integration
 
-A direct `ros2 launch soarm_station_system system.launch.py` from a shell with old/new wrapper variables unset passed with two mock arms and three mock cameras. The authenticated control, anonymous rejection, camera JPEG, browser token subprotocol `soarm_station`, disconnect hold, independent-arm state, INLINE completion and durable history checks passed. The run sent 268 mock commands. ROS node discovery, status echo and action listing used `/soarm_station`; the served dashboard title/header were SOArm Station. Ctrl-C stopped the mock owner before native startup.
+A direct `ros2 launch soarm_station_system system.launch.py` from a shell with old/new wrapper variables unset passed with two mock arms and three mock cameras. The authenticated control, anonymous rejection, camera JPEG, browser token subprotocol `soarm_station`, disconnect hold, independent-arm state, INLINE completion and durable history checks passed. The run sent 268 mock commands. ROS node discovery, status echo and action listing used `/soarm_station`; the served dashboard title/header were SO-Arm Station. Ctrl-C stopped the mock owner before native startup.
 
 The first run against the existing populated mock database timed out on the five-second history-service request. The repeat used an isolated fresh mock database and passed; the timeout's cause was not established or changed by this rename. Large retained-history page latency is not qualified by the fresh fixture. Existing mock data was preserved.
 

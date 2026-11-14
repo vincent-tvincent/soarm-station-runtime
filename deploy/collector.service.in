@@ -1,5 +1,5 @@
 [Unit]
-Description=SOArm Station durable HTTPS telemetry collector
+Description=SO-Arm Station durable HTTPS telemetry collector
 After=network-online.target
 [Service]
 Type=simple

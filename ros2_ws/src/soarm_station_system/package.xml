@@ -1,5 +1,5 @@
 <package format="3"><name>soarm_station_system</name><version>0.1.0</version>
-<description>Multi-resource ROS 2 application</description><maintainer email="maintainers@example.invalid">SOArm Station maintainers</maintainer>
+<description>Multi-resource ROS 2 application</description><maintainer email="maintainers@example.invalid">SO-Arm Station maintainers</maintainer>
 <license>Apache-2.0</license><buildtool_depend>ament_python</buildtool_depend>
 <exec_depend>rclpy</exec_depend><exec_depend>soarm_station_interfaces</exec_depend><exec_depend>sensor_msgs</exec_depend><exec_depend>diagnostic_msgs</exec_depend>
 <exec_depend>trajectory_msgs</exec_depend><exec_depend>tf2_ros</exec_depend><exec_depend>robot_state_publisher</exec_depend><exec_depend>launch_ros</exec_depend>

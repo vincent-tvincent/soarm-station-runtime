@@ -1,6 +1,11 @@
-# SOArm Station naming migration
+# SO-Arm Station naming migration
 
-The project is named **SOArm Station**. The runtime and training repositories are `soarm-station-runtime` and `soarm-station-training`. SO-101 and other hardware model names remain adapter identities.
+The project is named **SO-Arm Station**. The runtime and training repositories are `soarm-station-runtime` and `soarm-station-training`. SO-101 and other hardware model names remain adapter identities.
+
+The display spelling was standardized to **SO-Arm** on November 13, 2026.
+Repository, package, command, environment-variable and ROS identifiers retain
+the spellings in the table below; this display-name correction requires no
+interface migration.
 
 ## Public names
 

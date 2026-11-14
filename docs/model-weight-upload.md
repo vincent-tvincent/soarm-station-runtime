@@ -1,6 +1,6 @@
 # Uploading and using model weights
 
-Use this guide to add an exported LeRobot checkpoint to SOArm Station, create a saved execution profile, and prepare it for an explicit policy run. The Policies workspace is the third dashboard page after Operations and ROS graph.
+Use this guide to add an exported LeRobot checkpoint to SO-Arm Station, create a saved execution profile, and prepare it for an explicit policy run. The Policies workspace is the third dashboard page after Operations and ROS graph.
 
 The normal sequence is **Upload or copy → Refresh/catalog → Create profile → Validate and Save → Apply model → Start policy**. Uploading, saving and applying do not start robot motion. Training and demonstration collection belong to the separate training repository.
 

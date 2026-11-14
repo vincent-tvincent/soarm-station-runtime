@@ -23,7 +23,7 @@ def discover_root(origin,environment=None):
 def resolve_root(value,origin,environment=None):
     root=Path(value).expanduser().resolve() if value else discover_root(origin,environment)
     if root is None or not is_project_root(root):
-        raise ValueError('Cannot find the full SOArm Station checkout. Pass root:=/absolute/path/to/soarm-station-runtime.')
+        raise ValueError('Cannot find the full SO-Arm Station checkout. Pass root:=/absolute/path/to/soarm-station-runtime.')
     return root
 
 

@@ -1,6 +1,6 @@
 # Initial monitoring validation — November 12, 2026 (America/Los_Angeles)
 
-This dated report uses the package/interface names of its tested revision. For current SOArm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
+This dated report uses the package/interface names of its tested revision. For current SO-Arm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
 
 This records the initial read-only deployment. The later user-approved native writable qualification and current state are in [physical motion validation](physical-motion-validation-2026-11-12.md). The earlier approval restriction below is historical.
 

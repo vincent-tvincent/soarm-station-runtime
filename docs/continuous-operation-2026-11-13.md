@@ -1,6 +1,6 @@
 # Continuous-operation revision — November 13, 2026
 
-This dated report uses the package/interface names of its tested revision. For current SOArm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
+This dated report uses the package/interface names of its tested revision. For current SO-Arm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
 
 The user requested removal/revision of unnecessary actuation safeguards that interrupt smooth continuous operation. The planning chat reviewed the exact deployed baseline `048fdf52906804d82d028eacbd846658f529650e`; the implementation chat remained the sole code writer. No PID, calibration, travel/speed limits, 0.12-rad target-lead bound, source-freshness window, torque-loss protection or support-torque policy was relaxed.
 

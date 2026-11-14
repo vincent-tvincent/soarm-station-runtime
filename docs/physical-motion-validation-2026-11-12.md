@@ -1,6 +1,6 @@
 # Native writable control qualification — November 12, 2026
 
-This dated report uses the package/interface names of its tested revision. For current SOArm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
+This dated report uses the package/interface names of its tested revision. For current SO-Arm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
 
 This is the initial physical baseline. Later session lifetime/permission/reference behavior is revised in [the November13 continuity report](continuous-operation-2026-11-13.md); initial normal-completion re-enable behavior is historical.
 

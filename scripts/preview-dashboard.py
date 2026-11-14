@@ -41,7 +41,7 @@ class Preview:
 
     def response(self, payload, status=200):
         return web.json_response(payload, status=status, headers={
-            "Cache-Control": "no-store", "X-SOArm-Preview": "hardware-free-mock",
+            "Cache-Control": "no-store", "X-SO-Arm-Preview": "hardware-free-mock",
         })
 
     def status_value(self):
@@ -60,7 +60,7 @@ class Preview:
         return st
 
     async def index(self, request):
-        return web.FileResponse(self.web_root / "index.html", headers={"X-SOArm-Preview": "hardware-free-mock", "Cache-Control": "no-store"})
+        return web.FileResponse(self.web_root / "index.html", headers={"X-SO-Arm-Preview": "hardware-free-mock", "Cache-Control": "no-store"})
 
     async def asset(self, request):
         name = request.match_info["name"]
@@ -69,7 +69,7 @@ class Preview:
         path = (self.web_root / name).resolve()
         if path.parent != self.web_root or not path.is_file():
             raise web.HTTPNotFound()
-        return web.FileResponse(path, headers={"Cache-Control": "no-store", "X-SOArm-Preview": "hardware-free-mock"})
+        return web.FileResponse(path, headers={"Cache-Control": "no-store", "X-SO-Arm-Preview": "hardware-free-mock"})
 
     async def preview_info(self, request):
         return self.response({"environment": self.fixture["preview"]["environment"],
@@ -264,7 +264,7 @@ class Preview:
 
     async def image(self, request):
         content,camera=self.image_bytes(request.match_info["id"])
-        return web.Response(body=content,content_type="image/jpeg",headers={"Cache-Control":"no-store","X-SOArm-Preview":"historical-reference-not-live","X-Source-Time-Ns":"0","X-Reference-Date":camera["reference_date"],"X-Reference-Kind":camera.get("reference_kind","historical_reference")})
+        return web.Response(body=content,content_type="image/jpeg",headers={"Cache-Control":"no-store","X-SO-Arm-Preview":"historical-reference-not-live","X-Source-Time-Ns":"0","X-Reference-Date":camera["reference_date"],"X-Reference-Kind":camera.get("reference_kind","historical_reference")})
 
     async def camera_socket(self, request):
         content,camera=self.image_bytes(request.match_info["id"])
