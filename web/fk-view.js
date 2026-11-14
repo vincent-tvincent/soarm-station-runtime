@@ -136,9 +136,11 @@ export class FKView {
       cp = Math.cos(this.pitch),
       sp = Math.sin(this.pitch);
     return {
-      x: 210 + (cy * x - sy * y) * 650,
+      // Right/up/back form one right-handed camera basis. Positive pitch views
+      // the arm from above; larger depth is nearer for the painter ordering.
+      x: 210 + (-cy * x + sy * y) * 650,
       y: 245 - (cp * z - sp * (sy * x + cy * y)) * 650,
-      depth: sy * x + cy * y,
+      depth: cp * (sy * x + cy * y) + sp * z,
     };
   }
   line(a, b, attributes) {

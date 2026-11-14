@@ -97,3 +97,17 @@ gray overlay. The hinge keeps its existing fault color, and the EE axes remain.
 The normalized percentage maps to the URDF jaw limits with a representative
 65 mm finger length; this is an opening illustration, not calibrated aperture
 metrology. Only the dashboard's device-free FK calculation and rendering changed.
+
+### Camera handedness correction — November 13, 2026
+
+The old screen basis and painter depth used opposite handedness. With positive
+pitch it looked like an underside view even though depth ordering assumed the
+other side. The viewer now uses a consistent right-handed right/up/back basis,
+with positive pitch above the table and depth including height. The FK, joint
+values, jaw-angle mapping and motor signs were not changed.
+
+Independent Pinocchio comparisons matched the jaw FK to numerical precision.
+Projection tests cover orthonormality, right×up=back, above-table elevation and
+depth ordering. At the inspected arm pose, the 0→100% opening projects rightward
+instead of leftward. This is a browser-only correction; no service reload or
+physical movement is needed.
