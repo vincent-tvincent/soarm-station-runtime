@@ -16,7 +16,7 @@ function manager(overrides={}){
     search:'',selectedModel:null,picker:false,importText:'',importDirty:false,importResult:null,importMode:'new',importNewId:'',
     importFilename:'No profile selected',importVersion:0,importPreviewVersion:0,importReadVersion:0,importPreviewSnapshot:null,
     navigationVersion:0,validationVersion:0,inspectedRemote:null,inspectionVersion:0,inspectionJob:null,_inspectionContext:null,_inspectionStatus:null,runtimeVersion:0,catalogVersion:0,profileListVersion:0,
-    scanJobs:new Map(),activeTransfers:new Map(),runGeneration:0,runInstruction:'Pick the cup',runDuration:'',runMode:'STREAM',
+    scanJobs:new Map(),preparationJobs:new Map(),preparationOutcomes:new Map(),selectedProfile:null,activeTransfers:new Map(),runGeneration:0,runInstruction:'Pick the cup',runDuration:'',runMode:'STREAM',
     startedRun:null,operation:null,instructionPending:false,renders:0,notices:[],
     client:{currentOperation:null,refresh:async()=>{},enable:async()=>{}},
     api:{profiles:async()=>[],models:async()=>[],sources:async()=>({roots:[]}),runtime:async()=>({})},
@@ -191,7 +191,7 @@ test('Update is refused for INLINE or foreign operations, and Stop never ends an
 
 test('Apply supplies the displayed saved revision and explicitly queues at a current-operation boundary',async()=>{
   const m=manager();m.profiles=[{id:'preset',revision:'etag-saved'}];m.client.currentOperation=modelOp();m.dialog=async()=> 'after_current';
-  let args;m.api.prepare=async(...a)=>{args=a;return{};};
+  let args;m.api.prepare=async(...a)=>{args=a;return{job:{id:'prepare1',state:'queued'}};};
   assert.equal(await m.apply('preset'),true);assert.deepEqual(args,['preset',{expected_revision:'etag-saved',mode:'after_current'}]);
 });
 
@@ -312,4 +312,120 @@ test('metadata outage keeps Stop for the owned run without enabling a new run or
   assert.equal(await m.startPolicy(),false);assert.equal(enables,0);
   m.client.currentOperation=modelOp('foreign-request','foreign-operation');
   assert.equal(m.displayedApplied(),null);assert.doesNotMatch(m.runPage(),/data-action="stop-policy"/);
+});
+
+const prepared=(id='preset',revision='r2',arm='arm1')=>({id,name:id,profile_revision:revision,arm_id:arm,state:'ready',runtime_profile_id:`native-${id}-${revision}-${arm}`});
+const requestedPreparation=(m,jobId='prep1',extra={})=>{
+  const requested={id:'preset',revision:'r2',armId:'arm1',name:'Selected policy',job:{id:jobId,state:'queued'},polling:false,...extra};
+  m.preparationJobs.set(jobId,requested);m.selectedProfile={id:requested.id,revision:requested.revision,armId:requested.armId,jobId};
+  return requested;
+};
+
+test('selected profile resolves exact revision and arm, never a stale last-applied fallback',()=>{
+  const m=manager({selectedProfile:{id:'preset',revision:'r2',armId:'arm2'}});
+  m.runtime={applied:prepared('preset','r2','arm1'),applied_by_arm:{arm1:prepared('preset','r1','arm1'),arm2:prepared('preset','r2','arm2')}};
+  assert.equal(m.applied().arm_id,'arm2');
+  m.selectedProfile={id:'preset',revision:'r2',armId:'arm1'};assert.equal(m.applied(),null);
+  m.selectedProfile={id:'preset',revision:'r3',armId:'arm2'};assert.equal(m.applied(),null);
+});
+
+test('an arm-unbound selection does not arbitrarily choose between ambiguous matching profiles',()=>{
+  const m=manager({selectedProfile:{id:'preset',revision:'r2'}});
+  m.runtime={applied_by_arm:{arm1:prepared(),arm2:prepared('preset','r2','arm2')}};
+  assert.equal(m.applied(),null);
+});
+
+test('an owned active run displays its pinned profile while another selected profile is ready',()=>{
+  const m=manager(),run=owned(m);run.appliedSnapshot=prepared('active','r1','arm1');
+  const active=prepared('active','r1','arm1'),next=prepared('next','r2','arm2');
+  m.runtime={applied:next,applied_by_arm:{arm1:active,arm2:next}};
+  m.selectedProfile={id:'next',revision:'r2',armId:'arm2'};
+  assert.equal(m.applied().id,'next');assert.equal(m.displayedApplied().id,'active');assert.equal(m.displayedApplied().state,'ready');
+});
+
+test('queued Apply response cannot overwrite a terminal failure found during refresh',async()=>{
+  const m=manager();m.profiles=[{id:'preset',name:'Test policy',revision:'r2'}];
+  m.api.prepare=async()=>({job:{id:'prep1',state:'queued'},message:'Older generic queued notice'});
+  m.api.runtime=async()=>({jobs:[{id:'prep1',state:'failed',errors:[{message:'Insufficient memory'}]}],applied_by_arm:{arm2:prepared('other','r4','arm2')}});
+  assert.equal(await m.apply('preset'),false);
+  assert.match(m.notices.at(-1).value,/Preparation failed.*Insufficient memory/);
+  assert.equal(m.notices.at(-1).error,true);assert.equal(m.preparationJobs.size,0);assert.equal(m.applied(),null);
+});
+
+test('immediate failed and completed prepare responses report their actual terminal result',async()=>{
+  for(const success of [false,true]){
+    const m=manager();m.profiles=[{id:'preset',name:'Test policy',revision:'r2'}];
+    m.api.prepare=async()=>({job:success?{id:'prep1',state:'complete',result:{applied:prepared()}}:{id:'prep1',state:'failed',errors:[{message:'Bad processor'}]}});
+    m.api.runtime=async()=>({jobs:[],applied_by_arm:success?{arm1:prepared()}: {}});
+    assert.equal(await m.apply('preset'),success);assert.equal(m.preparationJobs.size,0);
+    assert.equal(m.preparationOutcomes.get('prep1').state,success?'ready':'failed');
+    assert.match(m.notices.at(-1).value,success?/Prepared Test policy/:/Bad processor/);
+    if(success){assert.equal(m.selectedProfile.armId,'arm1');assert.equal(m.applied().profile_revision,'r2');}
+  }
+});
+
+test('preparation polling finds terminal jobs omitted from the recent runtime job window',async()=>{
+  const m=manager();requestedPreparation(m);
+  m.api.runtime=async()=>({jobs:[],applied_by_arm:{arm1:prepared()}});
+  const calls=[];m.api.preparationStatus=async id=>{calls.push(id);return{job:{id,state:'complete',result:{applied:prepared()}}};};
+  await m.pollOnce();assert.deepEqual(calls,['prep1']);assert.equal(m.preparationJobs.size,0);
+  assert.equal(m.preparationOutcomes.get('prep1').state,'ready');assert.match(m.notices.at(-1).value,/Prepared Selected policy/);
+});
+
+test('completed preparation for another revision or arm never reports ready for the selected request',()=>{
+  for(const metadata of [prepared('preset','older','arm1'),prepared('preset','r2','arm2'),prepared('other','r2','arm1')]){
+    const m=manager();requestedPreparation(m);
+    m.observePreparations({jobs:[{id:'prep1',state:'complete',result:{applied:metadata}}],applied:metadata});
+    assert.equal(m.preparationOutcomes.get('prep1').state,'unconfirmed');assert.equal(m.notices.at(-1).error,true);
+    assert.doesNotMatch(m.notices.at(-1).value,/^Prepared /);
+  }
+});
+
+test('a previous preparation completion is recorded without replacing the latest selected request notice',()=>{
+  const m=manager();requestedPreparation(m,'older');
+  requestedPreparation(m,'newer',{id:'next',revision:'r3',name:'New selection'});
+  m.show('New selection is preparing.');
+  m.observePreparations({jobs:[{id:'older',state:'failed',errors:[{message:'Old failure'}]}]});
+  assert.equal(m.preparationOutcomes.get('older').state,'failed');assert.equal(m.selectedProfile.id,'next');
+  assert.equal(m.notices.at(-1).value,'New selection is preparing.');assert.equal(m.preparationJobs.has('newer'),true);
+});
+
+test('pending preparations keep background polling alive when the management page is hidden',t=>{
+  const m=manager({visible:false});requestedPreparation(m);let callback=null;
+  t.mock.method(globalThis,'setTimeout',(fn,ms)=>{callback=fn;assert.equal(ms,2000);return 123;});
+  t.mock.method(globalThis,'clearTimeout',()=>{});
+  PolicyManagement.prototype.schedulePoll.call(m);
+  assert.equal(typeof callback,'function');assert.equal(m.pollTimer,123);
+});
+
+test('full refresh does not erase a discovered preparation failure with an empty generic notice',async()=>{
+  const m=manager();requestedPreparation(m);m.api.uploads=async()=>[];
+  m.api.runtime=async()=>({jobs:[{id:'prep1',state:'failed',errors:[{message:'Load failed'}]}]});
+  await m.refresh();assert.match(m.notices.at(-1).value,/Preparation failed.*Load failed/);assert.equal(m.notices.at(-1).error,true);
+});
+
+test('pending banners follow the displayed active arm, then the selected arm when its operation ends',()=>{
+  const m=manager(),run=owned(m);run.appliedSnapshot=prepared('active','r1','arm1');
+  const arm1={id:'next_on_arm1',name:'Arm one next',profile_revision:'r3',arm_id:'arm1',state:'after_current'};
+  const arm2={id:'next_on_arm2',name:'Arm two next',profile_revision:'r4',arm_id:'arm2',state:'preparing'};
+  m.runtime={applied_by_arm:{arm1:run.appliedSnapshot,arm2:prepared('selected','r2','arm2')},pending:arm2,pending_by_arm:{arm1,arm2}};
+  m.selectedProfile={id:'selected',revision:'r2',armId:'arm2'};
+  assert.equal(m.pendingForDisplay().id,'next_on_arm1');
+  const banner={innerHTML:''};m.q=()=>banner;PolicyManagement.prototype.renderActive.call(m);
+  assert.match(banner.innerHTML,/Arm one next/);assert.doesNotMatch(banner.innerHTML,/Arm two next/);
+  assert.match(m.runPage(),/Arm one next/);assert.doesNotMatch(m.runPage(),/Arm two next/);
+  run.tracking=false;m.client.currentOperation=null;
+  assert.equal(m.pendingForDisplay().id,'next_on_arm2');
+});
+
+test('a requested profile with no known arm uses its exact pending identity instead of another global pending arm',()=>{
+  const m=manager({selectedProfile:{id:'requested',revision:'r3',jobId:'job3'}});
+  const correct={id:'requested',name:'Correct request',profile_revision:'r3',job_id:'job3',state:'preparing'};
+  const unrelated={id:'other',name:'Unrelated global request',profile_revision:'r7',job_id:'job7',arm_id:'arm3',state:'preparing'};
+  m.runtime={pending:unrelated,pending_by_arm:{arm1:{...correct,profile_revision:'old',job_id:'old'},arm2:correct,arm3:unrelated}};
+  assert.equal(m.pendingForDisplay().arm_id,'arm2');
+  delete m.runtime.pending_by_arm.arm2;
+  assert.equal(m.pendingForDisplay(),null);
+  const banner={innerHTML:''};m.q=()=>banner;PolicyManagement.prototype.renderActive.call(m);
+  assert.doesNotMatch(banner.innerHTML,/Unrelated global request/);
 });

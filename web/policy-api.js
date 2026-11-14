@@ -201,7 +201,7 @@ export class PolicyAPI {
     if(!['idle','after_current'].includes(mode))throw new PolicyAPIError('Unsupported profile preparation mode.',{code:'INVALID_INPUT'});
     return this.request(`/api/v1/policy-profiles/${encode(id)}/prepare`,{method:'POST',json:{expected_revision,mode}});
   }
-  async runtime(){const v=await this.request('/api/v1/policy-runtime');if(!object(v))throw malformed('The server returned no policy-runtime state.');return {...v,applied:v.applied??null,pending:v.pending??null,descriptors:Array.isArray(v.descriptors)?v.descriptors:[]};}
+  async runtime(){const v=await this.request('/api/v1/policy-runtime');if(!object(v))throw malformed('The server returned no policy-runtime state.');const normalize=p=>p?{...p,execution_config:object(p.execution)?p.execution:p.execution_config,execution:object(p.execution)?p.execution.kind:p.execution}:null;return {...v,applied:normalize(v.applied),applied_by_arm:Object.fromEntries(Object.entries(v.applied_by_arm||{}).map(([id,p])=>[id,normalize(p)])),pending:v.pending??null,descriptors:Array.isArray(v.descriptors)?v.descriptors:[]};}
 
   async upload(id,{signal}={}){return jobRecord(await this.request(`/api/v1/model-uploads/${encode(id)}`,{signal}));}
   async uploads() {

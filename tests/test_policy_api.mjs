@@ -122,6 +122,68 @@ test('normalizes actual ProfileStore summaries without losing structured configu
   assert.equal(remote.camera_summary,'');
 });
 
+test('runtime normalizes the global applied execution label while preserving its complete native configuration',async()=>{
+  const execution={kind:'remote',endpoint:'tcp/gpu-host:7447',deployment:'tabletop-pi05',
+    expected_artifact:'sha256:'+'e'.repeat(64),instance:'server-001',connection_profile:'lab-network'};
+  const native={id:'tabletop',name:'Tabletop policy',profile_revision:'profile-r3',state:'ready',
+    execution,arm_id:'arm2',artifact_revision:execution.expected_artifact,language_conditioned:true,
+    runtime_profile_id:'pm_tabletop_r3',source_revision:null,model_reference:null,
+    remote_instance:'server-001',session_admitted:false,
+    reason:'Descriptor verified; session admission remains a separate Start action'};
+  const calls=[];
+  const api=new PolicyAPI({origin:'https://station.test',fetch:async(url,options)=>{
+    calls.push({url,options});return response({schema_version:1,applied:native,pending:null,descriptors:[]});
+  }});
+  const value=await api.runtime();
+  assert.equal(value.applied.execution,'remote');
+  assert.deepEqual(value.applied.execution_config,execution);
+  const {execution_config,...record}=value.applied;
+  assert.deepEqual({...record,execution:execution_config},native,'all native identity and readiness fields survive');
+  assert.equal(value.applied.session_admitted,false);
+  assert.equal(calls.length,1);assert.equal(calls[0].options.method,'GET');
+  assert.equal(new URL(calls[0].url).pathname,'/api/v1/policy-runtime');
+});
+
+test('runtime normalizes every explicit per-arm applied entry without choosing a default arm or changing readiness',async()=>{
+  const arm1={id:'act_cup',name:'Cup ACT',arm_id:'arm1',profile_revision:'r1',state:'ready',
+    execution:{kind:'local',device:'cpu'},runtime_profile_id:'pm_act_r1',language_conditioned:false};
+  const arm2={id:'vla_pick',name:'Pick VLA',arm_id:'arm2',profile_revision:'r2',state:'preparing',
+    execution:{kind:'remote',endpoint:'tcp/workstation:7448',deployment:'pick-vla'},runtime_profile_id:'pm_vla_r2'};
+  const pending={id:'next_model',arm_id:'arm2',state:'after_current',profile_revision:'r4'};
+  const capabilities={local_prepare:true,remote_inspect:true,session_admitted_on_inspect:false};
+  const api=new PolicyAPI({origin:'https://station.test',fetch:async()=>response({schema_version:1,
+    applied:null,applied_by_arm:{arm1,arm2,arm3:null},pending,pending_by_arm:{arm2:pending},capabilities,
+    runtime_profiles:[{id:'pm_act_r1',arm_id:'arm1',backend:'local'}],descriptors:[]})});
+  const value=await api.runtime();
+  assert.equal(value.applied,null,'per-arm entries do not invent a globally selected arm');
+  assert.deepEqual(Object.keys(value.applied_by_arm),['arm1','arm2','arm3']);
+  assert.equal(value.applied_by_arm.arm1.execution,'local');
+  assert.deepEqual(value.applied_by_arm.arm1.execution_config,arm1.execution);
+  assert.equal(value.applied_by_arm.arm1.language_conditioned,false);
+  assert.equal(value.applied_by_arm.arm2.execution,'remote');
+  assert.deepEqual(value.applied_by_arm.arm2.execution_config,arm2.execution);
+  assert.equal(value.applied_by_arm.arm2.state,'preparing','normalization must not promote preparation to ready');
+  assert.equal(value.applied_by_arm.arm3,null);
+  assert.deepEqual(value.pending,pending);assert.deepEqual(value.pending_by_arm,{arm2:pending});
+  assert.deepEqual(value.capabilities,capabilities);
+  assert.deepEqual(value.runtime_profiles,[{id:'pm_act_r1',arm_id:'arm1',backend:'local'}]);
+});
+
+test('runtime accepts already normalized execution strings and honest unavailable state',async()=>{
+  const nativeConfig={kind:'local',device:'cuda'};
+  const applied={id:'existing',arm_id:'arm1',state:'ready',execution:'local',execution_config:nativeConfig};
+  let call=0;
+  const api=new PolicyAPI({origin:'https://station.test',fetch:async()=>response(call++===0
+    ?{applied,applied_by_arm:{arm1:applied},descriptors:[]}
+    :{state:'unavailable',reason:'No runtime bridge',applied:null,pending:null,capabilities:{local_prepare:false}})});
+  const compatible=await api.runtime();
+  assert.deepEqual(compatible.applied,applied);
+  assert.deepEqual(compatible.applied_by_arm.arm1,applied);
+  const unavailable=await api.runtime();
+  assert.equal(unavailable.state,'unavailable');assert.equal(unavailable.applied,null);
+  assert.deepEqual(unavailable.applied_by_arm,{});assert.equal(unavailable.capabilities.local_prepare,false);
+});
+
 test('inspect-draft preserves descriptor and cataloged upload means ready for selection',async()=>{
   const api=new PolicyAPI({origin:'https://station.test',fetch:async url=>new URL(url).pathname.endsWith('inspect-draft')
     ?response({validation:{valid:true,ready:false,errors:[],warnings:[],resolved_model:{category:'pi05'}},descriptor:{deployment:'pi05-tabletop'},admitted:false})
