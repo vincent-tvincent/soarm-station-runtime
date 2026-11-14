@@ -1,11 +1,11 @@
 # SOArm Station dashboard backend API v1
 
-Authenticated JSON contracts for resource descriptors, cached motor telemetry and generic ROS graph discovery. Existing control authority stays with the runtime owner. Null denotes an unavailable value.
+JSON contracts for resource descriptors, cached motor telemetry and generic ROS graph discovery. Access uses the trusted-peer/bearer policy below. Existing control authority stays with the runtime owner. Null denotes an unavailable value. For the complete route inventory and external control examples, see the [README API tables](../README.md#web-api-tables) and [integration guide](web-api.md).
 
 
 ## Static assets
 
-Public GET `/assets/{file}` serves only explicit `.js`/`.css` files in `web/`: `app.js`, `graph.js`, `transport.js`, `styles.css`, `camera-layout.js`, `payload-model.js`. No directory traversal or generic filesystem exposure. `/` remains public. APIs, media and WebSockets remain authenticated.
+Public GET `/assets/{file}` serves only the explicit `ASSET_NAMES` allowlist in `dashboard_node.py`: dashboard, graph, transport, camera, payload-editor, Manual/FK and Policies JavaScript/CSS, the local YAML bundle and its license text. No directory traversal or generic filesystem exposure. `/` remains public. APIs, media and WebSockets use the trusted-peer/bearer access policy.
 
 ## GET /api/status (additive)
 
@@ -92,7 +92,7 @@ Sampling counters include the terminating message; a custom oversized message ca
 {"arm_id":"arm1","runtime_boot_id":"BOOT","controller_session":"SESSION","operator_session_id":"OPERATOR","operation_type":"TRAJECTORY","mode":"INLINE","payload_kind":"CARTESIAN_TARGET","cartesian":[{"frame_id":"arm1_base","position":[0.1,0.2,0.3],"orientation_mode":"POSITION_ONLY","orientation":[0,0,0,1],"duration_s":1.25}]}
 ```
 
-There are 1..16 endpoints. Position is metres; quaternion order is XYZW. POSITION_ONLY and STRICT_POSE are the existing supported orientation modes. STRICT_POSE requires an orientation. Mixed joint/Cartesian bodies, malformed/nonfinite vectors and Cartesian STREAM reject. Registered-model/frame/IK/path limits and permission/operation checks remain authoritative. No Cartesian jog or continuous Cartesian-path feature is added.
+There are 1..16 endpoints. Position is metres; quaternion order is XYZW. POSITION_ONLY and STRICT_POSE are the existing supported orientation modes. STRICT_POSE requires an orientation. Mixed joint/Cartesian bodies, malformed/nonfinite vectors and Cartesian STREAM reject. Registered-model/frame/IK/path limits and permission/operation checks remain authoritative. For incremental keyboard IK, use the separate [Manual calculation routes](manual-control-backend.md) and send their joint targets through DIRECT control. The INLINE endpoint does not provide a continuous Cartesian-path guarantee.
 
 ## Reloading the dashboard process
 

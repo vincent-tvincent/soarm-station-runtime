@@ -35,7 +35,7 @@ ros2 launch soarm_station_system system.launch.py \
 
 This launches one mock arm (`arm1`) and one mock camera (`forward`). Use `config/multi_mock.yaml` for multiple mock resources. Both examples use HTTPS port 8443 and the same `/soarm_station` namespace; run one complete graph at a time with these settings.
 
-Open `https://localhost:8443/`, trust the certificate at `local/tls/cert.pem`, and log in with the `SOARM_STATION_TOKEN` value in `local/secrets.env`. Successful startup produces process-start messages, fresh arm feedback and camera images. No motion permission or operation is created by startup.
+Open `https://localhost:8443/` with the certificate at `local/tls/cert.pem` trusted by the client. Default loopback/Tailscale access connects automatically; bearer-only clients require the configured `SOARM_STATION_TOKEN`. See [API access](web-api.md#connection-access-and-discovery). Successful startup produces process-start messages, fresh arm feedback and camera images. No motion permission or operation is created by startup.
 
 The full launch selects both Python interpreters, loads the configured tokens for child processes and applies the DDS environment. It requires neither manual venv activation nor a systemd service.
 

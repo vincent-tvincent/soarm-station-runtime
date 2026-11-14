@@ -6,7 +6,7 @@ Tracked profiles live in `config/`; deployment profiles and credentials belong u
 
 An arm declares its backend, named joints, radian position bounds, velocity limits, calibration, base/TCP/model settings and gripper convention. SO-101 is the current hardware adapter. The gripper uses percent separately from ROS joint radians. A camera declares its backend/capture identity, resolution, FPS and optional measured intrinsics. Duplicate physical device paths are rejected. Shared serial buses require a bus-level adapter rather than separate owners opening the same bus.
 
-Relative file paths resolve against the YAML file's directory. Configuration is loaded at startup. Model bundles are bound to named entries in `profiles`; clients select registered IDs rather than arbitrary paths or URLs.
+Relative file paths resolve against the YAML file's directory. Physical configuration is loaded at startup. Model bundles can be bound to named startup entries in `profiles`, or prepared dynamically through [policy management](policy-management.md). Clients select registered runtime IDs rather than arbitrary checkpoint paths in motion requests. Saved profile IDs and the immutable prepared `runtime_profile_id` are distinct.
 
 The runtime's `.venv` uses distribution Python for ROS. `.runtime-venv` contains the pinned native LeRobot/PyTorch environment. A restricted Unix socket separates their Python ABIs. One worker owns motor and camera I/O, with an independent control thread per arm and one capture/encoding path per camera. See [architecture](architecture.md) for the process model.
 
@@ -66,7 +66,7 @@ Cartesian endpoints use LeRobot/Placo with explicit base frames, bounded solve t
 
 The dashboard opens automatically over HTTPS from the owner’s Tailscale connection or loopback, with no token form. Control and camera sockets are separate. Actual socket peers establish private-network access; browser origins are checked for commands and WebSockets. Existing bearer tokens remain compatible for other clients. HTTPS keys/certificates stay host-local.
 
-Dashboard routes include:
+The [README](../README.md#web-api-tables) contains the complete current route tables, including model management, Manual calculators, ROS discovery and input hosts. The [external integration guide](web-api.md) gives request shapes, identity/permission rules and continuous-stream examples. Core control routes include:
 
 | Method | Route |
 | --- | --- |
@@ -86,7 +86,7 @@ Run that CLI in a native LeRobot environment, with its operator token provisione
 
 ## Policy deployment
 
-The separate training repository exports bundles containing weights, saved processors, named state/action mappings, units, camera mappings, action FPS, calibration revision, hashes and evaluation metadata. Bind a verified bundle to a named `profiles` entry.
+The separate training repository exports bundles containing weights, saved processors, named state/action mappings, units, camera mappings, action FPS, calibration revision, hashes and evaluation metadata. Use [Policies to upload/select a checkpoint and prepare an execution profile](model-weight-upload.md), or bind a verified bundle to a startup `profiles` entry. Use the prepared per-arm `runtime_profile_id` or registered startup ID when starting MODEL.
 
 Local inference uses LeRobot checkpoints/processors. Remote inference uses released `RemoteClient`/`RemoteInferenceEngine` with Zenoh. Start the compute-side server with `scripts/serve-policy CONFIG` using `config/policy-server.example.yaml`. The example binds loopback; configure protected connectivity for another host. Each native deployment owns one model/session.
 
