@@ -302,3 +302,14 @@ test('inspection progress is independent from an unavailable runtime poll and do
   await assert.rejects(m.pollOnce(),/Runtime snapshot unavailable/);
   assert.equal(m.inspectionStatus.state,'complete');assert.equal(m.applied(),null);assert.equal(m.validation.ready,false);
 });
+
+test('metadata outage keeps Stop for the owned run without enabling a new run or claiming a foreign one',async()=>{
+  const m=manager();const run=owned(m);let enables=0;
+  run.appliedSnapshot={id:'policy',name:'Running policy',state:'ready',arm_id:'arm1',execution:'remote',language_conditioned:true};
+  m.runtime={state:'unavailable',applied:null};m.client.enable=async()=>{enables++;};
+  assert.equal(m.displayedApplied().state,'metadata unavailable');
+  assert.match(m.runPage(),/data-action="stop-policy"/);
+  assert.equal(await m.startPolicy(),false);assert.equal(enables,0);
+  m.client.currentOperation=modelOp('foreign-request','foreign-operation');
+  assert.equal(m.displayedApplied(),null);assert.doesNotMatch(m.runPage(),/data-action="stop-policy"/);
+});

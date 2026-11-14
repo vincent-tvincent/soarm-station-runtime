@@ -68,6 +68,18 @@ def test_bad_diagnostics_keep_last_valid_motor_cache_with_visible_error():
     send(valid);assert owner.motor_record_errors=={}
 
 
+def test_prepared_resources_preserve_static_profile_ids_with_managed_looking_prefix():
+    original={'profiles':[{'id':'pm_custom','arm_id':'arm1'},{'id':'legacy','arm_id':'arm1'}],
+              'arms':[{'id':'arm1','profile_ids':['pm_custom','legacy']}]}
+    prepared=[{'id':'pm_prepared_revision','arm_id':'arm1'}]
+    owner=types.SimpleNamespace(public_resources=original,
+        policy_manager=types.SimpleNamespace(public_runtime_profiles=lambda:prepared))
+    result=DashboardNode.resource_view(owner)
+    assert [p['id'] for p in result['profiles']]==['pm_custom','legacy','pm_prepared_revision']
+    assert result['arms'][0]['profile_ids']==['pm_custom','legacy','pm_prepared_revision']
+    assert original['arms'][0]['profile_ids']==['pm_custom','legacy']
+
+
 def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
     from aiohttp.test_utils import TestClient,TestServer
     calls=[]

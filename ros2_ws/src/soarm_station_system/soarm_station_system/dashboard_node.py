@@ -128,7 +128,8 @@ class DashboardNode(BaseNode):
         value=copy.deepcopy(self.public_resources)
         if getattr(self,'policy_manager',None) is not None:
             prepared=self.policy_manager.public_runtime_profiles()
-            value['profiles']=[p for p in value['profiles'] if not p['id'].startswith('pm_')]+prepared
+            prepared_ids={p['id'] for p in prepared}
+            value['profiles']=[p for p in value['profiles'] if p['id'] not in prepared_ids]+prepared
             for arm in value['arms']:arm['profile_ids']=[p['id'] for p in value['profiles'] if p.get('arm_id')==arm['id']]
         return value
     async def api_resources(self,request):return web.json_response(await asyncio.to_thread(self.resource_view))
