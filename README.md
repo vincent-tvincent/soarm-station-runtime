@@ -4,7 +4,7 @@ SOArm Station is a ROS 2 application for operating configurable sets of cameras 
 
 The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SOArm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
 
-Repository: `soarm-station-runtime`. Companion repository: `soarm-station-training`.
+Repository: [vincent-tvincent/soarm-station-runtime](https://github.com/vincent-tvincent/soarm-station-runtime). Companion repository: `soarm-station-training` (separate).
 
 ## Requirements
 
@@ -20,9 +20,11 @@ Use Bash for the commands below. Keep the complete repository: its Python core, 
 
 ## Quick start: mock devices
 
-Clone or extract the runtime repository, then run these commands from its root:
+Clone the runtime repository, then run:
 
 ```bash
+git clone https://github.com/vincent-tvincent/soarm-station-runtime.git
+cd soarm-station-runtime
 export ROS_DISTRO=lyrical
 scripts/bootstrap
 .venv/bin/python scripts/init-local --name localhost
@@ -100,6 +102,8 @@ See the [name migration](docs/name-migration.md) when updating clients or instal
 - [Startup and debugging](docs/startup-and-debug.md): first installation, foreground launch, ROS CLI, single-node runs and service management.
 - [Architecture](docs/architecture.md): process ownership, node responsibilities and timing.
 - [Policy/model management](docs/policy-management.md): file-owned sources, versioned profiles, uploads and no-motion preparation.
+- [Policy editor](docs/policy-management-frontend.md) and [deployment verification](docs/policy-management-deployment-2026-11-13.md): editor behavior, upload transport and the deployed third workspace.
+- [GitHub deployment](docs/github-deployment.md): source updates, Pi read-only access and activation boundaries.
 - [Dashboard UI](docs/dashboard-ui.md): camera layouts, operations panels and generic graph interaction.
 - [Dashboard backend API](docs/dashboard-api.md): motor/resource metadata, generic ROS discovery and bounded sampling.
 - [Runtime reference](docs/runtime-reference.md): configuration, interfaces, operations, policy bundles and telemetry.

@@ -11,6 +11,18 @@ data/
 *.db*
 *.pem
 *.key
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+weights/
+datasets/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+*.onnx
 
 ._*
 .DS_Store
