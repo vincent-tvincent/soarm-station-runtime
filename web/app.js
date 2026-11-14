@@ -10,6 +10,7 @@ import {
 import { StationClient } from "./transport.js";
 import { GraphExplorer } from "./graph.js";
 import { ManualPanel } from "./manual-panel.js";
+import { PolicyManagement } from "./policy-management.js";
 import { fitRect, packEqualCameras } from "./camera-layout.js";
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => {
@@ -40,6 +41,7 @@ let snapshot = {},
   manual,
   noticeTimer,
   graph,
+  policies,
   connected = false,
   operation = null,
   historyRows = [];
@@ -78,6 +80,7 @@ function connection(info) {
     connected ? "Connected" : info.reason || info.state || "Disconnected",
   );
   graph?.setConnected(connected);
+  policies?.setConnected(connected);
   $("disconnect").hidden = false;
   $("disconnect").disabled = info.state === "connecting";
   $("disconnect").textContent = connected ? "Disconnect" : "Reconnect";
@@ -171,8 +174,20 @@ async function connectStation() {
 }
 $("disconnect").onclick = () =>
   connected ? safely(() => client.disconnect()) : connectStation();
-function setPage(value) {
-  const page = value === "graph" ? "graph" : "operations";
+let currentPage = "operations", changingPage = false;
+async function setPage(value, { fromHash = false, initial = false } = {}) {
+  const page = ["operations", "graph", "policies"].includes(value) ? value : "operations";
+  if (changingPage) {
+    if (fromHash) history.replaceState(null, "", "#" + currentPage);
+    return false;
+  }
+  changingPage = true;
+  try {
+  if (!initial && currentPage === "policies" && page !== currentPage &&
+      !(await policies.beforeLeave())) {
+    if (fromHash) history.replaceState(null, "", "#" + currentPage);
+    return false;
+  }
   $("app").dataset.view = page;
   document
     .querySelectorAll("[data-page]")
@@ -181,18 +196,27 @@ function setPage(value) {
     page === "graph" ? "ROS / GRAPH EXPLORER" : "SOARM / STATION";
   $("operations").hidden = page !== "operations";
   $("graph").hidden = page !== "graph";
-  text("page-title", page === "graph" ? "ROS graph" : "Robot operations");
-  text("page-series", page === "graph" ? "OBSERVABILITY" : "CONTROL");
+  $("policies").hidden = page !== "policies";
+  text("page-title", page === "graph" ? "ROS graph" : page === "policies" ? "Policy management" : "Robot operations");
+  text("page-series", page === "graph" ? "OBSERVABILITY" : page === "policies" ? "POLICY MANAGEMENT" : "CONTROL");
   manual?.setVisible(page === "operations" && activeTab === "manual");
   graph?.setVisible(page === "graph");
+  policies?.setVisible(page === "policies");
   if (page === "graph" && connected) graph.refresh();
+  currentPage = page;
+  if (!fromHash && location.hash !== "#" + page) history.pushState(null, "", "#" + page);
+  return true;
+  } finally { changingPage = false; }
 }
 for (const item of document.querySelectorAll("[data-page]"))
   item.onclick = () => {
-    location.hash = item.dataset.page;
-    setPage(item.dataset.page);
+    void safely(() => setPage(item.dataset.page));
   };
-window.addEventListener("hashchange", () => setPage(location.hash.slice(1)));
+window.addEventListener("hashchange", () => void safely(() => setPage(location.hash.slice(1), { fromHash: true })));
+document.querySelector(".brand").addEventListener("click", event => {
+  event.preventDefault();
+  void safely(() => setPage("operations"));
+});
 for (const tab of document.querySelectorAll("[data-tab]"))
   tab.onclick = () => {
     activeTab = tab.dataset.tab;
@@ -228,6 +252,7 @@ $("hold").onclick = () =>
   });
 function renderState(state) {
   snapshot = state || {};
+  policies?.updateState(snapshot);
   resources = state.resources || resources;
   graph?.setConnected(true);
   const env = state.environment || state.preview?.label || "";
@@ -446,6 +471,7 @@ function renderMotors() {
 }
 function operationChanged(event) {
   manual?.updateOperation(event);
+  policies?.updateOperation(event);
   operation = event;
   if (
     ["result", "closed"].includes(event.event) ||
@@ -1612,10 +1638,11 @@ manual = new ManualPanel({
   onError: showError,
   onNotice: notice,
 });
+policies = new PolicyManagement({ element: $("policies"), client, onError: showError, onNotice: notice });
 loadExample();
 drawHistory();
 
-setPage(location.hash.slice(1));
+void safely(() => setPage(location.hash.slice(1), { fromHash: true, initial: true }));
 
 // The station is already reached through the owner's private connection.
 void connectStation();

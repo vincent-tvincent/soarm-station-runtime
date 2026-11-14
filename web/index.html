@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light" />
     <title>SOArm Station</title>
     <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/policy-management.css" />
   </head>
   <body>
     <div id="app" data-view="operations">
@@ -14,7 +15,8 @@
         <nav aria-label="Workspace">
           <button class="nav-item active" data-page="operations">
             Operations</button
-          ><button class="nav-item" data-page="graph">ROS graph</button>
+          ><button class="nav-item" data-page="graph">ROS graph</button
+          ><button class="nav-item" data-page="policies">Policies</button>
         </nav>
         <div class="connection">
           <span id="environment"></span><span id="connection">Connecting…</span
@@ -406,6 +408,7 @@
           </aside>
         </div>
       </main>
+      <main id="policies" class="page" hidden></main>
       <div id="notice" class="notice" role="status" hidden></div>
     </div>
     <script type="module" src="/assets/app.js"></script>
