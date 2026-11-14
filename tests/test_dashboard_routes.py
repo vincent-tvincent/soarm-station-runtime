@@ -66,3 +66,31 @@ def test_bad_diagnostics_keep_last_valid_motor_cache_with_visible_error():
         send(invalid)
         assert owner.motor_records['arm1'] is saved and owner.motor_record_errors['arm1']
     send(valid);assert owner.motor_record_errors=={}
+
+
+def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
+    from aiohttp.test_utils import TestClient,TestServer
+    calls=[]
+    async def unused(request):raise AssertionError('Route was not requested')
+    def expanded_state():raise AssertionError('Leader cleanup must not query policy IPC')
+    manager=types.SimpleNamespace(close=lambda:calls.append('policy'))
+    owner=types.SimpleNamespace(config={'web':{},'arms':[]},public_resources={'arms':[]},
+        states={'arm1':{'controller_session':'controller','operation_id':'','permission':False}},
+        state=expanded_state,policy_manager=manager)
+    for name in ('index','status','history','permission','hold','stream_input','operate','operation_status',
+                 'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample'):
+        setattr(owner,name,unused)
+    app=DashboardNode.create_app(owner)
+    original_close=owner.leader_registry.close
+    async def close_leader():
+        calls.append('leader')
+        await original_close()
+    owner.leader_registry.close=close_leader
+    async def exercise():
+        async with TestClient(TestServer(app)):
+            result=await owner.leader_registry._hold_current({'arm_id':'arm1','controller_session':'controller',
+                'operation_id':'owned','operator_session_id':'operator'})
+            assert result['success']
+            assert calls==[]
+        assert calls==['leader','policy']
+    asyncio.run(exercise())

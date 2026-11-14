@@ -96,9 +96,13 @@ class DashboardNode(BaseNode):
                 try:return client.call('hold_owned',arm_id=arm,controller_session=session,principal=principal,operation_id=operation_id)
                 finally:client.close()
             return await asyncio.to_thread(call)
-        self.leader_registry=LeaderHostRegistry(self.state,conditional_hold)
+        # Leader ownership/cleanup needs measured ROS state, not policy-store IPC.
+        self.leader_registry=LeaderHostRegistry(lambda:{'arms':dict(self.states),'resources':self.public_resources},conditional_hold)
         self.leader_registry.register_routes(app)
-        if getattr(self,'policy_manager',None) is not None:mount_policy_routes(app,self.policy_manager)
+        if getattr(self,'policy_manager',None) is not None:
+            mount_policy_routes(app,self.policy_manager)
+            async def close_policy(app):await asyncio.to_thread(self.policy_manager.close)
+            app.on_cleanup.append(close_policy)
         return app
     async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_STATION_ROOT'])/'web/index.html').read_text(),content_type='text/html')
     def motor_health(self,message):
@@ -211,7 +215,6 @@ class DashboardNode(BaseNode):
             await ws.close()
         return ws
     def destroy_node(self):
-        self.policy_manager.close()
         self.graph_observer.close()
         self.stopping=True;self.loop.call_soon_threadsafe(self.loop.stop);self.thread.join(timeout=4);super().destroy_node()
 def main():run(DashboardNode)
