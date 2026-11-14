@@ -148,18 +148,64 @@ export class FKView {
       node("line", { x1: p.x, y1: p.y, x2: q.x, y2: q.y, ...attributes }),
     );
   }
+  frameAxes(origin, rotation, length) {
+    return ["X", "Y", "Z"].map((label, axis) => ({
+      label,
+      origin,
+      end: origin.map((value, row) => value + length * rotation[row][axis]),
+    }));
+  }
+  drawAxes(axes, frame) {
+    for (const { label, origin, end } of axes) {
+      this.line(origin, end, {
+        stroke: "#aaa",
+        "stroke-width": 1,
+        "data-frame": frame,
+        "data-axis": label,
+      });
+      const q = this.project(end),
+        t = node("text", {
+          x: q.x + 5,
+          y: q.y - 4,
+          fill: "#767671",
+          "font-size": 10,
+          "data-frame": frame,
+        });
+      t.textContent = label;
+      this.svg.append(t);
+    }
+  }
   draw() {
     this.svg.replaceChildren();
+    const baseAxes = this.frameAxes(
+      [0, 0, 0],
+      [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      0.09,
+    );
+    const eeAxes = this.geometry
+      ? this.frameAxes(
+          this.geometry.tcp.position_m,
+          this.geometry.rotation_matrix,
+          0.06,
+        )
+      : [];
     const points = [
       this.project([0, 0, 0]),
       ...[this.geometry, this.target]
         .filter(Boolean)
         .flatMap((g) =>
-          g.segments.flatMap((s) => [
-            this.project(s.start_m),
-            this.project(s.end_m),
-          ]),
+          g.segments
+            .filter((s) => s.to !== "tcp")
+            .flatMap((s) => [this.project(s.start_m), this.project(s.end_m)]),
         ),
+      ...[...baseAxes, ...eeAxes].flatMap(({ origin, end }) => [
+        this.project(origin),
+        this.project(end),
+      ]),
     ];
     const xs = points.map((p) => p.x),
       ys = points.map((p) => p.y);
@@ -184,36 +230,25 @@ export class FKView {
         "stroke-width": 1,
       });
     }
-    for (const [label, p] of [
-      ["X", [0.09, 0, 0]],
-      ["Y", [0, 0.09, 0]],
-      ["Z", [0, 0, 0.09]],
-    ]) {
-      this.line([0, 0, 0], p, { stroke: "#aaa", "stroke-width": 1 });
-      const q = this.project(p),
-        t = node("text", {
-          x: q.x + 5,
-          y: q.y - 4,
-          fill: "#767671",
-          "font-size": 10,
-        });
-      t.textContent = label;
-      this.svg.append(t);
-    }
+    this.drawAxes(baseAxes, "base");
     const drawGeometry = (g, target) => {
       if (!g) return;
       const color = target ? "#a5a5a0" : "#191919";
-      for (const s of [...g.segments].sort(
-        (a, b) =>
-          this.project(a.start_m).depth +
-          this.project(a.end_m).depth -
-          (this.project(b.start_m).depth + this.project(b.end_m).depth),
-      ))
+      // Keep the real gripper branch; omit only the long tool-offset helper.
+      for (const s of g.segments
+        .filter((s) => s.to !== "tcp")
+        .sort(
+          (a, b) =>
+            this.project(a.start_m).depth +
+            this.project(a.end_m).depth -
+            (this.project(b.start_m).depth + this.project(b.end_m).depth),
+        ))
         this.line(s.start_m, s.end_m, {
           stroke: color,
           "stroke-width": target ? 3 : 4,
           "stroke-dasharray": target ? "5 5" : "",
           "stroke-linecap": "round",
+          "data-segment-to": s.to,
         });
       for (const j of g.joints) {
         const p = this.project(j.position_m),
@@ -235,6 +270,7 @@ export class FKView {
     };
     drawGeometry(this.target, true);
     drawGeometry(this.geometry, false);
+    this.drawAxes(eeAxes, "ee");
     this.element.querySelector(".fk-empty").hidden = !!this.geometry;
     const g = this.geometry,
       values = g?.position_m;
