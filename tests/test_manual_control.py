@@ -86,6 +86,32 @@ class ManualControlTests(unittest.TestCase):
                 for n in NAMES:self.assertLessEqual(abs(result['target']['positions'][n]-HOME[n]),.060000001)
         self.assertEqual(HOME,original)
 
+    def test_gripper_fingers_follow_opening_without_changing_body_fk(self):
+        model=ManualControl(config())
+        poses=[model.fk(HOME,opening) for opening in (0.,50.,100.)]
+        moving=[]
+        for opening,pose in zip((0.,50.,100.),poses):
+            fixed=next(s for s in pose['segments'] if s.get('role')=='fixed_finger')
+            finger=next(s for s in pose['segments'] if s.get('role')=='moving_finger')
+            hinge=next(j for j in pose['joints'] if j['role']=='gripper')
+            np.testing.assert_allclose(fixed['end_m'],pose['tcp']['position_m'])
+            np.testing.assert_allclose(finger['start_m'],hinge['position_m'])
+            self.assertAlmostEqual(np.linalg.norm(np.array(finger['end_m'])-finger['start_m']),.065)
+            self.assertEqual(pose['gripper_visual']['opening_percent'],opening)
+            self.assertTrue(pose['gripper_visual']['schematic'])
+            np.testing.assert_allclose(pose['position_m'],poses[0]['position_m'])
+            np.testing.assert_allclose(pose['rotation_matrix'],poses[0]['rotation_matrix'])
+            self.assertEqual(pose['joints'],poses[0]['joints'])
+            moving.append(np.array(finger['end_m'])-finger['start_m'])
+        self.assertAlmostEqual(poses[0]['gripper_visual']['visual_angle_rad'],-.174533)
+        self.assertAlmostEqual(poses[2]['gripper_visual']['visual_angle_rad'],1.74533)
+        # Independent rotation invariant: equal percentage steps rotate equally,
+        # with all three tip vectors lying in the real hinge's rotation plane.
+        axis=np.array(poses[0]['joints'][-1]['axis_base'])
+        for vector in moving:self.assertAlmostEqual(float(vector@axis),0.,places=10)
+        expected_cos=math.cos((1.74533+.174533)/2)
+        for a,b in zip(moving,moving[1:]):self.assertAlmostEqual(float(a@b)/.065**2,expected_cos)
+
     def test_elevation_roll_and_position_only_have_distinct_meaning(self):
         model=ManualControl(config());start=model.fk(HOME,50.)
         for key,field,sign in [('KeyI','elevation_rad',-1),('KeyU','elevation_rad',1),('KeyG','tool_roll_rad',-1),('KeyS','tool_roll_rad',1)]:

@@ -248,6 +248,7 @@ export class FKView {
           "stroke-dasharray": target ? "5 5" : "",
           "stroke-linecap": "round",
           "data-segment-to": s.to,
+          "data-segment-role": s.role || "link",
         });
       for (const j of g.joints) {
         const p = this.project(j.position_m),

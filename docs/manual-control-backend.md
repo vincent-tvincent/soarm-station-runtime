@@ -39,12 +39,12 @@ FK geometry is JSON-safe:
   elevation_rad, tool_roll_rad, azimuth_rad,
   joints:[{name, urdf_name, role:'joint'|'gripper', position_m:[x,y,z],
            axis_base:[x,y,z], position_rad:number|null}],
-  segments:[{from:'base'|jointName, to:jointName|'tcp', start_m:[...], end_m:[...]}],
-  tcp:{position_m:[x,y,z], frame:tcpFrame}, gripper_percent
+  segments:[{from:'base'|jointName, to:jointName|'tcp'|tipName, start_m:[...], end_m:[...], role?}],
+  tcp:{position_m:[x,y,z], frame:tcpFrame}, gripper_percent, gripper_visual
 }
 ```
 
-The TCP includes its fixed URDF transform. The gripper marker is its hinge location, not a fabricated jaw angle or grasped-object mesh. A gripper branch has `position_rad:null`. `frame_id` is the configured ROS alias for the URDF root; this calculator performs no TF lookup. That alias must describe the same base frame. `rotation_matrix` is the actual TCP rotation; semantic elevation/roll use the operator-tool axes (default TCP rotation multiplied by Rz(π), matching the previous SO-101 UI). The UI owns health coloring: black normal spheres, red only from current reported fault/stall evidence; no geometry computation implies health.
+The TCP includes its fixed URDF transform. The gripper marker stays at its hinge and has `position_rad:null`. For the SO-101 moving-jaw link, FK also returns fixed and moving finger segments. The moving finger uses the previous controller's representative 65 mm local -Y tip and maps normalized opening linearly to the URDF revolute limits. `gripper_visual` reports this explicitly as schematic; its `visual_angle_rad` is not a calibrated aperture measurement. This mapping never changes control targets or the measured percentage. Other models retain null `gripper_visual` rather than receiving guessed fingers. `frame_id` is the configured ROS alias for the URDF root; this calculator performs no TF lookup. That alias must describe the same base frame. `rotation_matrix` is the actual TCP rotation; semantic elevation/roll use the operator-tool axes (default TCP rotation multiplied by Rz(π), matching the previous SO-101 UI). The UI owns health coloring: black normal spheres, red only from current reported fault/stall evidence; no geometry computation implies health.
 
 ## Keyboard behavior and timing
 

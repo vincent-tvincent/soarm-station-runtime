@@ -158,7 +158,10 @@ class ManualControl:
             if kind != 'fixed':
                 if np.linalg.norm(axis) < 1e-10: raise ValueError('Zero movable joint axis')
                 axis /= np.linalg.norm(axis)
-            joint = {'name': name, 'kind': kind, 'parent': parent, 'child': child, 'origin': _origin(element), 'axis': axis, 'mimic': element.find('mimic') is not None}
+            limit = element.find('limit')
+            bounds = None if limit is None or limit.get('lower') is None or limit.get('upper') is None else (
+                _finite(float(limit.get('lower')), 'URDF lower limit'), _finite(float(limit.get('upper')), 'URDF upper limit'))
+            joint = {'name': name, 'kind': kind, 'parent': parent, 'child': child, 'origin': _origin(element), 'axis': axis, 'mimic': element.find('mimic') is not None, 'bounds': bounds}
             joints[name] = joint; children[child] = joint
         if self.tcp not in links: raise ManualUnavailable('Configured TCP link is absent from URDF')
         chain, visited, link = [], set(), self.tcp
@@ -211,7 +214,7 @@ class ManualControl:
         q = self._q(positions_rad); g = self._gripper(gripper_percent)
         pose, origins, axes, frames = self._forward(q)
         semantics, azimuth = _semantics(pose[:3, :3] @ self.operator_rotation)
-        points = []; segments = []; previous_name = 'base'; previous = np.zeros(3)
+        points = []; segments = []; gripper_visual = None; previous_name = 'base'; previous = np.zeros(3)
         reverse = dict(zip(self.mapping, self.names))
         for joint in self.chain:
             if joint['kind'] == 'fixed': continue
@@ -225,11 +228,24 @@ class ManualControl:
             name = self.config.get('gripper', {}).get('name', 'gripper')
             points.append({'name': name, 'urdf_name': self.branch['name'], 'role': 'gripper', 'position_m': jaw[:3, 3].tolist(), 'axis_base': (jaw[:3, :3] @ self.branch['axis']).tolist(), 'position_rad': None})
             segments.append({'from': previous_name, 'to': name, 'start_m': parent[:3, 3].tolist(), 'end_m': jaw[:3, 3].tolist()})
+            # Match the earlier SO-101 viewer: one fixed finger (ending at TCP),
+            # one moving finger extending 65 mm along the jaw link's local -Y.
+            # This is normalized opening visualization, not an aperture calibration.
+            bounds = self.branch['bounds']
+            if self.branch['child'] == 'moving_jaw_so101_v1_link' and bounds and bounds[1] > bounds[0]:
+                angle = bounds[0] + g / 100. * (bounds[1] - bounds[0])
+                tip = jaw[:3, 3] + jaw[:3, :3] @ _rotation(self.branch['axis'], angle) @ np.array([0., -.065, 0.])
+                segments[-2]['role'] = 'fixed_finger'
+                segments.append({'from': name, 'to': name + '_tip', 'role': 'moving_finger',
+                                 'start_m': jaw[:3, 3].tolist(), 'end_m': tip.tolist()})
+                gripper_visual = {'kind': 'hinged', 'opening_percent': g, 'visual_angle_rad': angle,
+                                  'mapping': 'normalized_percent_to_urdf_limits', 'schematic': True}
         return {'frame_id': self.frame, 'model_base_frame': self.model_base, 'tcp_frame': self.tcp,
                 'units': {'position': 'm', 'joint': 'rad', 'gripper': 'percent'},
                 'position_m': pose[:3, 3].tolist(), 'rotation_matrix': pose[:3, :3].tolist(),
                 'elevation_rad': float(semantics[0]), 'tool_roll_rad': float(semantics[1]), 'azimuth_rad': azimuth,
-                'joints': points, 'segments': segments, 'tcp': {'position_m': pose[:3, 3].tolist(), 'frame': self.tcp}, 'gripper_percent': g}
+                'joints': points, 'segments': segments, 'tcp': {'position_m': pose[:3, 3].tolist(), 'frame': self.tcp}, 'gripper_percent': g,
+                'gripper_visual': gripper_visual}
 
     def describe(self):
         poses = {}

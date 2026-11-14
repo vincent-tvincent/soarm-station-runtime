@@ -87,3 +87,13 @@ its FK rotation matrix.
 The base grid remains the only grid. The gripper hinge, joint fault markers,
 TCP calibration, kinematics and control are unchanged. Both frame indicators
 are included in the view fit so their labels remain visible while orbiting.
+
+### Visible gripper fingers — November 13, 2026
+
+The view now draws the fixed finger to the TCP and the hinged moving finger,
+using the older controller's SO-101 schematic geometry. Measured gripper
+percentage animates the black finger; target/leader percentage drives the
+gray overlay. The hinge keeps its existing fault color, and the EE axes remain.
+The normalized percentage maps to the URDF jaw limits with a representative
+65 mm finger length; this is an opening illustration, not calibrated aperture
+metrology. Only the dashboard's device-free FK calculation and rendering changed.
