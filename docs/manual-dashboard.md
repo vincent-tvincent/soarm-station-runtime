@@ -81,8 +81,9 @@ The FK view requests fresh geometry up to 20 Hz, independently of 100 Hz control
 
 ### End-effector axes — November 13, 2026
 
-The FK renderer hides the long wrist-to-TCP display helper and draws X/Y/Z at
-the actual measured TCP, oriented by the columns of its FK rotation matrix.
+The FK renderer includes the wrist-to-TCP segment (restored at the operator's
+request) and draws X/Y/Z at the actual measured TCP, oriented by the columns of
+its FK rotation matrix.
 The base grid remains the only grid. The gripper hinge, joint fault markers,
 TCP calibration, kinematics and control are unchanged. Both frame indicators
 are included in the view fit so their labels remain visible while orbiting.

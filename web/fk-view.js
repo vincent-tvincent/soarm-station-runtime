@@ -198,9 +198,10 @@ export class FKView {
       ...[this.geometry, this.target]
         .filter(Boolean)
         .flatMap((g) =>
-          g.segments
-            .filter((s) => s.to !== "tcp")
-            .flatMap((s) => [this.project(s.start_m), this.project(s.end_m)]),
+          g.segments.flatMap((s) => [
+            this.project(s.start_m),
+            this.project(s.end_m),
+          ]),
         ),
       ...[...baseAxes, ...eeAxes].flatMap(({ origin, end }) => [
         this.project(origin),
@@ -234,15 +235,13 @@ export class FKView {
     const drawGeometry = (g, target) => {
       if (!g) return;
       const color = target ? "#a5a5a0" : "#191919";
-      // Keep the real gripper branch; omit only the long tool-offset helper.
-      for (const s of g.segments
-        .filter((s) => s.to !== "tcp")
-        .sort(
-          (a, b) =>
-            this.project(a.start_m).depth +
-            this.project(a.end_m).depth -
-            (this.project(b.start_m).depth + this.project(b.end_m).depth),
-        ))
+      // Include the wrist-to-tool-tip segment as well as the gripper branch.
+      for (const s of [...g.segments].sort(
+        (a, b) =>
+          this.project(a.start_m).depth +
+          this.project(a.end_m).depth -
+          (this.project(b.start_m).depth + this.project(b.end_m).depth),
+      ))
         this.line(s.start_m, s.end_m, {
           stroke: color,
           "stroke-width": target ? 3 : 4,
