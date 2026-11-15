@@ -205,3 +205,43 @@ def test_activity_time_is_string_at_long_uptime_and_independent_of_wall_jumps():
     assert isinstance(second['activity_captured_at_ns'],str)
     assert int(second['activity_captured_at_ns'])-int(first['activity_captured_at_ns'])==250_000_000
     assert second['captured_at_ns']==first['captured_at_ns']==1_700_000_000_000_000_000
+
+
+def test_rpc_provider_is_polled_in_background_path_not_http_snapshot_and_tracks_interest():
+    from test_graph_rpc import trace
+    node,clock,sampler,graph=setup()
+    calls=[]
+    class Provider:
+        def set_active(self,value):calls.append(('active',value))
+        def snapshot(self):
+            calls.append(('snapshot',))
+            value=trace()
+            for endpoint in value['endpoints']:
+                endpoint['node_fqn']='/elsewhere/'+('producer' if endpoint['role']=='server' else 'consumer')
+            return value
+        def close(self):calls.append(('close',))
+    graph.rpc_provider=Provider();graph.refresh()
+    graph.watch({'operation':'acquire','client_id':str(uuid.uuid4())})
+    graph.refresh_rpc()
+    assert calls==[('active',True),('snapshot',)]
+    data=graph.snapshot();again=graph.snapshot()
+    assert calls==[('active',True),('snapshot',)]
+    assert data['services'][0]['activity']['messages']==9
+    assert again['rpc_trace']['configured'] and again['rpc_trace']['state']=='ready'
+    clock.value+=6.
+    stale=graph.snapshot()
+    assert stale['services'][0]['activity']['messages'] is None
+    assert stale['rpc_trace']['reason']=='Local RPC trace snapshot is stale'
+    clock.value+=7.;graph.refresh_rpc()
+    assert calls[-2:]==[('active',False),('snapshot',)]
+    assert graph.snapshot()['services'][0]['activity']['state']=='inactive'
+    graph.close();assert calls[-1]==('close',)
+
+
+def test_rpc_interest_is_closed_even_when_other_observer_cleanup_fails():
+    _,_,_,graph=setup();closed=[]
+    graph.rpc_provider=SimpleNamespace(close=lambda:closed.append(True))
+    def fail():raise RuntimeError('sample cleanup failed')
+    graph.sampler.close=fail
+    with pytest.raises(RuntimeError,match='sample cleanup failed'):graph.close()
+    assert closed==[True]

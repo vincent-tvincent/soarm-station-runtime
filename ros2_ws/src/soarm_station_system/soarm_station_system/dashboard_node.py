@@ -20,6 +20,7 @@ from .conversion import goal_from_dict,stream_from_dict
 from .common import BaseNode,STATE,SENSOR,run,topic
 from soarm_station.dashboard_data import resources,render_motors,validate_motor_record
 from soarm_station.graph_observer import GraphObserver
+from soarm_station.rpc_trace import RpcTraceClient,rpc_trace_socket
 from soarm_station.subscription_activity import SubscriptionActivity,observe_subscription
 from soarm_station.web_access import dashboard_access_middleware
 from soarm_station.web_streams import stream_camera_frames
@@ -89,7 +90,8 @@ class DashboardNode(BaseNode):
         self.motor_records={};self.motor_record_errors={};self.public_resources=resources(self.config)
         self.policy_manager=PolicyManager(self.config,resources=lambda:self.public_resources,bridge=Client(self.config['socket']))
         self.subscription_activity=SubscriptionActivity()
-        self.graph_observer=GraphObserver(self,self.config.get('graph_observer',{}),activity_provider=self.subscription_activity.snapshot)
+        rpc_provider=RpcTraceClient(rpc_trace_socket(self.config)) if self.config.get('rpc_trace',{}).get('enabled',True) else None
+        self.graph_observer=GraphObserver(self,self.config.get('graph_observer',{}),activity_provider=self.subscription_activity.snapshot,rpc_provider=rpc_provider)
         group=ReentrantCallbackGroup()
         self.permission_client=self.create_client(SetControlPermission,'/soarm_station/lerobot/set_permission',callback_group=group)
         self.hold_client=self.create_client(Hold,'/soarm_station/lerobot/hold',callback_group=group)

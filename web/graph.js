@@ -49,6 +49,9 @@ const internalInterface = n => n.transport_topic || infrastructure(n.name);
 const displayName = n => n.display_name || n.name;
 const activitySource = t => ({dashboard_subscription:'Existing dashboard subscription',
   transport_gid_projection:'Existing receipt · transport publisher GID',
+  ros_lttng:'ROS request/response trace',
+  lttng:'ROS request/response trace',
+  combined_observer_metadata:'Topic receipts + ROS request/response trace',
   ros_subscription:'Graph observer'}[t.source] || (t.source?'Graph observer':'Not observed'));
 const rate = (t) =>
   t && t.rate_hz !== null && t.rate_hz !== undefined
@@ -195,7 +198,59 @@ function observationClock(graph) {
 const publisherKey = (id,gid) => `${id}::publisher:${gid}`;
 const actionServerKey = (id,nodeId) => `${id}::server:${nodeId}`;
 const unknownKey = id => `${id}::unknown`;
-const liveMetric = n => n?.activity || n?.traffic || {};
+const displayKey = id => `${id}::display`;
+const rpcKey = (id,phase,nodeId='') => `${id}::rpc:${phase}:${nodeId}`;
+const RPC_PHASES = {request_sent:'client',request_received:'server',response_sent:'server',response_received:'client'};
+const RPC_PARTS = {goal:'send_goal',cancel:'cancel_goal',result:'get_result'};
+const liveMetric = n => (n?.kind==='action' && n?.activity?.display) || n?.activity || n?.traffic || {};
+const RPC_NAMES = {request_sent:'Requests sent',request_received:'Requests received',
+  response_sent:'Replies sent',response_received:'Replies received'};
+function rpcMetricText(metric) {
+  if(!metric || !Number.isSafeInteger(metric.messages))return metric?.state==='inactive'?'Monitoring off':'Not observed';
+  const suffix=metric.state==='partial'?'partial':Number.isFinite(metric.rate_hz)?`${metric.rate_hz.toFixed(1)} Hz`:'rate pending';
+  return `${metric.messages.toLocaleString()} · ${suffix}`;
+}
+function rpcInspectorFields(entity) {
+  if(entity.kind==='service')return Object.fromEntries(Object.entries(RPC_NAMES).map(([phase,label])=>
+    [label,rpcMetricText(entity.activity?.channels?.[phase])]));
+  if(entity.kind==='action')return Object.fromEntries(Object.keys(RPC_PARTS).flatMap(part=>
+    Object.entries(RPC_NAMES).map(([phase,label])=>[`${part[0].toUpperCase()+part.slice(1)} · ${label.toLowerCase()}`,
+      rpcMetricText(entity.activity?.rpc?.[part]?.channels?.[phase])])));
+  return {};
+}
+function actionRPCEntries(action,graph) {
+  return Object.entries(RPC_PARTS).flatMap(([part,suffix])=>{
+    const metric=action?.activity?.rpc?.[part];if(!metric)return [];
+    const name=action.name+'/_action/'+suffix;
+    return [{part,metric,id:(graph.services||[]).find(s=>s.name===name)?.id||`service:${name}`}];
+  });
+}
+function addRPCSources(sources,id,metric) {
+  if(!metric)return;
+  sources.set(id,metric);
+  for(const [phase,role] of Object.entries(RPC_PHASES)) {
+    if(metric.channels?.[phase])sources.set(rpcKey(id,phase),metric.channels[phase]);
+    const grouped=new Map();
+    for(const endpoint of metric.endpoints||[]) {
+      const channel=endpoint.channels?.[phase];
+      if(endpoint.role!==role || !endpoint.node_id || !channel)continue;
+      if(!grouped.has(endpoint.node_id))grouped.set(endpoint.node_id,[]);
+      grouped.get(endpoint.node_id).push({id:endpoint.id,...channel});
+    }
+    for(const [nodeId,channels] of grouped) {
+      channels.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+      const ages=channels.map(m=>m.last_message_age_ms).filter(finiteAge);
+      sources.set(rpcKey(id,phase,nodeId),{
+        state:channels.every(m=>m.state==='watching')?'watching':'unavailable',
+        sample_id:channels.every(m=>typeof m.sample_id==='string'&&m.sample_id)
+          ?JSON.stringify(channels.map(m=>[m.id,m.sample_id])):null,
+        messages:channels.every(m=>Number.isSafeInteger(m.messages)&&m.messages>=0)
+          ?channels.reduce((sum,m)=>sum+m.messages,0):null,
+        last_message_age_ms:ages.length?Math.min(...ages):null,
+      });
+    }
+  }
+}
 const setText=(element,value)=>{if(element && element.textContent!==String(value))element.textContent=String(value);};
 function historyPoints(entity,width,height) {
   const t=liveMetric(entity),history=t.history||(t.feedback?.history?.length?t.feedback.history:t.status?.history)||[];
@@ -208,8 +263,10 @@ const finiteAge = value => Number.isFinite(value) && value >= 0;
 export function activityLabel(entity) {
   const t=liveMetric(entity);
   if (entity.kind==='action' && ['watching','partial'].includes(t.state)) {
-    if (finiteAge(t.feedback?.last_message_age_ms) && t.feedback.last_message_age_ms<FLOW_LIMITS.evidenceMs) return 'Feedback active';
-    const counts=t.status?.status_summary?.counts;
+    const legacy=entity.activity||t;
+    if (finiteAge(legacy.feedback?.last_message_age_ms) && legacy.feedback.last_message_age_ms<FLOW_LIMITS.evidenceMs) return 'Feedback active';
+    if (legacy.display && finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs) return 'RPC / status activity';
+    const counts=legacy.status?.status_summary?.counts;
     if(counts) {
       const active=(counts.accepted||0)+(counts.executing||0)+(counts.canceling||0);
       return active ? `${active} goal${active===1?'':'s'} last reported active` : 'No active goals last reported';
@@ -217,7 +274,7 @@ export function activityLabel(entity) {
     return finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs ? 'Status activity' : 'No recent response';
   }
   if (observed(t)) return finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs && t.messages>0 ? 'Active' : 'No recent data';
-  return ({inactive:'Monitoring off',blocked:'Not measured',limited:'Capacity limit',throttled:'Throttled',unavailable:'Unknown',cleanup_pending:'Cleanup pending'}[t.state] || 'Unknown');
+  return ({inactive:'Monitoring off',blocked:'Not measured',limited:'Capacity limit',throttled:'Throttled',partial:'Partial measurement',unavailable:'Unknown',cleanup_pending:'Cleanup pending'}[t.state] || 'Unknown');
 }
 export class TopicFlowActivity {
   constructor({updateIntervalMs=2000}={}) { this.samples = new Map();this.setUpdateInterval(updateIntervalMs); }
@@ -237,7 +294,10 @@ export class TopicFlowActivity {
       for(const pub of t.publisher_counts||[]) sources.set(publisherKey(topic.id,pub.publisher_gid),{...t,...pub,sample_id:`${t.sample_id}:${pub.publisher_gid}`});
       if(Number.isSafeInteger(t.unknown_publisher_messages)) sources.set(unknownKey(topic.id),{...t,messages:t.unknown_publisher_messages,sample_id:`${t.sample_id}:unknown`});
     }
+    for(const service of graph.services||[])addRPCSources(sources,service.id,service.activity);
     for(const action of graph.actions||[]) {
+      if(action.activity?.display)sources.set(displayKey(action.id),action.activity.display);
+      for(const entry of actionRPCEntries(action,graph))addRPCSources(sources,entry.id,entry.metric);
       const a=action.activity||{}, parts=[a.status,a.feedback].filter(t=>observed(t) && typeof t.sample_id==='string' && t.sample_id);
       const counts=parts.map(t=>t.messages),ages=parts.map(t=>t.last_message_age_ms).filter(finiteAge);
       sources.set(action.id,{...a,state:['watching','partial'].includes(a.state)&&parts.length?'watching':a.state,
@@ -328,6 +388,19 @@ export function flowEdges(graph,visibleEdges,activity,now,{focus=null,focusedOnl
       return {sourceKey:topic.id,hollow:true,attribution:'single_discovered_publisher'};
     return null;
   }
+  function rpcMarkers(edge,serviceId,part='') {
+    const client=edge.kind.endsWith('_client'),nodeId=client?edge.from:edge.to;
+    const phases=client?['request_sent','response_received']:['request_received','response_sent'];
+    return phases.flatMap(phase=>{
+      const sourceKey=rpcKey(serviceId,phase,nodeId);
+      if(!activity.active(sourceKey,now))return [];
+      const reverse=phase.startsWith('response'),partIndex=part?Object.keys(RPC_PARTS).indexOf(part):0;
+      return [{...edge,id:`${edge.id}::rpc:${part||'service'}:${phase}`,edgeId:edge.id,
+        topicId:serviceId,sourceKey,reverse,phase,rpc:part||undefined,hollow:false,
+        attribution:'traced_rpc_endpoint',label:`${part?part+' ':''}${reverse?'reply':'req'}`,
+        phaseOffset:(partIndex*.19+(reverse?.48:0))%1}];
+    });
+  }
   const selected=focusedOnly?selectionPaths(graph,focus,visibleEdges).highlighted:null;
   const result=visibleEdges.filter(e=>!focusedOnly || selected.has(e.id)).flatMap(e=>{
     if(e.kind==='publish'||e.kind==='subscribe') {
@@ -337,15 +410,20 @@ export function flowEdges(graph,visibleEdges,activity,now,{focus=null,focusedOnl
         activity.active(topicId,now)?{sourceKey:topicId,hollow:true,attribution:'subscription_route'}:null;
       return source?[{...e,topicId,reverse:false,...source}]:[];
     }
+    if(e.kind==='service_client'||e.kind==='service_server')
+      return rpcMarkers(e,e.kind==='service_client'?e.to:e.from);
     if(e.kind==='action_server'||e.kind==='action_client') {
       const id=e.kind==='action_server'?e.from:e.to,action=graph.entities.get(id),a=action?.activity;
-      if(!a||!activity.active(id,now)) return [];
-      if(e.kind==='action_client') return [{...e,topicId:id,sourceKey:id,reverse:true,hollow:true,attribution:'action_response_route'}];
+      const requests=actionRPCEntries(action||{},graph).flatMap(entry=>rpcMarkers(e,entry.id,entry.part));
+      if(!a||!activity.active(id,now)) return requests;
+      const update={...e,topicId:id,reverse:true,...(a.rpc?{label:'updates',phaseOffset:.83}:{})};
+      if(e.kind==='action_client') return [...requests,{...update,sourceKey:id,hollow:true,attribution:'action_response_route'}];
       const serverKey=actionServerKey(id,e.to);
-      if(activity.active(serverKey,now))return [{...e,topicId:id,sourceKey:serverKey,reverse:true,hollow:false,attribution:'action_server_gids'}];
+      if(activity.active(serverKey,now))return [...requests,{...update,sourceKey:serverKey,hollow:false,attribution:'action_server_gids'}];
       const topics=[a.feedback_topic,a.status_topic].map(name=>(graph.topics||[]).find(t=>t.name===name)).filter(Boolean);
-      for(const topic of topics) {const source=publication(topic,e.to);if(source)return[{...e,topicId:id,reverse:true,...source}];}
-      if((action.servers||[]).length===1) return [{...e,topicId:id,sourceKey:id,reverse:true,hollow:true,attribution:'single_discovered_server'}];
+      for(const topic of topics) {const source=publication(topic,e.to);if(source)return[...requests,{...update,...source}];}
+      if((action.servers||[]).length===1) return [...requests,{...update,sourceKey:id,hollow:true,attribution:'single_discovered_server'}];
+      return requests;
     }
     return [];
   });
@@ -666,23 +744,25 @@ export class GraphExplorer {
     }
     for(const element of $('interface-list').querySelectorAll('[data-interface-rate]')) {
       const entity=data.entities.get(element.getAttribute('data-interface-rate'));
-      if(entity && ['topic','action'].includes(entity.kind))setText(element,rate(liveMetric(entity)));
+      if(entity && ['topic','action','service'].includes(entity.kind))setText(element,rate(liveMetric(entity)));
     }
     this.updateActivityInspector();this.syncFlowDots();this.renderLiveStatus();this.animateFlow();
   }
   updateActivityInspector() {
-    const n=this.selected();if(!n || n.id!==this.inspectorEntityId || !['topic','action'].includes(n.kind))return;
-    const host=$('graph-inspector'),t=liveMetric(n),interval=this.flowActivity.interval(n.id);
-    const counts=t.status?.status_summary?.counts;
+    const n=this.selected();if(!n || n.id!==this.inspectorEntityId || !['topic','action','service'].includes(n.kind))return;
+    const host=$('graph-inspector'),t=liveMetric(n),raw=n.activity||{},
+      interval=this.flowActivity.interval(n.kind==='action'&&raw.display?displayKey(n.id):n.id);
+    const counts=raw.status?.status_summary?.counts;
     const values={
       'Live state':activityLabel(n),'Monitor':t.state||'Unknown','Messages':t.messages==null?'—':String(t.messages),
       'Last update':interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval',
       'Serialized bytes':t.bytes==null?'Not measured':Number(t.bytes).toLocaleString(),
       'Last received':finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed',
       'Source':activitySource(t),
-      'Status messages':t.status_messages==null?'—':String(t.status_messages),
-      'Feedback messages':t.feedback_messages==null?'—':String(t.feedback_messages),
+      'Status messages':raw.status_messages==null?'—':String(raw.status_messages),
+      'Feedback messages':raw.feedback_messages==null?'—':String(raw.feedback_messages),
       'Last reported goals':counts?(Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None'):'Not observed',
+      ...rpcInspectorFields(n),
     };
     setText(host.querySelector('.activity-value'),rate(t));
     for(const row of host.querySelectorAll('[data-graph-field]')) {
@@ -695,7 +775,7 @@ export class GraphExplorer {
     if(!this.liveWatch.enabled || this.reduceMotion.matches || !this.visible || !this.connected || document.hidden){this.stopFlow();return;}
     const old=new Map(this.flowDots.map(dot=>[dot.id,dot])),current=[];
     for(const edge of flowEdges(this.data,this.renderedEdges||[],this.flowActivity,performance.now(),{focus:this.focus,focusedOnly:true})) {
-      const route=this.flowPaths.get(edge.id);if(!route)continue;
+      const route=this.flowPaths.get(edge.edgeId||edge.id);if(!route)continue;
       let dot=old.get(edge.id);old.delete(edge.id);
       if(!dot) {
         const element=svg('g',{opacity:0,'data-flow-edge':edge.id,'data-flow-kind':edge.kind});
@@ -709,8 +789,8 @@ export class GraphExplorer {
       dot.circle.setAttribute('fill',route.color);dot.circle.setAttribute('stroke',route.color);
       dot.count.setAttribute('fill',route.color);
       const interval=this.flowActivity.interval(edge.sourceKey);
-      setText(dot.count,interval===null?'':String(interval.messages));
-      setText(dot.title,interval===null?'Observed activity':`${interval.messages} observed messages in the previous ${(interval.durationMs/1000).toFixed(2)} s observer update interval${edge.hollow?'; endpoint receipt is unverified':''}.`);
+      setText(dot.count,interval===null?'':`${interval.messages}${edge.label?' '+edge.label:''}`);
+      setText(dot.title,interval===null?'Observed activity':`${interval.messages} observed ${edge.phase?edge.phase.replaceAll('_',' ')+' ':''}messages in the previous ${(interval.durationMs/1000).toFixed(2)} s observer update interval${edge.hollow?'; endpoint receipt is unverified':''}.`);
       this.sizeFlowDot(dot);current.push(dot);
     }
     for(const dot of old.values())dot.element.remove();
@@ -740,7 +820,7 @@ export class GraphExplorer {
           if (phase===null) { dot.element.setAttribute('opacity','0'); continue; }
           active=true;
           // All observed directions move concurrently, with a stable phase.
-          const forward=(phase+(dot.hollow ? 0.45 : 0))%1;
+          const forward=(phase+(dot.phaseOffset??(dot.hollow ? 0.45 : 0)))%1;
           const t=dot.reverse?1-forward:forward;
           const [x,y]=cubicPoint(dot.points,t);
           dot.element.setAttribute('transform',`translate(${x},${y})`);
@@ -767,8 +847,11 @@ export class GraphExplorer {
     if(this.liveWatch.error){el.textContent=this.liveWatch.error;return;}
     const coverage=watch.coverage||{};
     const observing=coverage.watching||0;
-    const unknown=Object.entries(coverage).reduce((n,[key,value])=>n+(key==='watching'?0:Number(value)||0),0);
-    el.textContent=watch.active?`Live · ${observing} topics observed${unknown?` · ${unknown} not measured`:''}${this.reduceMotion.matches?' · reduced motion':''}`:'Connecting live monitor…';
+    const topics=this.data?.topics||[],services=this.data?.services||[],actions=this.data?.actions||[];
+    const measuredServices=services.filter(s=>s.activity?.state==='watching').length;
+    const measuredActions=actions.filter(a=>liveMetric(a).state==='watching').length;
+    el.textContent=watch.active?`Live · ${observing}/${topics.length} topics · ${measuredServices}/${services.length} services · ${measuredActions}/${actions.length} actions${this.reduceMotion.matches?' · reduced motion':''}`:'Connecting live monitor…';
+    el.title=this.data?.rpc_trace?.reason||'Counts describe interfaces with active observation, including idle sources.';
   }
   dispose() {
     this.disposed=true; this.visible=false; this.connected=false;
@@ -1214,7 +1297,7 @@ export class GraphExplorer {
           12,
           muted,
         );
-        if (n.kind === "topic" || n.kind === "action") {
+        if (n.kind === "topic" || n.kind === "action" || n.kind === "service") {
           const activity=liveMetric(n);
           label(g, 10, p.h - 10, rate(activity), 11, muted).setAttribute('data-live-rate',n.id);
           const plot=svg('polyline',{'data-live-history':n.id,'data-plot-width':p.w,'data-plot-height':p.h,
@@ -1335,7 +1418,7 @@ export class GraphExplorer {
         html(
           "small",
           "",
-          (n.kind === "topic" || n.kind === "action")
+          (n.kind === "topic" || n.kind === "action" || n.kind === "service")
             ? rate(liveMetric(n))
             : `${n.clients?.length || 0} clients`,
         ),
@@ -1470,25 +1553,31 @@ export class GraphExplorer {
     }
     if (!edges.length)
       bindings.append(html("p", "muted", "No discovered bindings."));
-    if (n.kind === "topic" || n.kind === "action") {
-      const t=liveMetric(n), traffic=section(n.kind==='action'?'Action status / feedback':'Observed activity');
+    if (n.kind === "topic" || n.kind === "action" || n.kind === "service") {
+      const t=liveMetric(n),raw=n.activity||{},traffic=section('Observed activity');
       traffic.append(html('div','activity-value',rate(t)));
       row(traffic,'Live state',activityLabel(n));
       row(traffic,'Monitor',t.state||'Unknown');
       row(traffic,'Messages',t.messages==null?'—':String(t.messages));
-      const interval=this.flowActivity.interval(n.id);
+      const interval=this.flowActivity.interval(n.kind==='action'&&raw.display?displayKey(n.id):n.id);
       row(traffic,'Last update',interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval');
       if(n.kind==='topic') row(traffic,'Serialized bytes',t.bytes==null?'Not measured':Number(t.bytes).toLocaleString());
       row(traffic,'Last received',finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed');
-      if(n.kind==='topic')row(traffic,'Source',activitySource(t));
+      row(traffic,'Source',activitySource(t));
       const reason=html('p','inspector-note',t.reason||'');reason.setAttribute('data-activity-reason','');reason.hidden=!t.reason;traffic.append(reason);
       if(n.kind==='action') {
-        row(traffic,'Status messages',t.status_messages==null?'—':String(t.status_messages));
-        row(traffic,'Feedback messages',t.feedback_messages==null?'—':String(t.feedback_messages));
-        const counts=t.status?.status_summary?.counts;
+        row(traffic,'Status messages',raw.status_messages==null?'—':String(raw.status_messages));
+        row(traffic,'Feedback messages',raw.feedback_messages==null?'—':String(raw.feedback_messages));
+        const counts=raw.status?.status_summary?.counts;
         row(traffic,'Last reported goals',counts?(Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None'):'Not observed');
-        traffic.append(html('p','inspector-note','Action dots follow observed server status/feedback toward clients. Goal requests and per-client receipt are not inferred.'));
-      } else traffic.append(html('p','inspector-note','Sphere labels show observed messages since the previous update; a sphere is not one packet. Warm dots follow publications and cool dots follow subscriptions. Subscriber-route counts do not confirm receipt at each subscriber.'));
+        traffic.append(html('p','inspector-note','Action activity combines status/feedback with observed server RPC messages. Request/reply markers use measured endpoint phases; updates follow status/feedback. Metadata does not establish goal acceptance or task success.'));
+      } else if(n.kind==='service')traffic.append(html('p','inspector-note','The headline counts server requests received plus replies sent, not completed calls. Directional markers use each endpoint’s own request/reply counters.'));
+      else traffic.append(html('p','inspector-note','Sphere labels show observed messages since the previous update; a sphere is not one packet. Warm dots follow publications and cool dots follow subscriptions. Subscriber-route counts do not confirm receipt at each subscriber.'));
+      if(n.kind==='service'||n.kind==='action') {
+        const rpc=section(n.kind==='service'?'Request / reply channels':'Action RPC channels');
+        for(const [name,value] of Object.entries(rpcInspectorFields(n)))row(rpc,name,value);
+        rpc.append(html('p','inspector-note','Sent and received phases are separate observations. Counts are scoped to the active watch epoch; no request or response payload is exported.'));
+      }
       if(!this.data.watch?.enabled && n.kind==='topic') {
         const button=html('button','sample-button','Sample activity for 5 s');
         button.onclick=async()=>{button.disabled=true;try{await this.request('/api/v1/ros/sample',{topic:n.name,duration_s:5});await this.refresh();}catch(e){this.onError(e);}finally{button.disabled=false;}};

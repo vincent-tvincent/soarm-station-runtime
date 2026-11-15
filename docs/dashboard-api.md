@@ -134,10 +134,44 @@ clock with a client's monotonic clock or treat it as packet time/network
 latency. Existing `captured_at_ns` and `sequence` still describe topology
 discovery; they do not determine the counter refresh interval.
 
-`actions[].activity` references its standard hidden status/feedback topics and
-their observations. GoalStatusArray may provide bounded counts by status, never
-goal payloads or IDs. Feedback content is not decoded/exported. Goal requests,
-results and receipt by individual clients are explicitly unobserved.
+`actions[].activity` retains its existing status/feedback metrics and adds the
+RPC observations below. GoalStatusArray may provide bounded counts by status,
+never goal payloads or IDs. Feedback and RPC payload contents are not exported.
+
+### Service and action RPC activity
+
+`services[].activity` contains four separate `channels`: `request_sent`,
+`request_received`, `response_sent` and `response_received`. Each metric has
+`state`, `sample_id`, cumulative `messages`, `rate_hz`, bounded `history` and
+`last_message_age_ms`. `endpoints` attributes those phases to exact traced node
+FQNs and client/server roles. Missing mappings or lost trace records remain
+unknown/partial; observed idle endpoints report zero after an observation window.
+
+Service headline counts/rates combine **server requests received + replies
+sent**. They are handled messages, not unique calls or business successes.
+Client sent/received phases stay separate. The viewer animates each actual
+endpoint's forward request or reverse reply path; it does not assign aggregate
+traffic to an unmeasured endpoint.
+
+Actions add `activity.rpc.goal`, `.cancel` and `.result` for their underlying
+`send_goal`, `cancel_goal` and `get_result` services. The existing top-level
+status/feedback fields are unchanged. `activity.display` combines those topic
+observations with server RPC messages for the card's rate/history. This is not
+an executed-actions count. Requests/replies and status/feedback markers have
+separate labels and counter sources.
+
+Top-level `rpc_trace` reports collector state, counter/mapping epochs, snapshot
+age, loss and scope. Collector polling runs in the observer background thread,
+so HTTP graph responses do not wait on trace IPC. Initialization mappings come
+from standard ROS/LTTng metadata; no node-specific labels or command calls are
+needed. Capture is local to the launched process tree. Remote or uninstrumented
+participants remain explicitly outside that measurement coverage.
+
+Trace channel history uses its own collector-monotonic capture. Action display
+history aligns source-relative buckets onto the observer clock without comparing
+monotonic clocks across hosts. Watch epochs reset RPC counters; old snapshots
+cannot replay into a new epoch. Request/response payloads and memory handles are
+never exported in graph responses.
 
 Additional observations are capped at 64 topics. Continuous monitoring admits
 raw images, point clouds and audio when ROS type support is available. Each

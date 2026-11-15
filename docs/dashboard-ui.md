@@ -123,6 +123,12 @@ network delivery or wire bandwidth. Message contents are not exported.
 
 ### Continuous graph-wide activity
 
+**Topics**, **Actions** and **Services** are independent graph visibility
+checkboxes, enabled by default and saved in browser-local preferences. Hiding a
+type hides its blocks/connections, while monitoring continues. Named nodes stay
+unique and visible. Selecting a hidden interface from the lower list reveals
+its type; hiding the current interface clears its selection/focused view.
+
 The horizontal divider above the Topics/Actions/Services pane adjusts its
 height. Drag upward for more list space or downward for more canvas space.
 With the divider focused, Up/Down changes height, Shift makes larger steps,
@@ -140,7 +146,9 @@ previous graph update. Publisher labels use attributed counts where available;
 subscriber labels show the topic count, not verified subscriber delivery.
 Both publish and subscribe flow dots are solid, using their warm and cool route
 colors. Marker fill does not encode delivery confirmation.
-Action server labels combine its observed status/feedback contributions.
+Action update labels combine its observed status/feedback contributions.
+Service/action RPC dots identify requests and replies and use the actual
+traced endpoint's phase counter, independently of status/feedback.
 Every topic and action block retains its activity history plot. Unknown,
 blocked, idle and observed-active states are distinct.
 
@@ -178,10 +186,11 @@ This setting does not change ROS publication rates or the robot control loop.
 Publisher GIDs from actual ROS MessageInfo attribute incoming topic traffic
 when available, including multiple publishers. Unattributed single-source
 routes and subscriber paths also use solid dots; subscriber delivery is not
-confirmed by this observer. Attribution remains in the inspector and tooltips.
-Action dots follow observed server status/feedback
-back toward clients, with bidirectional dashed routes. They do not infer
-unobserved goal requests or per-client receipt. Historical goal-state summaries
+confirmed by the topic observer. Attribution remains in the inspector and
+tooltips. Service and action request/reply phases use standard ROS trace
+observations and animate independently along their bidirectional dashed routes.
+Action status/feedback updates still travel toward clients. Metadata does not
+establish goal acceptance or business success. Historical goal-state summaries
 are labeled as last reported, rather than treated as perpetual traffic.
 
 Existing dashboard subscriptions provide passive counts/history for their

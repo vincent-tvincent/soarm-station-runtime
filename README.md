@@ -16,6 +16,11 @@ Install these prerequisites before running the bootstrap:
 - Colcon, CMake, a C/C++ compiler, Python venv support, and distribution Python YAML/NumPy packages.
 - Network access to download Python packages and the native Python runtime.
 
+For service/action measurements in the ROS graph, Linux needs `lttng-tools`,
+`python3-bt2` and ROS/RMW builds with the standard RPC tracepoints enabled.
+These are verified on the tested Lyrical deployment. See
+[RPC observation setup](docs/runtime-reference.md#rpc-observation).
+
 Use Bash for the commands below. Keep the complete repository: its Python core, ROS workspace, configuration and web assets are used together.
 
 ## Quick start: mock devices

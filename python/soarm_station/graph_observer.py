@@ -17,6 +17,7 @@ import uuid
 from collections import Counter,OrderedDict
 from .graph_watch import GraphWatch, action_activity, empty_activity
 from .graph_transport import project_transport_activity
+from .graph_rpc import project_rpc_activity
 
 
 def node_name(name,namespace):
@@ -178,9 +179,12 @@ class TrafficSampler:
 
 class GraphObserver:
     def __init__(self,node,config=None,action_api=None,sampler=None,clock=time.monotonic,wall=time.time_ns,
-                 activity_provider=None,watcher=None):
+                 activity_provider=None,watcher=None,rpc_provider=None):
         self.node=node;self.config=config or {};self.clock=clock;self.wall=wall;self.lock=threading.RLock()
         self.activity_clock_id=uuid.uuid4().hex
+        self.rpc_provider=rpc_provider;self.rpc_received_at=None
+        self.rpc_current={'state':'initializing' if rpc_provider is not None else 'unavailable',
+            'reason':'Awaiting local RPC trace snapshot' if rpc_provider is not None else 'Local RPC trace provider is not configured'}
         self.sampler=sampler or TrafficSampler(node,self.config.get('sampling',{}),clock=clock,wall=wall)
         self.watcher=watcher or GraphWatch(node,self.config.get('watch',{}),activity_provider=activity_provider,clock=clock,wall=wall)
         if action_api is None:
@@ -193,7 +197,7 @@ class GraphObserver:
         self.thread=threading.Thread(target=self._run,name='ros-graph-observer',daemon=True);self.thread.start()
 
     def _run(self):
-        next_refresh=0.
+        next_refresh=0.;next_rpc_refresh=0.
         while not self.stop.is_set():
             if self.clock()>=next_refresh:
                 try:
@@ -209,7 +213,24 @@ class GraphObserver:
                 self.watcher.reconcile()
                 with self.lock:self.loop_errors.pop('watch',None)
             except Exception as exc:self._loop_error('watch',exc)
+            if self.rpc_provider is not None and self.clock()>=next_rpc_refresh:
+                self.refresh_rpc()
+                next_rpc_refresh=self.clock()+.2
             self.stop.wait(.1)
+
+    def refresh_rpc(self):
+        """Poll metadata outside the dashboard event loop; never control tracing."""
+        if self.rpc_provider is None:return
+        try:
+            watching=bool(self.watcher.snapshot()[0].get('active',False))
+            setter=getattr(self.rpc_provider,'set_active',None)
+            if setter is not None:setter(watching)
+            snapshot=self.rpc_provider.snapshot()
+            if not isinstance(snapshot,dict):raise ValueError('Invalid RPC trace snapshot')
+        except Exception as exc:
+            snapshot={'state':'unavailable','reason':'Local RPC trace unavailable: '+type(exc).__name__+': '+str(exc)[:256]}
+        with self.lock:
+            self.rpc_current=copy.deepcopy(snapshot);self.rpc_received_at=self.clock()
 
     def _loop_error(self,method,error):
         with self.lock:self.loop_errors[method]={'section':'observer','method':method,'error':type(error).__name__,'message':str(error)[:256]}
@@ -287,9 +308,10 @@ class GraphObserver:
         result['watch'],activity=self.watcher.snapshot()
         # Capture adjacent to counter collection, before response assembly and
         # transport/render delay. A string preserves the integer across JSON/JS.
+        activity_capture_ns=int(self.clock()*1_000_000_000);activity_wall_ns=self.wall()
         result.update(activity_clock_id=self.activity_clock_id,
             activity_clock_type='observer_monotonic',
-            activity_captured_at_ns=str(int(self.clock()*1_000_000_000)))
+            activity_captured_at_ns=str(activity_capture_ns))
         activity=project_transport_activity(result['topics'],activity)
         projected=sum(value.get('source')=='transport_gid_projection' for value in activity.values())
         result['watch']['projected_topics']=projected
@@ -304,6 +326,15 @@ class GraphObserver:
             topic['traffic']=self.sampler.snapshot(topic['name'])
             topic['activity']=activity.get(topic['name'],empty_activity('unavailable','Waiting for discovery reconciliation'))
         for action in result['actions']:action['activity']=action_activity(action['name'],activity)
+        with self.lock:
+            rpc=copy.deepcopy(self.rpc_current);rpc_received=self.rpc_received_at
+        rpc_age=max(0.,(activity_capture_ns/1e9-rpc_received)*1000) if rpc_received is not None else None
+        if rpc_age is not None and rpc_age>5000:
+            rpc.update(state='unavailable',reason='Local RPC trace snapshot is stale')
+        result['rpc_trace']=project_rpc_activity(result['services'],result['actions'],rpc,
+            active=bool(result['watch'].get('active',False)),observer_capture_ns=activity_capture_ns,
+            observer_wall_ns=activity_wall_ns,age_ms=rpc_age or 0.)
+        result['rpc_trace']['configured']=self.rpc_provider is not None
         return result
 
     def watch(self,request):
@@ -321,5 +352,8 @@ class GraphObserver:
     def close(self):
         self.stop.set()
         if self.thread:self.thread.join(timeout=5)
-        self.sampler.close()
-        self.watcher.close()
+        try:self.sampler.close()
+        finally:
+            try:self.watcher.close()
+            finally:
+                if self.rpc_provider is not None:self.rpc_provider.close()

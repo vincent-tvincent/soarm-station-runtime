@@ -4,7 +4,8 @@ import shlex
 import sys
 from pathlib import Path
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument,OpaqueFunction,SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument,OpaqueFunction,SetEnvironmentVariable,RegisterEventHandler
+from launch.event_handlers import OnShutdown
 from launch.substitutions import LaunchConfiguration,PathJoinSubstitution
 from launch_ros.actions import Node
 
@@ -21,7 +22,7 @@ def setup(context):
     if not candidate:raise RuntimeError('Pass root:=/absolute/path/to/the/full/soarm-station-runtime/checkout')
     sys.path.insert(0,str(Path(candidate).expanduser().resolve()/'python'))
     from soarm_station.config import load
-    from soarm_station.launch_support import resolve_root,child_environment
+    from soarm_station.launch_support import resolve_root,child_environment,start_rpc_trace
     root=resolve_root(candidate,__file__)
     config=load(LaunchConfiguration('config').perform(context))
     env=child_environment(root,config,context.environment,
@@ -30,6 +31,10 @@ def setup(context):
     respawn=LaunchConfiguration('respawn').perform(context).lower()=='true'
     log_level=LaunchConfiguration('log_level').perform(context)
     actions=[SetEnvironmentVariable(name=name,value=value) for name,value in env.items()]
+    trace=start_rpc_trace(root,config,{**context.environment,**env})
+    if trace is not None:
+        def stop_trace(_context):trace.close();return []
+        actions.append(RegisterEventHandler(OnShutdown(on_shutdown=[OpaqueFunction(function=stop_trace)])))
     def application(executable):
         return Node(package='soarm_station_system',executable=executable,name=executable,namespace='/soarm_station',
             parameters=[{'config':config['_path']}],prefix=shlex.quote(str(root/'.venv/bin/python')),

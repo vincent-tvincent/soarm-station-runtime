@@ -42,6 +42,42 @@ The runtime's `.venv` uses distribution Python for ROS. `.runtime-venv` contains
 
 Custom IDL lives in `ros2_ws/src/soarm_station_interfaces`. TF link names use `ID/` prefixes. Configure measured fixed transforms; camera extrinsics are not inferred. Physical telemetry preserves units and does not claim calibrated joint effort.
 
+### RPC observation
+
+On Linux, the ordinary `ros2 launch` entry point starts a standard ROS/LTTng
+metadata collector before launching ROS nodes. This captures exact node/service
+initialization mappings for both Python and C++ participants. No node source
+changes, manual labels, service probes or request/response payload capture are
+required. The collector is scoped to the launch process tree, including later
+children; it is not a remote-node instrumentation service.
+
+```yaml
+rpc_trace:
+  enabled: true
+  interval_s: 1.0
+  # socket: /optional/private/path/graph-rpc.sock
+```
+
+RPC observation defaults on. The socket defaults beside the native runtime
+socket with a `.rpc-trace.sock` suffix. It is a mode-0600 local Unix socket,
+with no network listener. Each graph observer owns its interest; closing it
+withdraws only that interest. Counters reset for a new active-watch epoch while
+initialization maps remain available. Startup/shutdown own only this collector's
+LTTng session and temporary files. Missing tooling reports unavailable RPC
+coverage without indefinitely blocking control startup.
+
+Snapshots rotate through two private temporary directories, bounded to 36 MiB
+total, with at most 8 MiB of trace ring buffers (1.5 MiB on the tested four-core
+Pi). No persistent trace archive is created. Packet gaps, lost events, missing
+initialization, retired processes and capacity limits remain explicit; they do
+not become fabricated zero traffic. An already-running node whose initialization
+was not captured needs to be relaunched under the collector for full mapping.
+
+The collector uses the standard [ROS tracing design](https://github.com/ros2/ros2_tracing/blob/rolling/doc/design_ros_2.md)
+and installed LTTng/Babeltrace tooling. See the
+[graph API contract](dashboard-api.md#service-and-action-rpc-activity) for phase
+counts and the distinction between handled messages and completed operations.
+
 ## Operations and permission
 
 Each arm admits one operation at a time:

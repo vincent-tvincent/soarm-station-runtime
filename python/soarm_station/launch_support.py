@@ -2,8 +2,49 @@
 import os
 import re
 import shlex
+import subprocess
+import sys
+import time
 from pathlib import Path
 from .web_access import validate_access_config
+
+
+class RpcTraceProcess:
+    def __init__(self,process):self.process=process
+    def close(self):
+        if self.process.poll() is not None:return
+        self.process.terminate()
+        try:self.process.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            self.process.kill();self.process.wait(timeout=2)
+
+
+def start_rpc_trace(root,config,environment=None,startup_timeout_s=5.):
+    """Arm bounded metadata tracing before ROS children; failure never blocks launch forever."""
+    from .rpc_trace import RpcTraceClient,rpc_trace_socket
+    settings=config.get('rpc_trace',{})
+    if settings.get('enabled',True) is False or sys.platform!='linux':return None
+    path=rpc_trace_socket(config)
+    allowed={'PATH','PYTHONPATH','LD_LIBRARY_PATH','HOME','USER','LOGNAME','XDG_RUNTIME_DIR',
+        'LANG','LC_ALL','TMPDIR','LTTNG_HOME'}
+    merged={**os.environ,**(environment or {})}
+    env={key:value for key,value in merged.items() if key in allowed}
+    env['PYTHONPATH']=str(Path(root)/'python')+(os.pathsep+env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+    command=[str(Path(root)/'.venv/bin/python'),'-m','soarm_station.rpc_trace_collector',
+        '--socket',path,'--parent-pid',str(os.getpid()),'--interval',str(settings.get('interval_s',1.))]
+    try:process=subprocess.Popen(command,env=env,stdout=subprocess.DEVNULL)
+    except OSError:return None
+    owned=RpcTraceProcess(process);client=RpcTraceClient(path,timeout_s=.15)
+    deadline=time.monotonic()+min(10.,max(.2,startup_timeout_s))
+    try:
+        while time.monotonic()<deadline and process.poll() is None:
+            snapshot=client.snapshot()
+            if snapshot.get('trace_ready'):return owned
+            # A reachable unavailable collector can serve an honest explanation.
+            if snapshot.get('mapping_epoch') and snapshot.get('state')=='unavailable':return owned
+            time.sleep(.05)
+        owned.close();return None
+    finally:client.close()
 
 
 def is_project_root(path):
