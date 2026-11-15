@@ -32,8 +32,9 @@ operation with support torque retained. Home uses the existing configured pose.
 | Menu / Options | Cycle Equal / Primary / Floating camera layout |
 | View / Create | Show/hide bindings |
 
-The initial gripper source is LT/L2. The black source button shows which trigger
-owns the jaw. The onscreen left/right source buttons perform the same selection
+The initial gripper source is LT/L2. One shared gripper percentage/bar displays
+only the selected trigger, with LT/L2 or RT/R2 beside its heading. The black
+source button shows which trigger owns the jaw. The onscreen left/right source buttons perform the same selection
 as the shoulder buttons. Selecting the current source again does nothing;
 simultaneously pressing both shoulder buttons leaves the source unchanged.
 The Guide/PS system button is unused. The onscreen **Reset view** still resets FK.
@@ -81,8 +82,8 @@ orientation rate. R3 or an onscreen profile change invalidates an older pending
 calculation and resets the elapsed-time anchor. No trigger factor is applied.
 
 Each gripper trigger has a 2% deadzone with the remaining range remapped to 0–1.
-The trigger bars display processed squeeze; the red marker is the pickup point
-on the selected trigger. The jaw remains subject to its configured velocity
+The single gripper bar displays processed squeeze; the red marker is the pickup
+point for the selected trigger. The jaw remains subject to its configured velocity
 limit independently of the body speed profile.
 
 The **Motion speed** percentage/bar shows the current body command as a fraction
@@ -93,6 +94,10 @@ XYZ magnitude times the selected translation rate. An angular request also shows
 its **°/s** rate. Stopped, suspended or unavailable control shows 0%. These are
 requested speeds, not measured motor/TCP speeds; a constrained IK result can
 move more slowly. R3 still cycles profiles 1–5.
+
+The numerical Jacobian rank sits in the shared **Arm pose** header, so it remains
+visible in Gamepad, keyboard IK, joint targets and leader modes. Its calculation
+and rank-loss color mapping are unchanged.
 
 ## Source and asynchronous behavior
 

@@ -28,9 +28,10 @@ export class GamepadPanel {
     this.disconnected = false; this.renderAt = -Infinity; this.errorMessage = ''; this.deviceReadError = '';
     element.innerHTML = `<label class="field-label">Controller<select id="gamepad-device" aria-label="Game controller"><option value="">Press a controller button to detect it</option></select></label>
       <div class="gamepad-device-line"><span id="gamepad-device-state">Waiting for a controller</span><button type="button" id="gamepad-refresh" class="text-button">Refresh</button></div>
-      <div class="gamepad-trigger-grid">${[['left','LT / L2','LB / L1'],['right','RT / R2','RB / R1']].map(([side,trigger,shoulder])=>`<section><button type="button" class="gamepad-trigger-select" data-grip-trigger="${side}" aria-pressed="${side==='left'}">${side==='left'?'Left':'Right'} gripper <kbd>${shoulder}</kbd></button><div class="gamepad-value"><strong id="gamepad-${side}-value">—</strong><span>${trigger}</span></div><div class="gamepad-meter" role="meter" aria-label="${side==='left'?'Left':'Right'} gripper trigger squeeze" aria-valuemin="0" aria-valuemax="100" id="gamepad-${side}-meter"><i></i><b id="gamepad-${side}-pickup" hidden></b></div></section>`).join('')}</div>
-      <div class="gamepad-grip-summary"><span id="gamepad-grip-state">Not started</span><button type="button" id="gamepad-grip-lock" class="manual-toggle" disabled>Lock gripper <kbd>X / □</kbd></button></div><p id="gamepad-grip-note" class="detail-note">Selected trigger takes over after pickup.</p>
-      <div class="gamepad-speed-profile"><div class="small-heading">Motion speed <span class="gamepad-speed-reading"><strong id="gamepad-motion-speed-value">0%</strong><span id="gamepad-speed-cap">— mm/s</span><kbd>R3</kbd></span></div><div class="gamepad-meter" role="meter" aria-label="Current requested motion speed" aria-valuemin="0" aria-valuemax="100" id="gamepad-motion-speed-meter" title="Requested translation/orientation as a percentage of the selected speed profile."><i></i></div><div class="segmented gamepad-speeds" role="group" aria-label="Gamepad maximum speed">${[1,2,3,4,5].map(value=>`<button type="button" data-gamepad-speed="${value}">${value}</button>`).join('')}</div></div>
+      <div class="gamepad-control-grid">
+        <section class="gamepad-grip-control"><div class="small-heading">Gripper trigger <span id="gamepad-grip-source">LT / L2</span></div><div class="gamepad-value"><strong id="gamepad-grip-value">—</strong><span id="gamepad-grip-state">Not started</span></div><div class="gamepad-meter" role="meter" aria-label="Selected gripper trigger squeeze" aria-valuemin="0" aria-valuemax="100" id="gamepad-grip-meter"><i></i><b id="gamepad-grip-pickup" hidden></b></div><div class="gamepad-trigger-choices" role="group" aria-label="Gripper trigger source">${[['left','LB / L1'],['right','RB / R1']].map(([side,shoulder])=>`<button type="button" class="gamepad-trigger-select" data-grip-trigger="${side}" aria-pressed="${side==='left'}">${side==='left'?'Left':'Right'} <kbd>${shoulder}</kbd></button>`).join('')}</div><p id="gamepad-grip-note" class="detail-note">Selected trigger takes over after pickup.</p><button type="button" id="gamepad-grip-lock" class="manual-toggle" disabled>Lock gripper <kbd>X / □</kbd></button></section>
+        <section class="gamepad-speed-profile"><div class="small-heading">Motion speed <span>Profile · <kbd>R3</kbd></span></div><div class="gamepad-value"><strong id="gamepad-motion-speed-value">0%</strong><span id="gamepad-speed-cap">— mm/s</span></div><div class="gamepad-meter" role="meter" aria-label="Current requested motion speed" aria-valuemin="0" aria-valuemax="100" id="gamepad-motion-speed-meter" title="Requested translation/orientation as a percentage of the selected speed profile."><i></i></div><div class="segmented gamepad-speeds" role="group" aria-label="Gamepad maximum speed">${[1,2,3,4,5].map(value=>`<button type="button" data-gamepad-speed="${value}">${value}</button>`).join('')}</div></section>
+      </div>
       <div class="gamepad-motion-readout"><span>Right stick <b>X / Y</b></span><span>Left stick <b>Z / roll</b></span><span>D-pad <b>Fine tilt / roll</b></span></div>
       <button type="button" class="text-button" id="gamepad-bindings-toggle" aria-expanded="false">Show controller bindings</button>
       <div id="gamepad-bindings" class="gamepad-bindings" hidden><dl>
@@ -272,12 +273,14 @@ export class GamepadPanel {
     const speedMeter=this.el('gamepad-motion-speed-meter');
     speedMeter.querySelector('i').style.width=`${speed}%`;
     speedMeter.setAttribute('aria-valuenow',String(speed));
-    for(const [side,value]of[['left',this.engine.liveLT],['right',this.engine.liveRT]]){
-      this.el(`gamepad-${side}-value`).textContent=valid?`${percent(value)}%`:'—';
-      const meter=this.el(`gamepad-${side}-meter`);meter.querySelector('i').style.width=`${valid?percent(value):0}%`;meter.setAttribute('aria-valuenow',String(valid?percent(value):0));
-      const marker=this.el(`gamepad-${side}-pickup`);marker.hidden=!valid||this.engine.activeTrigger!==side||this.engine.gripperState!=='pickup'||this.engine.pickupThreshold===null||!this.manual.isOwnStream();
-      marker.style.left=`${percent(this.engine.pickupThreshold)}%`;
-    }
+    this.el('gamepad-grip-value').textContent=valid?`${percent(this.engine.liveGrip)}%`:'—';
+    this.el('gamepad-grip-source').textContent=this.engine.activeTrigger==='right'?'RT / R2':'LT / L2';
+    const gripMeter=this.el('gamepad-grip-meter');
+    gripMeter.querySelector('i').style.width=`${valid?percent(this.engine.liveGrip):0}%`;
+    gripMeter.setAttribute('aria-valuenow',String(valid?percent(this.engine.liveGrip):0));
+    const marker=this.el('gamepad-grip-pickup');
+    marker.hidden=!valid||this.engine.gripperState!=='pickup'||this.engine.pickupThreshold===null||!this.manual.isOwnStream();
+    marker.style.left=`${percent(this.engine.pickupThreshold)}%`;
     const state=this.engine.gripperState;
     this.el('gamepad-grip-state').textContent=!this.manual.isOwnStream()?'Not started':state==='locked'?'Locked':state==='pickup'?'Waiting for pickup':'Following';
     const selected=this.engine.activeTrigger==='right'?'RT / R2':'LT / L2';

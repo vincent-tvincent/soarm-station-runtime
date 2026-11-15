@@ -2160,9 +2160,11 @@ kbd {
 
 /* Gamepad entry shares the Control panel's rectangular grid and restrained palette. */
 .gamepad-device-line { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:-6px 0 8px; color:var(--muted); font-size:11px; }
-.gamepad-trigger-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.gamepad-trigger-grid > section { min-width:0; }
-.gamepad-trigger-select { width:100%; display:flex; align-items:center; justify-content:space-between; padding:7px; font-size:11px; margin-bottom:8px; }
+.gamepad-control-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.gamepad-control-grid > section { min-width:0; border-top:1px solid var(--line); padding-top:10px; }
+.gamepad-control-grid .small-heading { margin-bottom:10px; }
+.gamepad-trigger-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+.gamepad-trigger-select { width:100%; display:flex; align-items:center; justify-content:space-between; padding:6px; font-size:11px; margin:0; }
 .gamepad-trigger-select[aria-pressed="true"] { background:#191919; color:#fff; border-color:#191919; }
 .gamepad-value { display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin:2px 0 6px; }
 .gamepad-value strong { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
@@ -2170,13 +2172,9 @@ kbd {
 .gamepad-meter { position:relative; height:7px; background:#e8e8e4; margin-bottom:5px; }
 .gamepad-meter i { display:block; height:100%; width:0; background:#191919; }
 .gamepad-meter b { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; background:var(--accent,#d9231b); }
-.gamepad-grip-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:11px; }
-.gamepad-grip-summary .manual-toggle { width:auto; padding:6px 9px; font-size:11px; margin:0; }
+.gamepad-grip-control .manual-toggle { width:100%; padding:6px; font-size:11px; margin:0; }
 #gamepad-grip-note { margin:5px 0 10px; font-size:10px; }
-.gamepad-speed-profile .small-heading { margin-bottom:6px; }
-.gamepad-speed-profile .gamepad-speed-reading { display:flex; align-items:baseline; gap:10px; }
-.gamepad-speed-reading strong { color:#191919; font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; }
-.gamepad-speed-profile > .gamepad-meter { margin-bottom:7px; }
+.gamepad-control-grid .gamepad-meter { margin-bottom:7px; }
 .gamepad-speeds { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:100%; }
 .gamepad-speeds button { padding:6px 0; font-size:11px; min-width:0; }
 .gamepad-motion-readout { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:10px 0 8px; border-top:1px solid var(--line); padding-top:8px; }
@@ -2189,12 +2187,10 @@ kbd {
 .gamepad-bindings dd { margin:0; color:var(--muted); }
 @media(min-width:1000px){
   #panel-manual:not([hidden]):has(#gamepad-panel:not([hidden])) {
-    grid-template-rows:auto minmax(370px,1fr) auto auto minmax(230px,.9fr);
+    grid-template-rows:auto minmax(330px,1fr) auto auto minmax(230px,.9fr);
   }
 }
-@media(max-width:400px){.gamepad-trigger-grid{gap:10px}.gamepad-value{flex-wrap:wrap}.gamepad-motion-readout{gap:6px}}
-.ik-mobility { display:flex; align-items:center; justify-content:space-between; gap:12px; border-top:2px solid var(--mobility-color,#666); border-bottom:1px solid var(--line); padding:9px 0; margin-bottom:12px; }
-.ik-mobility .small-heading { margin:0 0 3px; }
-.ik-mobility .detail-note { font-size:10px; }
-.ik-mobility-values { display:flex; flex-direction:column; gap:3px; text-align:right; font-size:11px; color:var(--mobility-color,#666); font-variant-numeric:tabular-nums; }
-.ik-mobility-values strong { font-size:19px; }
+@media(max-width:400px){.gamepad-control-grid{gap:10px}.gamepad-value{flex-wrap:wrap}.gamepad-motion-readout{gap:6px}}
+.fk-jacobian { display:flex; align-items:baseline; gap:7px; color:var(--mobility-color,#666); }
+.fk-jacobian > span:not(.sr-only) { font-size:10px; text-transform:uppercase; }
+.fk-jacobian strong { font-size:16px; font-variant-numeric:tabular-nums; }
