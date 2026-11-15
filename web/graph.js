@@ -550,7 +550,8 @@ export class GraphExplorer {
         dot={element,circle,count,title};
       }
       Object.assign(dot,edge,{points:route.points});
-      dot.circle.setAttribute('fill',edge.hollow?'#fff':route.color);dot.circle.setAttribute('stroke',route.color);
+      // Marker fill expresses the route color; attribution stays in the tooltip.
+      dot.circle.setAttribute('fill',route.color);dot.circle.setAttribute('stroke',route.color);
       dot.count.setAttribute('fill',route.color);
       const interval=this.flowActivity.interval(edge.sourceKey);
       setText(dot.count,interval===null?'':String(interval.messages));
@@ -1313,7 +1314,7 @@ export class GraphExplorer {
         const counts=t.status?.status_summary?.counts;
         row(traffic,'Last reported goals',counts?(Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None'):'Not observed');
         traffic.append(html('p','inspector-note','Action dots follow observed server status/feedback toward clients. Goal requests and per-client receipt are not inferred.'));
-      } else traffic.append(html('p','inspector-note','Sphere labels show observed messages since the previous update; a sphere is not one packet. Filled dots use publisher identity where available. Hollow routes do not confirm receipt at that subscriber.'));
+      } else traffic.append(html('p','inspector-note','Sphere labels show observed messages since the previous update; a sphere is not one packet. Warm dots follow publications and cool dots follow subscriptions. Subscriber-route counts do not confirm receipt at each subscriber.'));
       if(!this.data.watch?.enabled && n.kind==='topic') {
         const button=html('button','sample-button','Sample activity for 5 s');
         button.onclick=async()=>{button.disabled=true;try{await this.request('/api/v1/ros/sample',{topic:n.name,duration_s:5});await this.refresh();}catch(e){this.onError(e);}finally{button.disabled=false;}};

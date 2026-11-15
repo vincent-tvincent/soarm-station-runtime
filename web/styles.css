@@ -951,7 +951,6 @@ small {
   background: currentColor;
   border: 1.3px solid currentColor;
 }
-.graph-legend .flow-key.hollow { background: #fff; }
 .graph-flow-layer { pointer-events: none; }
 .sampling-actions { display: grid; gap: 6px; }
 .sampling-actions .watch-button { background: #191919; color: #fff; }
