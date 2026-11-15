@@ -1155,6 +1155,8 @@ export class GraphExplorer {
       row(traffic,'Live state',activityLabel(n));
       row(traffic,'Monitor',t.state||'Unknown');
       row(traffic,'Messages',t.messages==null?'—':String(t.messages));
+      const interval=this.flowActivity.interval(n.id);
+      row(traffic,'Last update',interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval');
       if(n.kind==='topic') row(traffic,'Serialized bytes',t.bytes==null?'Not measured':Number(t.bytes).toLocaleString());
       row(traffic,'Last received',finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed');
       if(t.source) row(traffic,'Source',t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer');
@@ -1165,7 +1167,7 @@ export class GraphExplorer {
         const counts=t.status?.status_summary?.counts;
         if(counts)row(traffic,'Last reported goals',Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None');
         traffic.append(html('p','inspector-note','Action dots follow observed server status/feedback toward clients. Goal requests and per-client receipt are not inferred.'));
-      } else traffic.append(html('p','inspector-note','Filled dots use publisher identity where available. Hollow dots indicate a discovered route without verified endpoint receipt. Unknown or idle traffic is not animated.'));
+      } else traffic.append(html('p','inspector-note','Sphere labels show observed messages since the previous update; a sphere is not one packet. Filled dots use publisher identity where available. Hollow routes do not confirm receipt at that subscriber.'));
       if(!this.data.watch?.enabled && n.kind==='topic') {
         const button=html('button','sample-button','Sample activity for 5 s');
         button.onclick=async()=>{button.disabled=true;try{await this.request('/api/v1/ros/sample',{topic:n.name,duration_s:5});await this.refresh();}catch(e){this.onError(e);}finally{button.disabled=false;}};
