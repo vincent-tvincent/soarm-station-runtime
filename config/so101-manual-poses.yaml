@@ -1,4 +1,4 @@
-# SO-101 Home: established body pose, TCP +Y aligned to base +Z; radians, jaw preserved.
+# SO-101 named poses: Home +Y up and operator-observed Fold; radians, jaw preserved.
 # Merge under one explicitly selected arm. This is not a new physical validation.
 manual_control:
   poses:
@@ -9,6 +9,16 @@ manual_control:
         elbow_flex: 1.1344640137963142
         wrist_flex: -0.26179288224559444
         wrist_roll: -1.5221141732182701
+      gripper: preserve
+    # Operator-observed Fold captured 2026-08-05; same saved motor calibration.
+    # Approved shoulder minimum: -105 degrees (-1.8325957145940461 rad).
+    fold:
+      positions:
+        shoulder_pan: -0.012274843090949132
+        shoulder_lift: -1.8289516205514205
+        elbow_flex: 1.662474061130423
+        wrist_flex: 1.3065036114928983
+        wrist_roll: -0.016110731556870737
       gripper: preserve
   wrist_roll_reference_rad: 0.0
   operator_tool_rpy: [0.0, 0.0, 3.141592653589793]

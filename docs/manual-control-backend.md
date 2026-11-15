@@ -97,7 +97,9 @@ manual_control:
   solve_budget_ms: 40.0
 ```
 
-Omitted/null `gripper` also preserves the supplied measured percentage. A finite explicit percentage is supported. Fold remains unavailable: the old Fold shoulder value −104.79° exceeds the current configured −100° bound, so do not import it silently or relax limits to enable a button. Unknown pose names and incomplete/out-of-range configured poses reject; there is no all-zero fallback.
+Omitted/null `gripper` also preserves the supplied measured percentage. A finite explicit percentage is supported. The named-pose template includes the operator-observed Fold from August 5, 2026, with its original joint values converted to radians and jaw preservation. On November 15 the user approved extending the shoulder lower bound and rounding it down to **−105°** (`-1.8325957145940461 rad`); the vendored URDF matches that bound. The selected arm's `shoulder_lift.min_rad` must match when installing this preset. Other joint limits and the recorded Fold target are unchanged. Unknown pose names and incomplete/out-of-range configured poses still reject; there is no all-zero fallback.
+
+Recorded Fold degrees: shoulder pan `-0.7032967033`, shoulder lift `-104.7912087912`, elbow flex `95.2527472527`, wrist flex `74.8571428571`, wrist roll `-0.9230769231`. The saved calibration hash is `c816f1bbaa8122bb40475699f5a74724fbe8cce65634f02d14b5e8e0e4265814`, matching this deployment. This preset import does not execute Fold or constitute a new physical path validation.
 
 ## Offline verification
 

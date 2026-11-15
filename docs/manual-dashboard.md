@@ -40,9 +40,10 @@ Making the new Home roll the reference would put R at −177.21°, beyond the
 configured roll limit. Operator yaw and speed settings are unchanged. Partial
 Home still preserves the current roll, so its +Y direction is not guaranteed
 vertical. These are device-free FK checks, not a new physical motion validation.
-The old Fold target is outside this Pi's declared shoulder bounds;
-it is unavailable, with no change to those limits. Neither preset is an
-all-zero fallback. No new physical motion validation is implied by UI tests.
+Fold uses the previously observed five-joint target from August 5, with jaw
+preservation. The user approved a shoulder minimum of −105° on November 15 so
+the recorded −104.7912° Fold fits; the profile and URDF share that lower bound.
+Neither preset is an all-zero fallback, and importing Fold does not execute it.
 
 Pure FK/IK/preset routes are `/api/manual/{arm}/describe` (GET) and
 `/fk`, `/step`, `/preset`, `/roll` (POST). They calculate only. Motion still
