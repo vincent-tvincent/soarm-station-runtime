@@ -491,3 +491,23 @@ test('partial action source intervals sum only available real counters',()=>{
   assert.deepEqual(owner.interval('action::server:server'),{messages:3,durationMs:2000});
   assert.equal(owner.interval('status-topic::publisher:cc01'),null);
 });
+
+test('a sole logical publisher with transport-adapted GID keeps an explicitly inferred route',()=>{
+  const owner=new TopicFlowActivity();
+  const make=count=>graph(count,{counter:{publisher_counts:[{publisher_gid:'transport-gid',messages:count,last_message_age_ms:0}],unknown_publisher_messages:0}});
+  owner.observe(make(10),0);const current=make(12);owner.observe(current,2000);
+  const pub=flowEdges(current,current.edges,owner,2000,{focus:'topic',focusedOnly:true}).find(e=>e.kind==='publish');
+  assert.equal(pub.hollow,true);assert.equal(pub.sourceKey,'topic');
+  assert.equal(pub.attribution,'single_discovered_publisher');assert.equal(owner.interval(pub.sourceKey).messages,2);
+});
+
+test('a different action server cannot inherit the sole publisher of another server',()=>{
+  const owner=new TopicFlowActivity();
+  const make=count=>{const g=actionGraph(count,count);return normalizeGraph({...g,
+    nodes:[...g.nodes,node('other-server')],
+    actions:g.actions.map(a=>({...a,servers:['server','other-server']})),
+    edges:[...g.edges,{id:'other-action-server',kind:'action_server',from:'action',to:'other-server'}]});};
+  owner.observe(make(10),0);const current=make(12);owner.observe(current,2000);
+  const edges=flowEdges(current,current.edges,owner,2000,{focus:'action',focusedOnly:true});
+  assert.ok(edges.some(e=>e.id==='action-server'));assert.equal(edges.some(e=>e.id==='other-action-server'),false);
+});

@@ -148,14 +148,14 @@ export function flowEdges(graph,visibleEdges,activity,now,{focus=null,focusedOnl
     publishers.get(e.to).add(e.endpoint_id||e.id);
   }
   function publication(topic,nodeId,endpointId=null) {
-    const metric=liveMetric(topic);
     const endpoints=(topic.publishers||[]).filter(p=>endpointId?p.id===endpointId:p.node_id===nodeId);
     for(const endpoint of endpoints) if(endpoint.gid && activity.active(publisherKey(topic.id,endpoint.gid),now))
       return {sourceKey:publisherKey(topic.id,endpoint.gid),hollow:false,attribution:'publisher_gid'};
     // A lone discovered source can be illustrated without claiming GID attribution.
-    const aggregateKey=(metric.publisher_counts||[]).length?unknownKey(topic.id):topic.id;
-    if(publishers.get(topic.id)?.size===1 && activity.active(aggregateKey,now))
-      return {sourceKey:aggregateKey,hollow:true,attribution:'single_discovered_publisher'};
+    const sole=graph.edges.find(e=>e.kind==='publish'&&e.to===topic.id);
+    if(publishers.get(topic.id)?.size===1 && sole?.from===nodeId &&
+        (!endpointId || sole.endpoint_id===endpointId) && activity.active(topic.id,now))
+      return {sourceKey:topic.id,hollow:true,attribution:'single_discovered_publisher'};
     return null;
   }
   const result=visibleEdges.filter(e=>!focusedOnly || (focus && (e.from===focus||e.to===focus))).flatMap(e=>{
