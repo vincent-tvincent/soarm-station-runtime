@@ -53,7 +53,10 @@ const activitySource = t => ({dashboard_subscription:'Existing dashboard subscri
 const rate = (t) =>
   t && t.rate_hz !== null && t.rate_hz !== undefined
     ? `${Number(t.rate_hz).toFixed(1)} Hz`
-    : (t?.state || "not_sampled").replaceAll("_", " ");
+    : ({blocked:'Not measured',inactive:'Monitor off',unavailable:'Measurement unavailable',
+        limited:'Monitor capacity',throttled:'Monitor throttled',cleanup_pending:'Monitor cleanup',
+        watching:'Rate not measured',sampling:'Measuring…',not_sampled:'Not measured'}[t?.state||'not_sampled']
+      || (t.state||'not_sampled').replaceAll('_',' '));
 const palette = {
   publish: ["#d52b22", "#bb4c21", "#c76c26", "#a73a2d"],
   subscribe: ["#2359ba", "#327f9b", "#297987", "#5264a4"],
