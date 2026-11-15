@@ -1,6 +1,6 @@
 import { FKView } from "./fk-view.js";
 const AXES = [
-  ["X", "KeyJ", "J", "KeyK", "K"],
+  ["X", "KeyK", "K", "KeyJ", "J"],
   ["Y", "KeyL", "L", "KeyH", "H"],
   ["Z", "KeyF", "F", "KeyD", "D"],
   ["Elevation", "KeyI", "I", "KeyU", "U"],

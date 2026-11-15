@@ -11,7 +11,7 @@ calculator = ManualControl(arm_config)
 calculator.describe()
 calculator.fk(positions_rad, gripper_percent)
 calculator.step(positions_rad, gripper_percent,
-    keys=['KeyK'], dt_s=0.033, level=2, shift=False,
+    keys=['KeyJ'], dt_s=0.033, level=2, shift=False,
     position_only=False, reference_positions=None, reference_gripper=None)
 calculator.preset('home', positions_rad, gripper_percent, preserve_wrist=False)
 calculator.roll_preset('minus_90', positions_rad, gripper_percent)
@@ -50,7 +50,7 @@ The TCP includes its fixed URDF transform. The gripper marker stays at its hinge
 
 | Keys | Increment |
 | --- | --- |
-| J / K | base/control-frame X − / + |
+| J / K | base/control-frame X + / − |
 | L / H | Y − / + |
 | F / D | Z − / + |
 | I / U | tool elevation − / + |

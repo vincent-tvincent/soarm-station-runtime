@@ -25,7 +25,7 @@ def config():
 
 class ManualControlTests(unittest.TestCase):
     def test_exact_keys_levels_and_momentary_shift(self):
-        for negative,positive,axis in [('KeyJ','KeyK',0),('KeyL','KeyH',1),('KeyF','KeyD',2)]:
+        for negative,positive,axis in [('KeyK','KeyJ',0),('KeyL','KeyH',1),('KeyF','KeyD',2)]:
             for key,sign in [(negative,-1),(positive,1)]:
                 rates=keyboard_rates([key],level=2)
                 self.assertAlmostEqual(rates['translation_m_s'][axis],sign*.04)
@@ -75,7 +75,7 @@ class ManualControlTests(unittest.TestCase):
 
     def test_each_translation_direction_progresses_without_wrist_roll_or_mutation(self):
         model=ManualControl(config());original=copy.deepcopy(HOME);start=np.array(model.fk(HOME,50.)['position_m'])
-        for key,axis,sign in [('KeyJ',0,-1),('KeyK',0,1),('KeyL',1,-1),('KeyH',1,1),('KeyF',2,-1),('KeyD',2,1)]:
+        for key,axis,sign in [('KeyJ',0,1),('KeyK',0,-1),('KeyL',1,-1),('KeyH',1,1),('KeyF',2,-1),('KeyD',2,1)]:
             with self.subTest(key=key):
                 result=model.step(HOME,50.,keys=[key],dt_s=.03,level=2)
                 self.assertEqual(result['status'],'OK')
@@ -132,8 +132,8 @@ class ManualControlTests(unittest.TestCase):
         self.assertAlmostEqual(right['target']['gripper'],50.9)
         self.assertEqual(model.step(HOME,99.,keys=[']'],dt_s=10,shift=True)['target']['gripper'],100.)
         self.assertEqual(model.step(HOME,1.,keys=['['],dt_s=10,shift=True)['dt_s'],.1)
-        first=model.step(HOME,50.,keys=['KeyK'],dt_s=.03,level=2)
-        second=model.step(HOME,50.,keys=['KeyK'],dt_s=.03,level=2,reference_positions=first['target']['positions'])
+        first=model.step(HOME,50.,keys=['KeyJ'],dt_s=.03,level=2)
+        second=model.step(HOME,50.,keys=['KeyJ'],dt_s=.03,level=2,reference_positions=first['target']['positions'])
         self.assertGreater(second['geometry']['position_m'][0],first['geometry']['position_m'][0]+.0008)
 
     def test_blocked_joints_do_not_report_best_effort_as_success(self):

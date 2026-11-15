@@ -22,7 +22,7 @@ SPEEDS = (
     (0.120, math.radians(70), 90.),
     (0.160, math.radians(100), 120.),
 )
-KEYS = {'x': ['KeyJ', 'KeyK'], 'y': ['KeyL', 'KeyH'], 'z': ['KeyF', 'KeyD'],
+KEYS = {'x': ['KeyK', 'KeyJ'], 'y': ['KeyL', 'KeyH'], 'z': ['KeyF', 'KeyD'],
         'elevation': ['KeyI', 'KeyU'], 'roll': ['KeyG', 'KeyS'],
         'gripper': ['BracketLeft', 'BracketRight']}
 ALIASES = {**{c.lower(): 'Key'+c.upper() for c in 'jklhfdiugs'},

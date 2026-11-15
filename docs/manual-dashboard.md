@@ -13,9 +13,11 @@ range sliders. Decorative panel/page indices are removed. On short desktop
 screens the page can scroll instead of crushing the pose view; the upper control
 area scrolls independently while the action row and FK remain separate.
 
-Keyboard IK uses J/K for X−/+, L/H for Y−/+, F/D for Z−/+, I/U elevation−/+,
+Keyboard IK uses J/K for X+/−, L/H for Y−/+, F/D for Z−/+, I/U elevation−/+,
 G/S roll−/+, [/] close/open. Levels 1–5 select speed, Shift temporarily selects
 maximum. Tab selects position-only. R/T/E select reference−90°/reference/+90°.
+The November 15 mapping revision swaps only J and K; the control-frame rotation,
+speed levels and all other keys retain their previous behavior.
 N requests the configured Home in every manual mode, Space preserves the wrist
 at Home, M requests configured Fold, and Esc stops. Keys do not operate while
 editing an input/select/text field. Releasing keys, blur or hiding the panel
