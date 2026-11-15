@@ -552,10 +552,14 @@ export class GraphExplorer {
         right.length * 100,
         mid.length * 96,
       );
+    const nodeWidth = 230, topicWidth = 238, margin = 24,
+      columnGap = Math.ceil(Math.max(nodeWidth, topicWidth) * 0.6),
+      middleX = margin + nodeWidth + columnGap,
+      rightX = middleX + topicWidth + columnGap;
     for (const [list, x, w] of [
-      [left, 24, 230],
-      [mid, 358, 238],
-      [right, 700, 230],
+      [left, margin, nodeWidth],
+      [mid, middleX, topicWidth],
+      [right, rightX, nodeWidth],
     ])
       list.forEach((n, i) =>
         positions.set(n.id, {
@@ -568,7 +572,7 @@ export class GraphExplorer {
           h: n.kind === "node" ? 88 : 82,
         }),
       );
-    this.bounds = { width: 954, height: height + 64 };
+    this.bounds = { width: rightX + nodeWidth + margin, height: height + 64 };
     this.stopFlow();
     this.viewport.replaceChildren();
     const defs = svg("defs");

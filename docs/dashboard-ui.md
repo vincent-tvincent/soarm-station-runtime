@@ -106,6 +106,8 @@ show a shortened name/type, observed-rate label and sample-history sparkline;
 the inspector retains the exact fully qualified name, type and endpoint QoS.
 Comments are local to the current view. Actions/services use subdued dashed
 links and can be inspected from the interface list. Crossings never join.
+Both column gaps are at least 60% of the widest block width. With the current
+230/238-unit blocks, each gap is 143 units; zoom and Fit preserve this ratio.
 
 Sampling is an explicit, bounded observer operation, not a robot command.
 Unsampled, unavailable and measured-zero states are different. Counts and
