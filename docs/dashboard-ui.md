@@ -112,6 +112,35 @@ Unsampled, unavailable and measured-zero states are different. Counts and
 serialized bytes describe only that observer subscription, not guaranteed
 network delivery or wire bandwidth. Message contents are not exported.
 
+### Sampled flow animation
+
+Select a topic and use **Sample activity for 5 s**, or **Watch live** to repeat
+bounded five-second samples while that topic and graph page are visible.
+This reuses the existing observer and two-second graph polling; it does not
+subscribe to the entire graph or create a message-per-frame event stream.
+Image, point-cloud and other high-bandwidth types retain the observer's blocks.
+
+New counter increments trigger a short batch pulse along the existing curves.
+Filled warm dots follow a single discovered publisher into its topic. Hollow
+cool dots follow subscription routes; they do not prove receipt or processing
+at those subscribers. If multiple publisher endpoints are discovered, their
+individual contributions are unknown and publisher dots are omitted. Action
+and service links have no traffic measurements and remain static. Completed
+sample rates remain readable without replaying animation from old counts.
+
+One shared animation loop updates at most 64 dots at 30 FPS using cached curve
+coordinates. It updates only SVG marker transforms/opacity, not graph layout.
+Counter watermarks, sample IDs and local elapsed time stop stale/duplicate data
+from keeping motion alive. Hidden pages/tabs, disconnects and reduced-motion
+preferences stop animation; hidden tabs also stop graph polling.
+
+Live watch is opt-in and reuses any sample reported active. No automatic Stop
+request is sent when hiding/stopping a watch, since the backend's Stop endpoint
+is topic-scoped and could affect another client. Its last finite sample expires
+naturally. Sampling slots, byte/message limits and cleanup limits still apply;
+budget/type failures pause live watching instead of causing automatic retries.
+The explicit **Stop sampling** button retains its existing topic-wide meaning.
+
 ## Files and verification
 
 - `web/app.js`: operations UI and camera interaction integration.
@@ -124,7 +153,7 @@ network delivery or wire bandwidth. Message contents are not exported.
 Run browser-independent checks with:
 
 ```sh
-node --test tests/test_dashboard_transport.mjs tests/test_dashboard_graph.mjs tests/test_camera_layout.mjs tests/test_payload_model.mjs
+node --test tests/test_dashboard_transport.mjs tests/test_dashboard_graph.mjs tests/test_graph_flow.mjs tests/test_camera_layout.mjs tests/test_payload_model.mjs
 ```
 
 For a hardware-free visual preview (requires aiohttp and Pillow):
