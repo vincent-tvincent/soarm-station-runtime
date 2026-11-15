@@ -11,6 +11,16 @@ const AXES = [
 const MOVE_KEYS = new Set(AXES.flatMap((a) => [a[1], a[3]]));
 const finite = Number.isFinite;
 const copy = (value) => structuredClone(value);
+export function jacobianRankPresentation(value, stale = false) {
+  if (stale || !value || !Number.isInteger(value.rank) || !Number.isInteger(value.max_rank) ||
+      value.max_rank <= 0 || value.rank < 0 || value.rank > value.max_rank)
+    return { rank: '—', color: '#666', detail: stale ? 'Waiting for fresh pose' : 'Unavailable' };
+  const missing = value.max_rank - value.rank;
+  const redness = missing === 0 ? 0 : Math.min(1,.45 + .55 * missing / value.max_rank);
+  const rgb = [25,25,25].map((component,i)=>Math.round(component+([217,35,27][i]-component)*redness));
+  return { rank: `${value.rank} / ${value.max_rank}`, color: `rgb(${rgb.join(', ')})`,
+    detail: `${value.rows || 6} × ${value.columns || value.max_rank} geometric Jacobian · measured pose` };
+}
 export class ManualPanel {
   constructor({ element, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
     Object.assign(this, { element, client, onError, onNotice });
@@ -33,7 +43,7 @@ export class ManualPanel {
     element.innerHTML = `<label class="field-label manual-mode-label">Control mode<select id="manual-mode" aria-label="Control mode"><option value="joint">Joint targets</option><option value="ik">IK · keyboard jog</option><option value="leader">Leader arm</option><option value="gamepad">Gamepad · Xbox / DualSense</option></select></label>
     <div class="manual-control-area">
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
-      <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Normal</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 2 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
+      <div data-manual-view="ik" hidden><div class="ik-mobility" id="ik-mobility" title="Numerical rank of the full arm geometric Jacobian (linear and angular velocity), excluding the gripper. Lower rank is redder. Near-singular matrices can still have full rank."><div><span class="small-heading">Jacobian rank</span><span id="ik-mobility-detail" class="detail-note">Measured pose</span></div><div class="ik-mobility-values"><strong id="ik-mobility-rank">—</strong></div></div><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Normal</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 2 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
       <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
       <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">The selected leader follows through the station. Home stops following.</p></div>
     </div>
@@ -180,6 +190,7 @@ export class ManualPanel {
       this.config = (resources.arms || []).find((a) => a.id === arm) || {};
       this.resetTargets();
       this.gamepad?.resetForArm();
+      this.renderJacobianRank(null,true);
     }
     // Initial status can select the default arm before connect() announces its
     // connected state. Fetch capabilities when that connection becomes ready.
@@ -187,6 +198,7 @@ export class ManualPanel {
       this.safe(() => this.loadDescription());
     if (!this.target && this.measured()) this.resetTargets();
     if (!this.connected) {
+      this.renderJacobianRank(null,true);
       this.cancelIntent();
       this.ownsStream = false;
       this.leaderRun = null;
@@ -512,7 +524,7 @@ export class ManualPanel {
         this.note(
           context.mode === "ik"
             ? "IK active · hold a key or jog button to move."
-            : context.mode === "gamepad" ? "Gamepad active · RT / R2 sets the arm speed range." : "Joint stream active · target edits are sent immediately.",
+            : context.mode === "gamepad" ? "Gamepad active · stick deflection sets motion speed." : "Joint stream active · target edits are sent immediately.",
         );
       }
     } catch (error) {
@@ -675,7 +687,10 @@ export class ManualPanel {
       : ["", "Fine", "Normal", "Coarse", "Fast", "Maximum"][this.level];
   }
   setSpeed(level) {
-    if (this.level !== level) this.epoch++;
+    if (this.level !== level) {
+      this.epoch++;
+      if (this.gamepad) this.gamepad.lastSolveAt = null;
+    }
     this.level = level;
     for (const b of this.element.querySelectorAll("[data-speed]"))
       b.classList.toggle("active", Number(b.dataset.speed) === level);
@@ -815,7 +830,7 @@ export class ManualPanel {
     if (!this.visible || !this.connected || !this.arm || this.poseLoading)
       return;
     const measured = this.measured();
-    if (!measured) return;
+    if (!measured) { this.renderJacobianRank(null,true); return; }
     this.poseLoading = true;
     const arm = this.arm;
     try {
@@ -832,8 +847,9 @@ export class ManualPanel {
         `/api/manual/${encodeURIComponent(arm)}/fk`,
         { ...measured, target: overlay },
       );
-      if (arm !== this.arm) return;
+      if (arm !== this.arm || !this.connected) return;
       const g = value.measured;
+      this.renderJacobianRank(g.jacobian, !this.stateForArm().feedback_valid);
       const readouts = {
         X: `${(g.position_m[0] * 1000).toFixed(0)} mm`,
         Y: `${(g.position_m[1] * 1000).toFixed(0)} mm`,
@@ -853,11 +869,18 @@ export class ManualPanel {
         this.mode === "leader" ? "Leader" : "Target",
       );
     } catch (e) {
+      this.renderJacobianRank(null);
       this.el("manual-fk").querySelector(".fk-empty").textContent =
         "Kinematic model unavailable";
     } finally {
       this.poseLoading = false;
     }
+  }
+  renderJacobianRank(value, stale = false) {
+    const display = jacobianRankPresentation(value,stale);
+    this.el('ik-mobility-rank').textContent = display.rank;
+    this.el('ik-mobility-detail').textContent = display.detail;
+    this.el('ik-mobility')?.style?.setProperty('--mobility-color',display.color);
   }
   async refreshHosts() {
     if (this.loadingHosts || !this.connected) return;

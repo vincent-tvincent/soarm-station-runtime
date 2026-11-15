@@ -247,6 +247,35 @@ class ManualControl:
                 'joints': points, 'segments': segments, 'tcp': {'position_m': pose[:3, 3].tolist(), 'frame': self.tcp}, 'gripper_percent': g,
                 'gripper_visual': gripper_visual}
 
+    def jacobian_diagnostics(self, positions):
+        """Numerical rank of the full 6xN geometric body-arm Jacobian.
+
+        Columns are [axis x (TCP - joint origin); axis], expressed in the URDF
+        model base. All configured body joints participate; the separate jaw
+        does not. This unweighted matrix is not the IK task residual Jacobian.
+        Diagnostics do not change any solver constraint or execution gate.
+        """
+        q = self._q(positions)
+        pose, origins, axes, _ = self._forward(q)
+        jacobian = np.empty((6, len(q)))
+        for column, name in enumerate(self.mapping):
+            axis = axes[name]
+            jacobian[:3, column] = np.cross(axis, pose[:3, 3]-origins[name])
+            jacobian[3:, column] = axis
+        if not np.all(np.isfinite(jacobian)):
+            raise ValueError('Geometric Jacobian is nonfinite')
+        try:
+            singular = np.linalg.svd(jacobian, compute_uv=False)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError('Jacobian singular-value decomposition failed') from exc
+        largest = float(singular[0]) if len(singular) else 0.
+        tolerance = float(np.finfo(jacobian.dtype).eps * max(jacobian.shape) * largest)
+        rank = int(np.count_nonzero(singular > tolerance))
+        return {'matrix_kind': 'geometric', 'task_label': 'Arm Jacobian',
+                'reference_frame': self.model_base, 'rows': 6, 'columns': len(q),
+                'joint_names': list(self.names), 'rank': rank, 'max_rank': min(jacobian.shape),
+                'singular_values': [float(value) for value in singular], 'rank_tolerance': tolerance}
+
     def describe(self):
         poses = {}
         for name in ('home', 'fold'):

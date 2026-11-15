@@ -1,120 +1,123 @@
 # Gamepad control
 
-November 15, 2026. This describes the current Gamepad implementation in the dashboard. Gamepad-specific deployment and physical-controller validation are separate from source tests and the existing keyboard/manual runtime. The Gamepad mode uses the same selected arm, DIRECT stream, permission, pickup, command-window and runtime-limit machinery; it does not connect to motors itself.
+November 15, 2026. Use **Control → Gamepad · Xbox / DualSense** in the dashboard.
+Connect the controller to the browser computer, press a button to expose it to
+browser discovery, and select it in **Controller**. One discovered controller
+may be selected automatically; selection does not start control.
 
-## Start and stop
+Center the sticks and release the D-pad, then press **A/Cross** or **Start**.
+Stick deflection directly selects motion speed within the chosen profile.
+Neither trigger controls arm speed. **B/Circle**, **Stop**, or Escape ends the
+operation with support torque retained. Home uses the existing configured pose.
 
-1. Connect a controller to the computer running the browser. Open the authenticated dashboard and select the intended arm.
-2. In **Control**, select **Gamepad · Xbox / DualSense**. Press a controller button if the browser has not exposed it yet, then choose it in **Controller**. A single discovered controller may be selected for display automatically; discovery never starts control.
-3. Release **RT/R2** completely. The arm needs valid measured feedback and an available analog IK backend.
-4. Press **A/Cross** or the onscreen **Start**. This is an explicit control request through the normal manual flow. A button already held during detection/reconnection is ignored until released and pressed again.
-5. Squeeze **RT/R2** to choose the arm-speed ceiling, then deflect the sticks. Start retains the current gripper opening until LT/L2 pickup.
-6. Press **B/Circle**, onscreen **Stop**, or the existing Escape/hold control to stop. Stop takes priority over simultaneous gamepad actions. Reconnection does not restart an operation.
-
-Use the controller's browser-provided **standard mapping**. The labels cover common Xbox and PlayStation layouts, but a controller name alone does not establish correct mapping. Nonstandard, incomplete, disconnected or nonfinite samples are rejected. No custom native gamepad driver or input-host process is required for this browser mode; the separate Leader arm mode remains a different input source.
-
-## Controls
-
-Directions below are in the existing configured arm/control frame, not camera-screen coordinates. If a control-frame yaw is configured, it rotates the translation axes in the same way as keyboard IK.
+## Mapping
 
 | Control | Operation |
 | --- | --- |
-| Right stick up / down | +X / −X (keyboard J / K) |
-| Right stick left / right | +Y / −Y (keyboard H / L) |
-| Left stick up / down | +Z / −Z (keyboard D / F) |
-| Left stick left / right | Semantic tool roll − / + (keyboard G / S) |
-| D-pad up / down | Fine elevation + / − (keyboard U / I) |
-| D-pad left / right | Fine tool roll − / +; overrides left-stick roll while pressed |
-| RT / R2 | Arm translation/orientation speed ceiling |
-| LT / L2 | Gripper closing amount after pickup; more squeeze requests more closure |
-| A / Cross | Start control |
+| Right stick up/down | +X / −X |
+| Right stick left/right | +Y / −Y |
+| Left stick up/down | +Z / −Z |
+| Left stick left/right | Tool roll − / + |
+| D-pad up/down | Fine elevation + / − relative to ground |
+| D-pad left/right | Fine tool roll − / +; overrides stick roll |
+| LB / L1 | Select LT/L2 as gripper trigger |
+| RB / R1 | Select RT/R2 as gripper trigger |
+| Selected trigger | Absolute closing amount, after pickup |
+| X / Square | Lock/unlock current gripper opening |
+| A / Cross | Start |
 | B / Circle | Stop / hold |
-| X / Square | Lock/unlock gripper opening |
-| Y / Triangle | Configured Home, using the normal Home path and preserved gripper reference |
-| LB / RB or L1 / R1 | Decrease/increase selected speed level, within 1–5 |
-| View / Create | Show/hide controller bindings |
-| Menu / Options | Cycle primary camera |
-| Left stick click / L3 | Reset FK viewer orbit/zoom |
-| Right stick click / R3 | Cycle camera layout |
+| Y / Triangle | Configured Home |
+| Right stick click / R3 | Cycle speed profiles 1 → 2 → 3 → 4 → 5 → 1 |
+| Left stick click / L3 | Cycle primary camera |
+| Menu / Options | Cycle Equal / Primary / Floating camera layout |
+| View / Create | Show/hide bindings |
 
-Actions are press-edge driven, not repeated every polling frame. Holding opposing D-pad directions cancels that component; holding both D-pad left/right suppresses left-stick roll rather than falling through to it. The D-pad uses 20% of the selected orientation rate before RT scaling. No additional gamepad button is assigned to Fold; any existing onscreen Fold capability remains configuration-dependent.
+The initial gripper source is LT/L2. The black source button shows which trigger
+owns the jaw. The onscreen left/right source buttons perform the same selection
+as the shoulder buttons. Selecting the current source again does nothing;
+simultaneously pressing both shoulder buttons leaves the source unchanged.
+The Guide/PS system button is unused. The onscreen **Reset view** still resets FK.
 
-## Analog scaling
+Directions use the configured base/control frame, not the camera image. Any
+configured control-frame yaw rotates XYZ as in keyboard IK. Input uses the
+browser's standard Gamepad mapping; unsupported mappings are shown explicitly.
+A name containing Xbox or DualSense alone is not evidence of a correct mapping.
 
-The default selected level is **2 / Normal**. These are requested ceilings; joint velocity limits, available IK movement and actual system cadence can reduce achieved motion.
+## Gripper handoff
 
-| Level | Full-RT translation | Full-RT orientation |
+The jaw convention is 0% opening = closed, 100% = open. After pickup, the selected
+trigger requests `opening = 100 × (1 − processed trigger squeeze)`.
+
+On a source change, the current admitted jaw opening is immediately copied into
+the held reference and stream target. Pending results from the old trigger are
+discarded. Body targets and the running operation are preserved. The new trigger
+enters **Waiting for pickup**, even when the old trigger was locked.
+
+Pickup requires a fresh upward crossing of `held closing + 3 percentage points`,
+capped at 100%. For a held opening of 35%, the marker is 68% processed squeeze.
+If the newly selected trigger is already above that marker, release below it and
+squeeze again. Holding it above the marker cannot jump the jaw. Moving the
+inactive trigger has no effect on the gripper or body.
+
+X/Square locks the admitted opening. Pressing it again enters the same pickup
+state on the selected trigger. Releasing a locked trigger cannot open the jaw;
+releasing it while **Following** requests opening. Trigger switching takes
+precedence over X in the same sample; Stop/Home take precedence over both.
+
+## Speed
+
+| Profile | Maximum translation | Maximum orientation |
 | --- | ---: | ---: |
 | 1 / Fine | 15 mm/s | 10°/s |
-| 2 / Normal | 40 mm/s | 25°/s |
+| 2 / Normal (default) | 40 mm/s | 25°/s |
 | 3 / Coarse | 80 mm/s | 45°/s |
 | 4 / Fast | 120 mm/s | 70°/s |
 | 5 / Maximum | 160 mm/s | 100°/s |
 
-Each stick has a radial deadzone of 0.08. Outside it, the remaining magnitude is linearly remapped to 0–1; partial deflection stays partial. Each trigger has a 0.02 deadzone with the remaining travel linearly remapped to 0–1. The displayed trigger percentages use these processed values.
+Each stick has an 8% radial deadzone, with the remaining magnitude remapped
+linearly to 0–1. Requested rate is `profile maximum × processed stick component`.
+XYZ diagonal magnitude is capped at 1. D-pad fine motion uses 20% of the selected
+orientation rate. R3 or an onscreen profile change invalidates an older pending
+calculation and resets the elapsed-time anchor. No trigger factor is applied.
 
-The arm rate is `selected ceiling × processed RT × processed stick component`. For example, level 2 at 35% RT has a 14 mm/s translation ceiling; a half-scale stick requests about 7 mm/s along that direction. Combined XYZ translation is norm-capped so diagonal movement does not exceed that ceiling. RT is applied once in the backend, not again to already scaled axes.
+Each gripper trigger has a 2% deadzone with the remaining range remapped to 0–1.
+The trigger bars display processed squeeze; the red marker is the pickup point
+on the selected trigger. The jaw remains subject to its configured velocity
+limit independently of the body speed profile.
 
-**RT does not gate the gripper.** After pickup, LT can open/close the jaw while RT is released and the arm is stationary. The analog jaw follows an absolute opening target, subject to the arm's configured gripper percentage-per-second limit, independently of the selected arm speed level.
+## Source and asynchronous behavior
 
-## Gripper lock and pickup
+Motion advances while the Control/Gamepad pane is active and the browser is
+focused. After returning from a hidden/unfocused pane, center the sticks and
+release the D-pad while focused. Neutral seen only in the background does not
+count. Trigger values do not gate body resume. Lock stays locked; an unlocked jaw
+returns through pickup. The last target can still finish settling during a pause.
 
-The motor-facing convention is **0% opening = closed, 100% = open**. LT represents the opposite quantity, closing amount. In Following state the requested opening is `100 × (1 − processed LT)`.
+Device disconnect or invalid samples stop the owned source. Reconnecting and
+held buttons cannot automatically start a new operation. Source selection,
+Stop, Home, mode/arm changes and focus loss invalidate obsolete responses.
+Each input path has at most one calculation pending. Same-direction analog
+variation does not continually restart the solve, but release/reversal discards
+incompatible results; old jaw results cannot overshoot the newest opening.
 
-- **Waiting for pickup:** Start/unlock preserves the held opening. Squeeze LT upward through the displayed pickup marker before taking over. The marker is `min(100%, held closing amount + 3 percentage points)`. With a held opening of 35%, closing is 65%, so the marker is 68% processed LT.
-- **Following:** LT determines the absolute opening target. Releasing LT requests opening; RT may remain released.
-- **Locked:** X/Square captures the current held/admitted gripper reference and preserves it while the sticks continue operating the arm. LT release cannot reopen a locked jaw. The onscreen lock button uses the same behavior.
-- **Unlock:** returns to pickup, retaining the captured opening. If LT is already above the pickup marker, release it below the marker and squeeze again; an already-held trigger cannot cause an immediate jump. At the fully closed endpoint, release/repress is still required.
+There is no unchanged-input inactivity timer. A steady stick and an unchanged
+`Gamepad.timestamp` remain valid held input. Existing network, feedback and
+device-fault behavior is unchanged.
 
-The held-opening source prefers the fresh runtime gripper command reference, then the current owned manual target, then measured opening when establishing a reference. An unavailable opening cannot be replaced with a fabricated 0% or 50% value. Locking changes only the jaw target/reference and invalidates any older outstanding result that could restore a previous closing request.
+## Implementation and verification
 
-## Focus, source changes and idle operation
+- [gamepad-input.js](../web/gamepad-input.js): pure standard-mapping interpreter,
+  analog values, press edges, selected trigger, lock and pickup.
+- [gamepad-panel.js](../web/gamepad-panel.js): discovery, view, source transitions
+  and one pending calculation; no direct motor access.
+- [manual-panel.js](../web/manual-panel.js): existing Start/Stop/Home ownership.
+- [manual backend](manual-control-backend.md): calculation-only
+  `POST /api/manual/{arm}/analog-step`. The gamepad sends normalized axes with
+  `speed_scale: 1`; the API retains its existing speed-scale argument for other
+  callers. Returned targets use the existing persistent-target DIRECT stream.
 
-Gamepad motion advances only while the Control/Gamepad pane is active and the browser window is focused. Leaving the pane, hiding the document or losing focus suspends new analog advancement and discards outstanding results. The existing stream retains its last target; it may still finish settling toward that target. This is not a claim of instantaneous physical immobility.
-
-When returning to the active, focused pane, release RT/R2 there before resuming arm-rate input. A neutral trigger observed only in the background does not satisfy this requirement. Gripper lock remains locked; an unlocked gripper returns through pickup. Focus restoration alone does not issue a new operation or replay queued movement.
-
-Controller disconnect, source replacement or invalid samples stop the owned control path and require a fresh explicit Start. Changing controllers stops the old source. Stop, Home, mode/arm changes and disconnect invalidate asynchronous results; late responses cannot restore an obsolete target. Continuous same-direction analog adjustments need not restart the solver on every small noise change, but release, reversal and RT neutralization discard incompatible pending motion. An older jaw result cannot overshoot the latest absolute opening request.
-
-There is **no inactivity timeout based on unchanged controls**. A steady held stick or an unchanged browser `Gamepad.timestamp` is not treated as stale merely because its value does not change. An active idle controller does not automatically end its session. This does not remove the existing network command-window, runtime feedback/source-expiry, device-fault or explicit Stop behavior; those are separate from an arbitrary “you have not moved recently” timer.
-
-## Developer boundary
-
-- [gamepad-input.js](../web/gamepad-input.js) is a pure standard-Gamepad interpreter: deadzones, rates, action edges, pickup and lock. It owns no DOM, device polling, clock, permission or transport.
-- [gamepad-panel.js](../web/gamepad-panel.js) reads `navigator.getGamepads()` on animation frames, handles source/focus state, and permits at most one calculation in flight. It sends measured state plus the current accepted reference to the pure calculator. The first calculation uses 1/60 s; later calculations use elapsed time capped at 100 ms. It never sends catch-up bursts.
-- [manual-panel.js](../web/manual-panel.js) retains the explicit Start/Stop/Home ownership and generation checks. [transport.js](../web/transport.js) retains the existing authenticated DIRECT stream. The nominal 100 Hz command timer is distinct from browser polling and IK-request cadence; it is not a measured gamepad end-to-end rate.
-- [manual_control.py](../python/soarm_station/manual_control.py) implements `analog_step`; [manual_http.py](../python/soarm_station/manual_http.py) exposes authenticated `POST /api/manual/{arm}/analog-step`. It shares the per-arm solve lock with keyboard step. This is calculation only, not a new actuation endpoint or motor owner.
-
-Example calculation payload:
-
-```json
-{
-  "positions": {"shoulder_pan": 0.0, "shoulder_lift": -0.8, "elbow_flex": 1.1, "wrist_flex": 0.0, "wrist_roll": 0.0},
-  "gripper": 35.0,
-  "translation": [0.5, 0.0, 0.0],
-  "elevation": 0.0,
-  "roll": 0.0,
-  "speed_scale": 0.35,
-  "gripper_target": 35.0,
-  "dt_s": 0.033,
-  "level": 2,
-  "reference_positions": {"shoulder_pan": 0.0, "shoulder_lift": -0.8, "elbow_flex": 1.1, "wrist_flex": 0.0, "wrist_roll": 0.0},
-  "reference_gripper": 35.0
-}
-```
-
-Those positions are illustrative request syntax, not a physical pose to execute. Use the selected arm's exact named joint set and real measured/reference data. Axes must be finite and within −1…1, speed scale within 0…1, and gripper target within 0…100 or null. Null leaves the reference jaw unchanged. Oversized XYZ diagonals are normalized; subunit magnitudes are preserved. The calculator returns the existing target/geometry/status format. BLOCKED is a calculation result, not permission revocation; smaller converged increments are reported with `step_fraction` and shown in the UI. The corrected solver has no 40 ms elapsed-time acceptance cutoff; see [manual backend details](manual-control-backend.md).
-
-## Verification and limits
-
-Relevant hardware-free commands:
-
-```bash
-node --test tests/test_gamepad_input.mjs tests/test_gamepad_panel.mjs tests/test_manual_panel.mjs
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python -m unittest discover -s tests -p test_manual_analog.py -v
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python -m unittest discover -s tests -p test_manual_ik_regression.py -v
-```
-
-The source tests cover axis signs, deadzones/scaling, diagonal caps, button edges, lock/pickup, source/focus changes, stable unchanged inputs, late-result rejection, one pending solve, HTTP validation and shared locking. The captured positive-Y IK regression was also checked as isolated Pi math; that is not gamepad-driven physical validation.
-
-Simulated Gamepad samples and hardware-free browser checks do **not** establish compatibility with a particular physical Xbox/DualSense model, USB/Bluetooth connection, browser/OS mapping, grip retention, actual opening width, physical clearance, sustained control rate or end-to-end latency. Record those separately when the selected controller and robot are explicitly tested. Browser trigger percentage and modeled jaw angle are not measurements of gripping force or aperture. No training/dataset collection capability is added to production Gamepad mode.
+Run `node --test tests/test_gamepad_input.mjs tests/test_gamepad_panel.mjs tests/test_manual_panel.mjs`.
+The source tests cover handoff races, input scaling, profile changes, source/focus
+transitions, lock/pickup and button edges. Browser QA uses simulated inputs and an
+in-memory runtime. Physical Xbox/DualSense USB/Bluetooth mapping, actual grip
+retention and end-to-end robot motion remain separate validation steps.

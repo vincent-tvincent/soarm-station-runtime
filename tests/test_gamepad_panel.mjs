@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GamepadPanel } from '../web/gamepad-panel.js';
+import { ManualPanel } from '../web/manual-panel.js';
 
 const copy = value => structuredClone(value);
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -14,7 +15,12 @@ const output = (engine, pad, held) => engine.sample(pad, { enabled: true, heldOp
 class Element {
   constructor() { this.nodes = new Map(); this.style = {}; this.dataset = {}; this.firstChild = { textContent: '' }; this.hidden = false; this.value = ''; this.attributes = {}; this.classList = { toggle() {} }; }
   querySelector(selector) { if (!this.nodes.has(selector)) this.nodes.set(selector, new Element()); return this.nodes.get(selector); }
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) {
+    if (selector === '[data-grip-trigger]') return ['left', 'right'].map(side => {
+      const node = this.querySelector(`[data-grip-trigger="${side}"]`); node.dataset.gripTrigger = side; return node;
+    });
+    return [];
+  }
   setAttribute(name, value) { this.attributes[name] = value; }
   replaceChildren(...children) { this.children = children; }
   click() { return this.onclick?.(); }
@@ -41,8 +47,8 @@ function fixture(t, { own = true, pad = raw(), requested = 50, admitted = 50, me
     preservedGripper: () => admitted, stateForArm: () => ({ feedback_valid: true }),
     intentContext() { return { arm: this.arm, mode: this.mode, generation }; },
     currentIntent(context) { return context.arm === this.arm && context.mode === this.mode && context.generation === generation; },
-    updateControls() {}, note() {}, el: id => manualElements.querySelector('#' + id),
-    setSpeed(value) { this.level = value; },
+    updateControls() {}, updateKeys() {}, note() {}, el: id => manualElements.querySelector('#' + id),
+    setSpeed(value) { ManualPanel.prototype.setSpeed.call(this, value); },
     onError(error) { calls.errors.push(error); },
     async safe(fn) { try { return await fn(); } catch (error) { calls.errors.push(error); } },
     async start() { calls.starts++; this.own = true; this.client.currentOperation = { ready: true }; panel.operationStarted(); },
@@ -59,6 +65,7 @@ function fixture(t, { own = true, pad = raw(), requested = 50, admitted = 50, me
   panel = new GamepadPanel({ element, manual, onCameraCycle: () => calls.cameras++, onCameraLayout: () => calls.layouts++,
     env: { read: () => { if (readerError !== null) throw readerError; return current ? [current] : []; }, supported: () => true, focused: () => focused,
       now: () => time, raf: callback => calls.raf.push(callback) } });
+  manual.gamepad = panel; manual.element = element;
   panel.active = true; panel.wasFocused = true; panel.selectedKey = panel.key(pad); panel.raw = pad;
   panel.inventoryKey = JSON.stringify([[pad.index, pad.id, pad.mapping]]); panel.needsNeutral = false;
   if (own) panel.engine.reset(admitted, pad); else panel.engine.resetButtonBaseline(pad);
@@ -100,17 +107,40 @@ test('controller read errors are visible, stop a lost source once, and clear wit
   assert.equal(f.calls.starts, 0); assert.equal(f.manual.own, false); assert.equal(f.calls.targets.length, 0);
 });
 
-test('RT neutral in a background or inactive pane cannot satisfy focused resume', async t => {
+test('only focused neutral sticks and released D-pad satisfy resume; triggers are not a speed gate', async t => {
   const f = fixture(t); f.focus(false); f.emit('blur');
-  f.poll(raw({ rt: 0 })); assert.equal(f.panel.needsNeutral, true);
+  f.poll(raw({ rt: 1, lt: 1 })); assert.equal(f.panel.needsNeutral, true);
   f.poll(raw({ rt: 1, axes: [0, 0, 0, -.6] }));
   f.focus(true); f.poll(raw({ rt: 1, axes: [0, 0, 0, -.6] })); await flush();
   assert.equal(f.panel.needsNeutral, true); assert.equal(f.calls.requests.length, 0);
-  f.panel.setActive(false); f.poll(raw()); assert.equal(f.panel.needsNeutral, true);
-  f.panel.setActive(true); // Current source is neutral and this pane is focused.
+  f.poll(raw({ rt: 1, buttons: [12] })); await flush();
+  assert.equal(f.panel.needsNeutral, true); assert.equal(f.calls.requests.length, 0);
+  f.panel.setActive(false); f.poll(raw({ rt: 1, lt: 1 })); assert.equal(f.panel.needsNeutral, true);
+  f.panel.setActive(true); // Focused body-neutral input, despite both triggers being squeezed.
   assert.equal(f.panel.needsNeutral, false);
-  f.poll(raw({ rt: 1, axes: [0, 0, 0, -.6] })); await flush();
+  f.poll(raw({ rt: 0, lt: 1, axes: [0, 0, 0, -.6] })); await flush();
   assert.equal(f.calls.requests.length, 1); assert.equal(f.calls.stops, 0);
+  assert.equal(f.calls.requests[0].body.speed_scale, 1);
+});
+
+test('Start uses raw body neutrality even when inactive preview has zero motion output', async t => {
+  const f = fixture(t, { own: false, pad: raw({ axes: [0, 0, 0, -.5] }) });
+  assert.deepEqual(f.panel.output.translation, [0, 0, 0]);
+  assert.equal(f.panel.canStart(), false);
+  f.poll(raw({ axes: [0, 0, 0, -.5], buttons: [0] })); await flush(); assert.equal(f.calls.starts, 0);
+  f.poll(raw({ buttons: [12] })); assert.equal(f.panel.canStart(), false);
+  f.poll(raw({ rt: 1, lt: 1 })); assert.equal(f.panel.canStart(), true);
+  f.poll(raw({ rt: 1, lt: 1, buttons: [0] })); await flush(); assert.equal(f.calls.starts, 1);
+});
+
+test('sticks request the same body speed with RT released or squeezed', async t => {
+  const f = fixture(t, { pad: raw({ axes: [0, 0, 0, -.5], rt: 0 }) });
+  await f.panel.solve();
+  const released = f.calls.requests.at(-1).body;
+  assert.equal(released.speed_scale, 1); assert.ok(released.translation[0] > 0);
+  f.poll(raw({ axes: [0, 0, 0, -.5], rt: 1 })); await flush();
+  const squeezed = f.calls.requests.at(-1).body;
+  assert.equal(squeezed.speed_scale, 1); assert.deepEqual(squeezed.translation, released.translation);
 });
 
 for (const [label, nextAxes] of [['neutral', [0, 0, -.5, 0]], ['reverse', [0, 0, -.5, .5]]]) {
@@ -185,6 +215,106 @@ test('unlock keeps the captured grip until LT crosses pickup; it does not fabric
   assert.equal(f.calls.requests.length, 0);
   f.poll(raw({ lt: .8 })); await flush();
   assert.equal(f.panel.engine.gripperState, 'following'); assert.equal(f.calls.requests.length, 1);
+});
+
+for (const [from, to, button] of [['left', 'right', 5], ['right', 'left', 4]]) {
+  test(`${from}-to-${to} trigger swap freezes admitted grip, retires the pending old-source reply, and waits for pickup`, async t => {
+    const pad = values => raw({ lt: values.left ?? .9, rt: values.right ?? .95, buttons: values.buttons || [] });
+    const initial = pad({ [from]: .9, [to]: .95 });
+    const f = fixture(t, { pad: initial, requested: 20, reference: 20, admitted: 35, measured: 50 });
+    if (from === 'right') f.panel.engine.selectTrigger('right', 35);
+    f.panel.engine.gripperState = 'following'; f.panel.output = output(f.panel.engine, initial, 35);
+    const gate = deferred(); f.handler(() => gate.promise);
+    const pending = f.panel.solve(); assert.ok(f.calls.requests[0].body.gripper_target < 20);
+    f.poll(pad({ [from]: .9, [to]: .95, buttons: [button] }));
+    assert.equal(f.panel.engine.activeTrigger, to); assert.equal(f.panel.engine.gripperState, 'pickup');
+    assert.equal(f.manual.target.gripper, 35); assert.equal(f.manual.reference.gripper, 35);
+    assert.deepEqual(f.manual.target.positions, { joint: 1 }); assert.deepEqual(f.manual.reference.positions, { joint: .5 });
+    assert.equal(f.calls.targets.length, 1); assert.equal(f.calls.targets[0].gripper, 35);
+    assert.equal(f.calls.stops, 0); assert.equal(f.calls.starts, 0); assert.equal(f.manual.own, true);
+    gate.resolve({ status: 'OK', step_fraction: 1, target: { positions: { joint: .8 }, gripper: 19 } });
+    await pending; assert.equal(f.calls.targets.length, 1);
+    f.handler(null);
+    f.poll(pad({ [from]: 0, [to]: .95 })); await flush();
+    assert.equal(f.panel.engine.gripperState, 'pickup'); assert.equal(f.calls.targets.length, 1);
+    assert.ok(Math.abs(f.panel.engine.pickupThreshold - .68) < 1e-10);
+    f.poll(pad({ [from]: 1, [to]: .5 })); await flush(); assert.equal(f.panel.engine.gripperState, 'pickup');
+    f.poll(pad({ [from]: 1, [to]: .8 })); await flush();
+    assert.equal(f.panel.engine.gripperState, 'following'); assert.ok(f.calls.targets.at(-1).gripper < 35);
+    assert.equal(f.calls.stops, 0);
+  });
+}
+
+test('a locked gripper can swap trigger ownership and stays held until the new trigger picks up', async t => {
+  const f = fixture(t, { pad: raw({ lt: .9, rt: .95 }), requested: 20, reference: 20, admitted: 35, measured: 50 });
+  await f.element.querySelector('#gamepad-grip-lock').click(); assert.equal(f.panel.engine.gripperState, 'locked');
+  await f.element.querySelector('[data-grip-trigger="right"]').click();
+  assert.equal(f.panel.engine.activeTrigger, 'right'); assert.equal(f.panel.engine.gripperState, 'pickup');
+  assert.equal(f.manual.target.gripper, 35); assert.equal(f.manual.reference.gripper, 35);
+  assert.equal(f.calls.targets.length, 2); const epoch = f.panel.sourceEpoch;
+  f.poll(raw({ lt: 0, rt: .95 })); await flush(); assert.equal(f.panel.engine.gripperState, 'pickup');
+  assert.equal(f.calls.targets.length, 2, 'the onscreen selection must not queue a second freeze on the next sample');
+  assert.equal(f.panel.sourceEpoch, epoch);
+  assert.ok(f.calls.targets.every(value => value.gripper === 35)); assert.equal(f.calls.stops, 0);
+});
+
+test('reselecting the active trigger is idempotent and does not reset following or freeze another target', async t => {
+  const lt = .02 + .65 * .98;
+  const f = fixture(t, { pad: raw({ lt }), requested: 35, reference: 35, admitted: 35 });
+  f.panel.engine.gripperState = 'following'; f.panel.output = output(f.panel.engine, raw({ lt }), 35);
+  const epoch = f.panel.sourceEpoch;
+  assert.equal(f.panel.selectGripperTrigger('left'), false);
+  f.poll(raw({ lt, buttons: [4] })); await flush();
+  assert.equal(f.panel.engine.gripperState, 'following'); assert.equal(f.panel.sourceEpoch, epoch);
+  assert.equal(f.calls.targets.length, 0); assert.equal(f.calls.requests.length, 0); assert.equal(f.calls.stops, 0);
+});
+
+for (const selected of ['left', 'right']) {
+  test(`the inactive trigger cannot change a following ${selected} gripper target`, async t => {
+    const activeValue = .02 + .6 * .98;
+    const sample = inactive => raw(selected === 'left' ? { lt: activeValue, rt: inactive } : { rt: activeValue, lt: inactive });
+    const f = fixture(t, { pad: sample(0), requested: 40, reference: 40, admitted: 40 });
+    if (selected === 'right') f.panel.engine.selectTrigger('right', 40);
+    f.panel.engine.gripperState = 'following'; f.panel.output = output(f.panel.engine, sample(0), 40);
+    const epoch = f.panel.sourceEpoch;
+    f.poll(sample(1)); f.poll(sample(0)); await flush();
+    assert.equal(f.panel.engine.activeTrigger, selected); assert.equal(f.panel.engine.gripperState, 'following');
+    assert.ok(Math.abs(f.panel.output.gripper_target - 40) < .0001);
+    assert.equal(f.panel.sourceEpoch, epoch); assert.equal(f.calls.targets.length, 0); assert.equal(f.calls.requests.length, 0);
+  });
+}
+
+test('preview trigger selection does not grant permission, start, stop, or send a target', async t => {
+  const f = fixture(t, { own: false, pad: raw({ rt: .95 }), requested: 20, reference: 20, admitted: 35 });
+  await f.element.querySelector('[data-grip-trigger="right"]').click();
+  assert.equal(f.panel.engine.activeTrigger, 'right'); assert.equal(f.manual.own, false);
+  assert.equal(f.calls.targets.length, 0); assert.equal(f.calls.starts, 0); assert.equal(f.calls.stops, 0);
+  assert.equal(f.manual.target.gripper, 20);
+});
+
+test('R3 wraps speed 5 to 1 once per press and rejects an outstanding old-profile response', async t => {
+  const source = buttons => raw({ axes: [0, 0, 0, -.5], buttons });
+  const f = fixture(t, { pad: source([]) }); f.manual.level = 5;
+  const gate = deferred(); f.handler(() => gate.promise);
+  const pending = f.panel.solve(); assert.equal(f.calls.requests[0].body.level, 5);
+  const epoch = f.manual.epoch;
+  f.poll(source([11])); assert.equal(f.manual.level, 1); assert.ok(f.manual.epoch > epoch);
+  assert.equal(f.panel.lastSolveAt, null);
+  f.poll(source([11])); assert.equal(f.manual.level, 1);
+  gate.resolve({ status: 'OK', step_fraction: 1, target: { positions: { joint: .9 }, gripper: 50 } });
+  await pending; assert.equal(f.calls.targets.length, 0);
+  f.handler(null); f.poll(source([11])); await flush(); assert.equal(f.calls.requests.at(-1).body.level, 1);
+  assert.equal(f.calls.requests.at(-1).body.dt_s, 1 / 60, 'new profile starts a fresh integration interval rather than catching up');
+  assert.equal(f.panel.engine.activeTrigger, 'left'); assert.equal(f.calls.stops, 0);
+});
+
+test('L3 cycles primary camera and Menu cycles layout without changing speed or operation authority', async t => {
+  const f = fixture(t, { own: false }); const level = f.manual.level;
+  f.poll(raw({ buttons: [10] })); f.poll(raw({ buttons: [10] })); await flush();
+  assert.equal(f.calls.cameras, 1); assert.equal(f.calls.layouts, 0);
+  f.poll(raw()); f.poll(raw({ buttons: [9] })); f.poll(raw({ buttons: [9] })); await flush();
+  assert.equal(f.calls.layouts, 1); assert.equal(f.calls.cameras, 1); assert.equal(f.manual.level, level);
+  assert.equal(f.calls.starts, 0); assert.equal(f.calls.stops, 0); assert.equal(f.calls.targets.length, 0);
 });
 
 test('discovery, reconnect and held Start cannot auto-start; idle active sessions have no timeout', async t => {
