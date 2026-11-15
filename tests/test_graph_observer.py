@@ -1,4 +1,5 @@
 import json
+import uuid
 from types import SimpleNamespace
 import pytest
 from soarm_station.graph_observer import GraphObserver,TrafficSampler
@@ -161,3 +162,46 @@ def test_unknown_rmw_endpoint_owners_remain_explicit_without_invalid_node_querie
     assert unresolved['fully_qualified_name'] is None and unresolved['namespace'] is None
     assert all(t['publishers'][0]['node_id']==unresolved['id'] for t in data['topics'])
     assert any(error['error']=='UnknownEndpointOwner' for error in data['errors'])
+
+
+def test_activity_capture_advances_after_counter_snapshot_without_topology_refresh():
+    _,clock,_,graph=setup();graph.refresh()
+    topology_sequence=graph.sequence;topology_capture=graph.current['captured_at_ns']
+    def counters():
+        clock.value+=.125
+        return {'active':True},{}
+    graph.watcher=SimpleNamespace(snapshot=counters)
+    first=graph.snapshot()
+    assert first['activity_captured_at_ns']=='10125000000'
+    clock.value+=.25
+    second=graph.snapshot()
+    assert second['activity_captured_at_ns']=='10500000000'
+    assert int(second['activity_captured_at_ns'])-int(first['activity_captured_at_ns'])==375_000_000
+    assert first['sequence']==second['sequence']==topology_sequence
+    assert first['captured_at_ns']==second['captured_at_ns']==topology_capture
+    assert first['activity_clock_type']==second['activity_clock_type']=='observer_monotonic'
+    assert first['activity_clock_id']==second['activity_clock_id']
+    assert uuid.UUID(first['activity_clock_id']).version==4
+
+
+def test_activity_clock_is_observer_scoped_even_before_discovery():
+    _,clock,_,graph=setup()
+    initial=graph.snapshot();clock.value+=.5;later=graph.snapshot()
+    assert initial['sequence']==later['sequence']==0 and later['captured_at_ns'] is None
+    assert initial['activity_clock_id']==later['activity_clock_id']
+    assert int(later['activity_captured_at_ns'])>int(initial['activity_captured_at_ns'])
+    _,_,_,replacement=setup()
+    assert replacement.snapshot()['activity_clock_id']!=initial['activity_clock_id']
+
+
+def test_activity_time_is_string_at_long_uptime_and_independent_of_wall_jumps():
+    _,clock,_,graph=setup();clock.value=10_000_000.
+    wall=[1_700_000_000_000_000_000];graph.wall=lambda:wall[0]
+    graph.refresh();first=graph.snapshot()
+    assert isinstance(first['activity_captured_at_ns'],str)
+    assert int(first['activity_captured_at_ns'])>2**53
+    wall[0]-=90_000_000_000;clock.value+=.25
+    second=json.loads(json.dumps(graph.snapshot()))
+    assert isinstance(second['activity_captured_at_ns'],str)
+    assert int(second['activity_captured_at_ns'])-int(first['activity_captured_at_ns'])==250_000_000
+    assert second['captured_at_ns']==first['captured_at_ns']==1_700_000_000_000_000_000

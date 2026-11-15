@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FLOW_LIMITS, TopicFlowActivity, cubicPoint, flowEdges, normalizeGraph, GraphLiveWatch, GraphExplorer, activityLabel,
+  FLOW_LIMITS, GRAPH_UPDATE_INTERVALS, normalizeUpdateInterval, graphStructureSignature, TopicFlowActivity, cubicPoint, flowEdges, normalizeGraph, GraphLiveWatch, GraphExplorer, activityLabel,
 } from '../web/graph.js';
 
 const node=id=>({id,name:id,namespace:'/',fully_qualified_name:`/${id}`,instance_count:1});
@@ -510,4 +510,168 @@ test('a different action server cannot inherit the sole publisher of another ser
   owner.observe(make(10),0);const current=make(12);owner.observe(current,2000);
   const edges=flowEdges(current,current.edges,owner,2000,{focus:'action',focusedOnly:true});
   assert.ok(edges.some(e=>e.id==='action-server'));assert.equal(edges.some(e=>e.id==='other-action-server'),false);
+});
+
+test('graph update selector accepts only its declared intervals and defaults invalid values to2s',()=>{
+  assert.deepEqual(GRAPH_UPDATE_INTERVALS,[500,1000,2000,5000,10000]);
+  for(const interval of GRAPH_UPDATE_INTERVALS){
+    assert.equal(normalizeUpdateInterval(interval),interval);
+    assert.equal(normalizeUpdateInterval(String(interval)),interval);
+  }
+  for(const invalid of [undefined,null,'',0,-500,750,2001,10000.5,NaN,Infinity,'1s','automatic'])assert.equal(normalizeUpdateInterval(invalid),2000);
+});
+
+test('5s and10s display intervals sustain advancing evidence but still expire a frozen source',()=>{
+  for(const interval of [5000,10000]){
+    const owner=new TopicFlowActivity({updateIntervalMs:interval});owner.observe(graph(0),0);
+    let last=0;
+    for(let now=interval;now<=interval*5;now+=interval){
+      if(last)assert.equal(owner.active('topic',now-1),true,`${interval}ms gap`);
+      owner.observe(graph(now/10),now);last=now;
+      assert.equal(owner.active('topic',now+interval-1),true);
+      assert.equal(owner.active('topic::publisher:aa01',now+interval-1),true);
+    }
+    owner.observe(graph(last/10),last+interval/2);
+    assert.equal(owner.active('topic',last+interval+1499),true);
+    assert.equal(owner.active('topic',last+interval+1501),false);
+  }
+});
+
+test('changing update interval alone or replaying a frozen counter cannot create fresh evidence',()=>{
+  const{owner,now}=live();owner.setUpdateInterval(10000);
+  assert.equal(owner.active('topic',now+3501),false);
+  owner.observe(graph(11),now+4000);assert.equal(owner.active('topic',now+4000),false);
+  owner.observe(graph(12),now+5000);assert.equal(owner.active('topic',now+15000),true);
+  assert.equal(owner.active('topic',now+16501),false);
+});
+
+const CLOCK_A='11111111111141118111111111111111',CLOCK_B='22222222222242228222222222222222';
+const clockFields=(ns,id=CLOCK_A,type='observer_monotonic')=>({activity_clock_id:id,activity_clock_type:type,activity_captured_at_ns:String(ns)});
+const withClock=(g,ns,id=CLOCK_A,type='observer_monotonic')=>({...g,...clockFields(ns,id,type)});
+const unknownWindow=value=>assert.ok(value===null||value?.durationMs===null,`expected unknown observation window, got ${JSON.stringify(value)}`);
+
+test('server monotonic BigInt subtraction measures the true interval despite browser response jitter',()=>{
+  const owner=new TopicFlowActivity(),base=9007199254740993n;
+  owner.observe(withClock(graph(100),base),1000);
+  owner.observe(withClock(graph(120),base+2000000001n),9500);
+  assert.equal(owner.interval('topic').messages,20);
+  near(owner.interval('topic').durationMs,2000.000001);
+  near(owner.interval('topic::publisher:aa01').durationMs,2000.000001);
+  assert.notEqual(owner.interval('topic').durationMs,8500);
+});
+
+test('action aggregate and server-source count labels share the observer clock window',()=>{
+  const owner=new TopicFlowActivity(),base=9007199254740993n;
+  owner.observe(withClock(actionGraph(20,5),base),10);
+  owner.observe(withClock(actionGraph(25,12),base+2500000000n),10010);
+  assert.deepEqual(owner.interval('action'),{messages:12,durationMs:2500});
+  assert.deepEqual(owner.interval('action::server:server'),{messages:12,durationMs:2500});
+});
+
+test('server clock restart and independent counter epoch changes re-prime the observation window',()=>{
+  const owner=new TopicFlowActivity();owner.observe(withClock(graph(10),1000000000n),0);
+  owner.observe(withClock(graph(12),3000000000n),3000);assert.equal(owner.interval('topic').durationMs,2000);
+  owner.observe(withClock(graph(15),1000000000n,CLOCK_B),4000);unknownWindow(owner.interval('topic'));
+  owner.observe(withClock(graph(17),2000000000n,CLOCK_B),6000);assert.deepEqual(owner.interval('topic'),{messages:2,durationMs:1000});
+  owner.observe(withClock(graph(300,{counter:{sample_id:'restarted-counter'}}),4000000000n,CLOCK_B),8000);
+  unknownWindow(owner.interval('topic'));unknownWindow(owner.interval('topic::publisher:aa01'));
+});
+
+test('invalid or partially present server timing never falls back to a fabricated browser window',()=>{
+  const invalidFields=[
+    {activity_captured_at_ns:null},{activity_captured_at_ns:1000000000},
+    {activity_captured_at_ns:'1e9'},{activity_captured_at_ns:'-1'},{activity_captured_at_ns:''},{activity_captured_at_ns:'NaN'},
+    {activity_clock_id:null},{activity_clock_id:''},{activity_clock_type:undefined},
+    {activity_clock_type:'wall'},{activity_clock_type:'unix'},{activity_clock_type:'system_wall'},
+    {activity_clock_id:null,activity_clock_type:null,activity_captured_at_ns:null},
+  ];
+  for(const invalid of invalidFields){
+    const owner=new TopicFlowActivity();owner.observe(withClock(graph(10),1000000000n),1000);
+    const next={...withClock(graph(12),3000000000n),...invalid};owner.observe(next,3500);
+    unknownWindow(owner.interval('topic'));unknownWindow(owner.interval('topic::publisher:aa01'));
+  }
+});
+
+test('equal or backwards observer timestamps produce no fabricated nonnegative interval',()=>{
+  for(const timestamp of [2000000000n,1000000000n]){
+    const owner=new TopicFlowActivity();owner.observe(withClock(graph(10),2000000000n),1000);
+    owner.observe(withClock(graph(12),timestamp),4000);unknownWindow(owner.interval('topic'));
+  }
+});
+
+test('legacy snapshots lacking every observer clock field retain the client-monotonic fallback',()=>{
+  const owner=new TopicFlowActivity();owner.observe(graph(10),1000);owner.observe(graph(13),2750);
+  assert.deepEqual(owner.interval('topic'),{messages:3,durationMs:1750});
+  owner.observe(withClock(graph(16),9000000000n),4000);unknownWindow(owner.interval('topic'));
+});
+
+test('structural signature ignores new measurements/clocks and discovery ordering, but detects endpoint changes',()=>{
+  const initial=graph(10),updated=withClock(graph(20),9007199254740993n);
+  updated.age_ms=2000;updated.watch.lease_count=4;updated.nodes.reverse();updated.edges.reverse();
+  updated.topics[0].traffic={state:'complete',messages:500};
+  assert.equal(graphStructureSignature(initial),graphStructureSignature(updated));
+  updated.topics[0].publishers[0].gid='changed-gid';
+  assert.notEqual(graphStructureSignature(initial),graphStructureSignature(updated));
+});
+
+test('counter-only refresh preserves graph/inspector controls while topology or view changes rebuild them',async t=>{
+  documentStub(t);const initial=graph(10);let next=graph(11),key='initial-view';
+  const owner=Object.create(GraphExplorer.prototype),svgToken={},buttonToken={};
+  Object.assign(owner,{disposed:false,pending:false,connected:true,visible:true,data:initial,focus:'topic',initialized:true,
+    liveWatch:{enabled:true},flowActivity:new TopicFlowActivity(),renderedSignature:graphStructureSignature(initial),renderedViewKey:key,
+    fullRenders:0,inspectorRenders:0,measurements:0,svgToken,buttonToken,
+    request:async()=>next,viewKey:()=>key,syncLiveWatch:async()=>{},
+    updateMeasurements(){this.measurements++;},
+    render(){this.fullRenders++;this.renderedSignature=graphStructureSignature(this.data);this.renderedViewKey=key;this.svgToken={};},
+    inspector(){this.inspectorRenders++;this.buttonToken={};},
+    stopFlow(){},message(){},
+  });
+  await owner.refresh();assert.equal(owner.measurements,1);assert.equal(owner.fullRenders,0);assert.equal(owner.inspectorRenders,0);
+  assert.equal(owner.svgToken,svgToken);assert.equal(owner.buttonToken,buttonToken);
+  next=graph(12);next.topics[0].name='/renamed';await owner.refresh();
+  assert.equal(owner.fullRenders,1);assert.equal(owner.inspectorRenders,1);
+  key='different-focus';await owner.refresh();assert.equal(owner.fullRenders,2);assert.equal(owner.inspectorRenders,2);
+});
+
+function schedulerBrowser(t){
+  const elements=new Map(),stored=new Map(),intervals=new Map();let nextId=0;
+  const element=()=>({children:[],attrs:{},clientWidth:1000,clientHeight:700,
+    append(...children){this.children.push(...children);},setAttribute(key,value){this.attrs[key]=value;},
+    replaceChildren(...children){this.children=children;},querySelector(){return null;},remove(){}});
+  const document={hidden:false,getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);},
+    createElementNS:()=>element(),addEventListener(){},removeEventListener(){}};
+  for(const [name,value]of Object.entries({document,window:{matchMedia:()=>({matches:false,addEventListener(){},removeEventListener(){}})},
+    localStorage:{getItem:key=>stored.get(key)??null,setItem:(key,value)=>stored.set(key,value)},
+    ResizeObserver:class{observe(){}disconnect(){}},
+  })){
+    const previous=Object.getOwnPropertyDescriptor(globalThis,name);Object.defineProperty(globalThis,name,{value,writable:true,configurable:true});
+    t.after(()=>{if(previous)Object.defineProperty(globalThis,name,previous);else delete globalThis[name];});
+  }
+  t.mock.method(globalThis,'setInterval',(callback,ms)=>{const id=++nextId;intervals.set(id,{callback,ms});return id;});
+  t.mock.method(globalThis,'clearInterval',id=>intervals.delete(id));
+  return{document,elements,stored,intervals};
+}
+
+test('10s display polling keeps independent2s lease heartbeats and changing interval replaces only display timer',async t=>{
+  const browser=schedulerBrowser(t);let now=0;const calls=[],displayPolls=[];
+  class SchedulerExplorer extends GraphExplorer{bind(){}}
+  const owner=new SchedulerExplorer({request:async(path,body)=>{
+    calls.push({path,body:{...body},at:now});return{accepted:true,lease_id:body.lease_id||'stable',expires_in_ms:body.operation==='release'?0:12000,active:body.operation!=='release'};
+  },onError(){}});
+  const heartbeat=owner.watchTimer,originalDisplay=owner.timer,model=owner.flowActivity;
+  assert.equal(browser.intervals.get(heartbeat).ms,2000);
+  owner.setUpdateInterval('10000');assert.equal(owner.flowActivity,model);
+  assert.equal(browser.intervals.has(originalDisplay),false);assert.equal(owner.watchTimer,heartbeat);
+  assert.equal(browser.intervals.get(owner.timer).ms,10000);assert.equal(browser.intervals.get(heartbeat).ms,2000);
+  assert.equal(browser.stored.get('ros-graph-update-ms'),'10000');assert.equal(browser.elements.get('graph-update-interval').value,'10000');
+  owner.visible=true;owner.connected=true;owner.data=graph(0);owner.liveWatch.now=()=>now;
+  owner.refresh=async()=>{displayPolls.push(now);};await owner.syncLiveWatch();
+  for(now=2000;now<=20000;now+=2000){
+    browser.intervals.get(heartbeat).callback();await owner.liveWatch.pending;
+    if(now%10000===0)browser.intervals.get(owner.timer).callback();
+  }
+  assert.deepEqual(displayPolls,[10000,20000]);assert.equal(calls.filter(c=>c.body.operation==='acquire').length,1);
+  assert.deepEqual(calls.filter(c=>c.body.operation==='renew').map(c=>c.at),[4000,8000,12000,16000,20000]);
+  owner.dispose();await owner.liveWatch.sync();assert.equal(browser.intervals.size,0);
+  assert.equal(calls.at(-1).body.operation,'release');
 });

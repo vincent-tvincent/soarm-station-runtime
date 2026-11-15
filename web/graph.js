@@ -55,10 +55,40 @@ const palette = {
 };
 // Motion is continuous while fresh counters advance; it never represents individual packets.
 export const FLOW_LIMITS = Object.freeze({maxEdges:128,maxFps:30,cycleMs:1400,evidenceMs:3500,staleMs:4500});
+export const GRAPH_UPDATE_INTERVALS = Object.freeze([500,1000,2000,5000,10000]);
+export function normalizeUpdateInterval(value) {
+  const parsed=Number(value);return GRAPH_UPDATE_INTERVALS.includes(parsed)?parsed:2000;
+}
+export function graphStructureSignature(graph) {
+  const sorted=values=>values?.slice().sort((a,b)=>String(a.id??a).localeCompare(String(b.id??b)));
+  const entity=n=>{
+    const {activity,traffic,...metadata}=n;
+    return {...metadata,types:sorted(metadata.types),publishers:sorted(metadata.publishers),
+      subscriptions:sorted(metadata.subscriptions),clients:sorted(metadata.clients),servers:sorted(metadata.servers)};
+  };
+  return JSON.stringify({nodes:sorted(graph.nodes)?.map(entity),topics:sorted(graph.topics)?.map(entity),
+    actions:sorted(graph.actions)?.map(entity),services:sorted(graph.services)?.map(entity),edges:sorted(graph.edges)});
+}
+function observationClock(graph) {
+  const fields=['activity_clock_id','activity_clock_type','activity_captured_at_ns'];
+  if(!fields.some(key=>Object.hasOwn(graph,key)))return {mode:'legacy',valid:true,id:null,ns:null};
+  if(typeof graph.activity_clock_id==='string' && graph.activity_clock_id &&
+      graph.activity_clock_type==='observer_monotonic' && typeof graph.activity_captured_at_ns==='string' &&
+      /^\d{1,32}$/.test(graph.activity_captured_at_ns))
+    return {mode:'server',valid:true,id:graph.activity_clock_id,ns:BigInt(graph.activity_captured_at_ns)};
+  return {mode:'invalid',valid:false,id:null,ns:null};
+}
 const publisherKey = (id,gid) => `${id}::publisher:${gid}`;
 const actionServerKey = (id,nodeId) => `${id}::server:${nodeId}`;
 const unknownKey = id => `${id}::unknown`;
 const liveMetric = n => n?.activity || n?.traffic || {};
+const setText=(element,value)=>{if(element && element.textContent!==String(value))element.textContent=String(value);};
+function historyPoints(entity,width,height) {
+  const t=liveMetric(entity),history=t.history||(t.feedback?.history?.length?t.feedback.history:t.status?.history)||[];
+  if(!history.length)return '';
+  const values=history.map(b=>b.messages||0),maximum=Math.max(1,...values);
+  return values.map((v,i)=>`${width-80+(i/Math.max(1,values.length-1))*68},${height-10-(v/maximum)*15}`).join(' ');
+}
 const observed = t => ['watching','sampling'].includes(t?.state);
 const finiteAge = value => Number.isFinite(value) && value >= 0;
 export function activityLabel(entity) {
@@ -76,10 +106,16 @@ export function activityLabel(entity) {
   return ({inactive:'Monitoring off',blocked:'Not measured',limited:'Capacity limit',throttled:'Throttled',unavailable:'Unknown',cleanup_pending:'Cleanup pending'}[t.state] || 'Unknown');
 }
 export class TopicFlowActivity {
-  constructor() { this.samples = new Map(); }
+  constructor({updateIntervalMs=2000}={}) { this.samples = new Map();this.setUpdateInterval(updateIntervalMs); }
+  setUpdateInterval(value) {
+    this.updateIntervalMs=normalizeUpdateInterval(value);
+    this.evidenceMs=Math.max(FLOW_LIMITS.evidenceMs,this.updateIntervalMs+1500);
+    this.staleMs=Math.max(FLOW_LIMITS.staleMs,this.updateIntervalMs+2500);
+  }
   clear() { this.samples.clear(); }
   observe(graph, now) {
-    const fresh=['ready','partial'].includes(graph.state) && finiteAge(graph.age_ms) && graph.age_ms<FLOW_LIMITS.staleMs;
+    const clock=observationClock(graph);
+    const fresh=clock.valid && ['ready','partial'].includes(graph.state) && finiteAge(graph.age_ms) && graph.age_ms<this.staleMs;
     const sources=new Map();
     for (const topic of graph.topics||[]) {
       const t=liveMetric(topic); sources.set(topic.id,t);
@@ -117,17 +153,20 @@ export class TopicFlowActivity {
       const old=this.samples.get(id);
       if(!observed(t) || typeof t.sample_id!=='string' || !t.sample_id ||
           !Number.isSafeInteger(t.messages) || t.messages<0) {this.samples.delete(id);continue;}
-      const same=old?.sampleId===t.sample_id;
-      const recent=finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs;
+      const comparable=old?.clockMode===clock.mode && old?.clockId===clock.id;
+      const clockValid=clock.valid && (!comparable || clock.mode!=='server' || clock.ns>old.serverNs);
+      const same=old?.sampleId===t.sample_id && comparable && old.clockValid && clockValid;
+      const recent=finiteAge(t.last_message_age_ms) && t.last_message_age_ms<this.evidenceMs;
       const delta=same && t.messages>=old.messages?t.messages-old.messages:null;
       const current={sampleId:t.sample_id,messages:t.messages,start:old?.start,until:old?.until||0,
-        observedAt:now,delta,intervalMs:delta===null?null:Math.max(0,now-old.observedAt)};
+        observedAt:now,clockMode:clock.mode,clockId:clock.id,serverNs:clock.ns,clockValid,delta,
+        intervalMs:delta===null?null:clock.mode==='server'?Number(clock.ns-old.serverNs)/1e6:Math.max(0,now-old.observedAt)};
       if(!same || !fresh || !recent || t.messages<old.messages || t.messages===0) current.until=0;
       else if(t.messages>old.messages) {
         if(!this.active(id,now)) current.start=now;
-        current.until=now+Math.min(FLOW_LIMITS.evidenceMs-t.last_message_age_ms,FLOW_LIMITS.staleMs-graph.age_ms);
+        current.until=now+Math.min(this.evidenceMs-t.last_message_age_ms,this.staleMs-graph.age_ms);
         advanced=true;
-      } else current.until=Math.min(current.until,now+FLOW_LIMITS.evidenceMs-t.last_message_age_ms,now+FLOW_LIMITS.staleMs-graph.age_ms);
+      } else current.until=Math.min(current.until,now+this.evidenceMs-t.last_message_age_ms,now+this.staleMs-graph.age_ms);
       this.samples.set(id,current);
     }
     for(const id of this.samples.keys()) if(!sources.has(id)) this.samples.delete(id);
@@ -333,7 +372,9 @@ export class GraphExplorer {
     this.pending = false;
     this.disposed = false;
     this.didFit = false;
-    this.flowActivity = new TopicFlowActivity();
+    let savedInterval;try{savedInterval=localStorage.getItem('ros-graph-update-ms');}catch{}
+    this.updateIntervalMs=normalizeUpdateInterval(savedInterval);
+    this.flowActivity = new TopicFlowActivity({updateIntervalMs:this.updateIntervalMs});
     this.flowDots = [];
     this.flowFrame = null;
     this.flowLastFrame = -Infinity;
@@ -358,9 +399,11 @@ export class GraphExplorer {
     this.svg.append(this.viewport);
     this.host.append(this.svg);
     this.bind();
-    this.timer = setInterval(() => {
-      if (this.visible && this.connected && !document.hidden) this.refresh();
-    }, 2000);
+    this.restartPolling();
+    // Observation leases are independent of how often the display is refreshed.
+    this.watchTimer=setInterval(()=>{
+      if(!this.disposed && this.visible && this.connected && !document.hidden) void this.syncLiveWatch();
+    },2000);
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.didFit && this.data) this.fit();
     });
@@ -381,8 +424,97 @@ export class GraphExplorer {
     else { this.flowActivity.clear(); this.stopFlow(); }
     this.updateWatchActivity();
   }
+  restartPolling() {
+    if(this.disposed)return;
+    clearInterval(this.timer);
+    this.timer=setInterval(()=>{
+      if(!this.disposed && this.visible && this.connected && !document.hidden) void this.refresh();
+    },this.updateIntervalMs);
+  }
+  setUpdateInterval(value) {
+    if(this.disposed)return;
+    this.updateIntervalMs=normalizeUpdateInterval(value);
+    this.flowActivity.setUpdateInterval(this.updateIntervalMs);
+    try{localStorage.setItem('ros-graph-update-ms',String(this.updateIntervalMs));}catch{}
+    const select=$('graph-update-interval');if(select)select.value=String(this.updateIntervalMs);
+    this.restartPolling();
+    if(this.visible && this.connected && !document.hidden)void this.refresh();
+  }
   updateWatchActivity() {
     this.liveWatch.setActive(!this.disposed && this.visible && this.connected && !document.hidden);
+  }
+  viewKey() {
+    return JSON.stringify([this.focus,this.scope,this.isolatedId,$('graph-search')?.value||'',$('show-infrastructure')?.checked||false]);
+  }
+  updateMeasurements() {
+    const data=this.data;
+    setText($('graph-meta'),(Object.values(data.coverage||{}).includes('partial')?'Partial discovery':'Discovery snapshot')+
+      ' · '+(data.age_ms===undefined?'':Math.round(data.age_ms)+' ms old · ')+'read only');
+    for(const element of this.viewport.querySelectorAll('[data-live-rate]')) {
+      const entity=data.entities.get(element.getAttribute('data-live-rate'));if(entity)setText(element,rate(liveMetric(entity)));
+    }
+    const baselines=new Map(Array.from(this.viewport.querySelectorAll('[data-live-baseline]'),e=>[e.getAttribute('data-live-baseline'),e]));
+    for(const plot of this.viewport.querySelectorAll('[data-live-history]')) {
+      const id=plot.getAttribute('data-live-history'),entity=data.entities.get(id);if(!entity)continue;
+      const points=historyPoints(entity,Number(plot.getAttribute('data-plot-width')),Number(plot.getAttribute('data-plot-height')));
+      if(plot.getAttribute('points')!==points)plot.setAttribute('points',points);
+      plot.setAttribute('visibility',points?'visible':'hidden');baselines.get(id)?.setAttribute('visibility',points?'hidden':'visible');
+    }
+    for(const element of $('interface-list').querySelectorAll('[data-interface-rate]')) {
+      const entity=data.entities.get(element.getAttribute('data-interface-rate'));
+      if(entity && ['topic','action'].includes(entity.kind))setText(element,rate(liveMetric(entity)));
+    }
+    this.updateActivityInspector();this.syncFlowDots();this.renderLiveStatus();this.animateFlow();
+  }
+  updateActivityInspector() {
+    const n=this.selected();if(!n || n.id!==this.inspectorEntityId || !['topic','action'].includes(n.kind))return;
+    const host=$('graph-inspector'),t=liveMetric(n),interval=this.flowActivity.interval(n.id);
+    const counts=t.status?.status_summary?.counts;
+    const values={
+      'Live state':activityLabel(n),'Monitor':t.state||'Unknown','Messages':t.messages==null?'—':String(t.messages),
+      'Last update':interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval',
+      'Serialized bytes':t.bytes==null?'Not measured':Number(t.bytes).toLocaleString(),
+      'Last received':finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed',
+      'Source':t.source?(t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer'):'Not observed',
+      'Status messages':t.status_messages==null?'—':String(t.status_messages),
+      'Feedback messages':t.feedback_messages==null?'—':String(t.feedback_messages),
+      'Last reported goals':counts?(Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None'):'Not observed',
+    };
+    setText(host.querySelector('.activity-value'),rate(t));
+    for(const row of host.querySelectorAll('[data-graph-field]')) {
+      const key=row.getAttribute('data-graph-field');if(Object.hasOwn(values,key))setText(row.querySelector('dd'),values[key]);
+    }
+    const reason=host.querySelector('[data-activity-reason]');if(reason){setText(reason,t.reason||'');reason.hidden=!t.reason;}
+  }
+  syncFlowDots() {
+    if(!this.flowLayer)return;
+    if(!this.liveWatch.enabled || this.reduceMotion.matches || !this.visible || !this.connected || document.hidden){this.stopFlow();return;}
+    const old=new Map(this.flowDots.map(dot=>[dot.id,dot])),current=[];
+    for(const edge of flowEdges(this.data,this.renderedEdges||[],this.flowActivity,performance.now(),{focus:this.focus,focusedOnly:true})) {
+      const route=this.flowPaths.get(edge.id);if(!route)continue;
+      let dot=old.get(edge.id);old.delete(edge.id);
+      if(!dot) {
+        const element=svg('g',{opacity:0,'data-flow-edge':edge.id,'data-flow-kind':edge.kind});
+        const circle=svg('circle',{'stroke-width':1.4,'vector-effect':'non-scaling-stroke'});
+        const count=svg('text',{'text-anchor':'middle','font-weight':600,stroke:'#fff','paint-order':'stroke',class:'graph-flow-count'});
+        const title=svg('title');element.append(circle,count,title);this.flowLayer.append(element);
+        dot={element,circle,count,title};
+      }
+      Object.assign(dot,edge,{points:route.points});
+      dot.circle.setAttribute('fill',edge.hollow?'#fff':route.color);dot.circle.setAttribute('stroke',route.color);
+      dot.count.setAttribute('fill',route.color);
+      const interval=this.flowActivity.interval(edge.sourceKey);
+      setText(dot.count,interval===null?'':String(interval.messages));
+      setText(dot.title,interval===null?'Observed activity':`${interval.messages} observed messages in the previous ${(interval.durationMs/1000).toFixed(2)} s observer update interval${edge.hollow?'; endpoint receipt is unverified':''}.`);
+      this.sizeFlowDot(dot);current.push(dot);
+    }
+    for(const dot of old.values())dot.element.remove();
+    this.flowDots=current;
+  }
+  sizeFlowDot(dot) {
+    const k=this.transform.k,scale=Math.max(.25,k);
+    dot.circle.setAttribute('r',Math.min(9,3.1/k));dot.count.setAttribute('font-size',String(11/scale));
+    dot.count.setAttribute('y',String(-8/scale));dot.count.setAttribute('stroke-width',String(3/scale));
   }
   stopFlow() {
     if (this.flowFrame!==null) cancelAnimationFrame(this.flowFrame);
@@ -435,7 +567,7 @@ export class GraphExplorer {
   }
   dispose() {
     this.disposed=true; this.visible=false; this.connected=false;
-    clearInterval(this.timer); this.stopFlow(); this.flowActivity.clear(); void this.liveWatch.dispose();
+    clearInterval(this.timer); clearInterval(this.watchTimer); this.stopFlow(); this.flowActivity.clear(); void this.liveWatch.dispose();
     document.removeEventListener('visibilitychange',this.visibilityChanged);
     this.reduceMotion.removeEventListener('change',this.motionChanged);
     this.resizeObserver.disconnect();
@@ -460,8 +592,12 @@ export class GraphExplorer {
         this.focus = topics[0]?.id || data.nodes[0]?.id;
         this.initialized = true;
       }
-      this.render();
-      this.inspector();
+      const signature=graphStructureSignature(data);
+      if(signature===this.renderedSignature && this.viewKey()===this.renderedViewKey) {
+        this.updateMeasurements();
+      } else {
+        this.render();this.inspector();
+      }
       void this.syncLiveWatch();
     } catch (e) {
       this.flowActivity.clear(); this.stopFlow();
@@ -473,6 +609,8 @@ export class GraphExplorer {
   }
   bind() {
     $("refresh-graph").onclick = () => this.refresh();
+    const interval=$('graph-update-interval');
+    if(interval){interval.value=String(this.updateIntervalMs);interval.onchange=()=>this.setUpdateInterval(interval.value);}
     $("graph-live-flow").onchange = () => {
       this.liveWatch.setEnabled($("graph-live-flow").checked);
       this.flowActivity.clear();this.stopFlow();
@@ -777,22 +915,10 @@ export class GraphExplorer {
         }),
       );
     }
-    const flowLayer=svg('g',{'aria-hidden':'true',class:'graph-flow-layer','pointer-events':'none'});
-    this.viewport.append(flowLayer);
-    if (this.liveWatch.enabled && !this.reduceMotion.matches) for (const edge of flowEdges(d,edges,this.flowActivity,performance.now(),{focus:this.focus,focusedOnly:true})) {
-      const route=flowPaths.get(edge.id); if (!route) continue;
-      const dot=svg('g',{opacity:0,'data-flow-edge':edge.id,'data-flow-kind':edge.kind});
-      const circle=svg('circle',{r:3.1,fill:edge.hollow?'#fff':route.color,stroke:route.color,
-        'stroke-width':1.4,'vector-effect':'non-scaling-stroke'});
-      const interval=this.flowActivity.interval(edge.sourceKey);
-      const count=svg('text',{'text-anchor':'middle',fill:route.color,'font-size':11,
-        'font-weight':600,stroke:'#fff','stroke-width':3,'paint-order':'stroke',class:'graph-flow-count'});
-      count.textContent=interval===null?'':String(interval.messages);
-      const title=svg('title');
-      title.textContent=interval===null?'Observed activity':`${interval.messages} observed messages in the previous ${(interval.durationMs/1000).toFixed(2)} s update interval${edge.hollow?'; endpoint receipt is unverified':''}.`;
-      dot.append(circle,count,title);flowLayer.append(dot);
-      this.flowDots.push({...edge,element:dot,circle,count,points:route.points});
-    }
+    this.flowLayer=svg('g',{'aria-hidden':'true',class:'graph-flow-layer','pointer-events':'none'});
+    this.viewport.append(this.flowLayer);
+    this.flowPaths=flowPaths;this.renderedEdges=edges;
+    this.syncFlowDots();
     for (const n of entities) {
       const p = positions.get(n.id),
         selected = n.id === this.focus,
@@ -889,37 +1015,14 @@ export class GraphExplorer {
         );
         if (n.kind === "topic" || n.kind === "action") {
           const activity=liveMetric(n);
-          label(g, 10, p.h - 10, rate(activity), 11, muted);
-          const history = activity.history || (activity.feedback?.history?.length?activity.feedback.history:activity.status?.history) || [];
-          if (history.length) {
-            const values = history.map((b) => b.messages || 0),
-              max = Math.max(1, ...values);
-            const points = values
-              .map(
-                (v, i) =>
-                  `${p.w - 80 + (i / Math.max(1, values.length - 1)) * 68},${p.h - 10 - (v / max) * 15}`,
-              )
-              .join(" ");
-            g.append(
-              svg("polyline", {
-                points,
-                fill: "none",
-                stroke: ink,
-                "stroke-width": 1.3,
-              }),
-            );
-          } else
-            g.append(
-              svg("line", {
-                x1: p.w - 77,
-                x2: p.w - 12,
-                y1: p.h - 16,
-                y2: p.h - 16,
-                stroke: muted,
-                "stroke-width": 1,
-                "stroke-dasharray": "2 3",
-              }),
-            );
+          label(g, 10, p.h - 10, rate(activity), 11, muted).setAttribute('data-live-rate',n.id);
+          const plot=svg('polyline',{'data-live-history':n.id,'data-plot-width':p.w,'data-plot-height':p.h,
+            points:historyPoints(n,p.w,p.h),fill:'none',stroke:ink,'stroke-width':1.3});
+          const baseline=svg('line',{'data-live-baseline':n.id,x1:p.w-77,x2:p.w-12,y1:p.h-16,y2:p.h-16,
+            stroke:muted,'stroke-width':1,'stroke-dasharray':'2 3'});
+          plot.setAttribute('visibility',plot.getAttribute('points')?'visible':'hidden');
+          baseline.setAttribute('visibility',plot.getAttribute('points')?'hidden':'visible');
+          g.append(plot,baseline);
         } else
           label(
             g,
@@ -959,6 +1062,7 @@ export class GraphExplorer {
     this.applyTransform();
     if (!this.didFit && this.visible) this.fit();
     this.list();
+    this.renderedSignature=graphStructureSignature(this.data);this.renderedViewKey=this.viewKey();
     this.renderLiveStatus();
     this.animateFlow();
   }
@@ -988,13 +1092,7 @@ export class GraphExplorer {
   applyTransform() {
     const { x, y, k } = this.transform;
     this.viewport.setAttribute("transform", `translate(${x},${y}) scale(${k})`);
-    for (const dot of this.flowDots) {
-      const scale=Math.max(.25,k);
-      dot.circle.setAttribute('r',Math.min(9,3.1/k));
-      dot.count.setAttribute('font-size',String(11/scale));
-      dot.count.setAttribute('y',String(-8/scale));
-      dot.count.setAttribute('stroke-width',String(3/scale));
-    }
+    for (const dot of this.flowDots) this.sizeFlowDot(dot);
   }
   list() {
     if (!this.data) return;
@@ -1028,6 +1126,7 @@ export class GraphExplorer {
             : `${n.clients?.length || 0} clients`,
         ),
       );
+      row.lastElementChild.setAttribute('data-interface-rate',n.id);
       row.title = (n.types || []).join(", ");
       row.onclick = () => this.activate(n.id);
       row.ondblclick = () => this.isolate(n.id);
@@ -1040,6 +1139,7 @@ export class GraphExplorer {
     const host = $("graph-inspector"),
       n = this.selected();
     if (!n) {
+      this.inspectorEntityId=null;
       host.replaceChildren(
         html(
           "div",
@@ -1054,6 +1154,7 @@ export class GraphExplorer {
       document.activeElement.classList.contains("graph-annotation");
     if (active) return;
     host.replaceChildren();
+    this.inspectorEntityId=n.id;
     const heading = html("div", "inspector-heading");
     heading.append(
       html(
@@ -1075,7 +1176,7 @@ export class GraphExplorer {
     };
     const row = (parent, k, v) => {
       const dl = parent.querySelector("dl") || parent.appendChild(html("dl"));
-      const r = html("div");
+      const r = html("div");r.setAttribute("data-graph-field",k);
       r.append(html("dt", "", k), html("dd", "", v));
       dl.append(r);
     };
@@ -1159,13 +1260,13 @@ export class GraphExplorer {
       row(traffic,'Last update',interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval');
       if(n.kind==='topic') row(traffic,'Serialized bytes',t.bytes==null?'Not measured':Number(t.bytes).toLocaleString());
       row(traffic,'Last received',finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed');
-      if(t.source) row(traffic,'Source',t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer');
-      if(t.reason)traffic.append(html('p','inspector-note',t.reason));
+      if(n.kind==='topic')row(traffic,'Source',t.source?(t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer'):'Not observed');
+      const reason=html('p','inspector-note',t.reason||'');reason.setAttribute('data-activity-reason','');reason.hidden=!t.reason;traffic.append(reason);
       if(n.kind==='action') {
         row(traffic,'Status messages',t.status_messages==null?'—':String(t.status_messages));
         row(traffic,'Feedback messages',t.feedback_messages==null?'—':String(t.feedback_messages));
         const counts=t.status?.status_summary?.counts;
-        if(counts)row(traffic,'Last reported goals',Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None');
+        row(traffic,'Last reported goals',counts?(Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None'):'Not observed');
         traffic.append(html('p','inspector-note','Action dots follow observed server status/feedback toward clients. Goal requests and per-client receipt are not inferred.'));
       } else traffic.append(html('p','inspector-note','Sphere labels show observed messages since the previous update; a sphere is not one packet. Filled dots use publisher identity where available. Hollow routes do not confirm receipt at that subscriber.'));
       if(!this.data.watch?.enabled && n.kind==='topic') {

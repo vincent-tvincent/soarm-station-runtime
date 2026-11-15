@@ -96,6 +96,15 @@ reported separately. States are `watching`, `inactive`, `blocked`, `unavailable`
 proof of a dead publisher. Passive existing subscriptions can supply data,
 including compressed images, without duplicate subscriptions or serialization.
 
+Counter snapshots also include `activity_clock_id` (stable observer-instance
+UUID), `activity_clock_type: "observer_monotonic"` and
+`activity_captured_at_ns` (decimal string). The capture is recorded immediately
+after the live counters are copied. To measure an update interval, subtract two
+captures only when observer ID and counter epoch match. Do not compare this
+clock with a client's monotonic clock or treat it as packet time/network
+latency. Existing `captured_at_ns` and `sequence` still describe topology
+discovery; they do not determine the counter refresh interval.
+
 `actions[].activity` references its standard hidden status/feedback topics and
 their observations. GoalStatusArray may provide bounded counts by status, never
 goal payloads or IDs. Feedback content is not decoded/exported. Goal requests,

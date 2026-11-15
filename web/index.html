@@ -341,6 +341,11 @@
               type="checkbox"
             />Infrastructure</label
           ><label class="check-label"><input id="graph-live-flow" type="checkbox" checked />Live flow</label
+          ><label class="check-label graph-update-control">Update
+            <select id="graph-update-interval" aria-label="Graph update interval" title="Target display refresh interval; ROS publication and motor-control rates are unchanged.">
+              <option value="500">0.5 s</option><option value="1000">1 s</option>
+              <option value="2000" selected>2 s</option><option value="5000">5 s</option><option value="10000">10 s</option>
+            </select></label
           ><button id="refresh-graph">Refresh</button>
         </div>
         <div class="graph-summary">

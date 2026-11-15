@@ -815,6 +815,10 @@ small {
   min-width: 190px;
   font-size: 12px;
 }
+.graph-toolbar .graph-update-control select {
+  min-width: 0;
+  width: 70px;
+}
 .graph-toolbar button {
   font-size: 12px;
 }

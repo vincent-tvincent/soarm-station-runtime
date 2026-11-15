@@ -2,6 +2,12 @@
 
 Accepts any rclpy-compatible node. No robot configuration, command clients,
 payload decoding or application topic-name assumptions are used here.
+
+Snapshot timing is additive: captured_at_ns remains the topology's wall-clock
+capture. activity_captured_at_ns is a decimal-string monotonic timestamp taken
+when live counter snapshotting completes, scoped by activity_clock_id. Compare
+its differences only within that observer and the same counter/sample epoch;
+it is neither a packet timestamp nor a browser/network-latency measurement.
 """
 import copy
 import math
@@ -173,6 +179,7 @@ class GraphObserver:
     def __init__(self,node,config=None,action_api=None,sampler=None,clock=time.monotonic,wall=time.time_ns,
                  activity_provider=None,watcher=None):
         self.node=node;self.config=config or {};self.clock=clock;self.wall=wall;self.lock=threading.RLock()
+        self.activity_clock_id=uuid.uuid4().hex
         self.sampler=sampler or TrafficSampler(node,self.config.get('sampling',{}),clock=clock,wall=wall)
         self.watcher=watcher or GraphWatch(node,self.config.get('watch',{}),activity_provider=activity_provider,clock=clock,wall=wall)
         if action_api is None:
@@ -277,6 +284,11 @@ class GraphObserver:
         if result['age_ms'] is not None and result['age_ms']>max(5000.,self.refresh_s*3000):result['state']='stale'
         result['sampling']=self.sampler.status()
         result['watch'],activity=self.watcher.snapshot()
+        # Capture adjacent to counter collection, before response assembly and
+        # transport/render delay. A string preserves the integer across JSON/JS.
+        result.update(activity_clock_id=self.activity_clock_id,
+            activity_clock_type='observer_monotonic',
+            activity_captured_at_ns=str(int(self.clock()*1_000_000_000)))
         with self.lock:loop_errors=list(self.loop_errors.values())
         if loop_errors:
             result['errors'].extend(loop_errors)

@@ -140,9 +140,24 @@ Moving dots have a stable repeating phase while fresh counters advance.
 Publication and subscription directions animate concurrently; no one-shot
 traversal is restarted on each HTTP poll. Frozen counters expire even if HTTP
 requests keep succeeding. Animation remains local at up to 30 FPS / 128 dots,
-with the existing two-second graph polling and cached curve coordinates.
+with configurable graph polling and cached curve coordinates.
 Hidden tabs and reduced-motion preferences stop animation. No per-message
 browser event stream is used.
+
+The **Update** selector offers 0.5, 1, 2, 5 and 10 seconds (default 2), saved
+locally in the browser. This is a target display cadence; network and scheduling
+delays can vary the actual interval. Requests do not overlap. A separate
+two-second heartbeat maintains the approximately four-second lease renewal even
+with ten-second display updates. Slower display rates extend only the permitted
+freshness horizon; changing the setting cannot manufacture new activity.
+
+Interval durations use differences between counter snapshots from the same
+observer's monotonic clock, independently of browser arrival/render timing.
+Clock or counter-epoch changes re-prime the interval instead of inventing a
+duration. Only legacy snapshots without observer-clock fields use client timing.
+Counter-only refreshes update plots, text and markers in place, preserving graph
+buttons, selection and layout; topology/filter changes still rebuild the view.
+This setting does not change ROS publication rates or the robot control loop.
 
 Publisher GIDs from actual ROS MessageInfo attribute incoming topic traffic
 when available, including multiple publishers. Unattributed single-source
