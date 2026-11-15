@@ -340,10 +340,12 @@
               id="show-infrastructure"
               type="checkbox"
             />Infrastructure</label
+          ><label class="check-label"><input id="graph-live-flow" type="checkbox" checked />Live flow</label
           ><button id="refresh-graph">Refresh</button>
         </div>
         <div class="graph-summary">
           <span id="graph-counts">Waiting for ROS discovery</span
+          ><span id="graph-flow-status" role="status">Connecting live monitor…</span
           ><span id="graph-meta">Read only</span>
         </div>
         <div class="graph-workspace">
@@ -370,7 +372,7 @@
               ><span><i class="line-key warm"></i>Publish</span
               ><span><i class="line-key cool"></i>Subscribe</span
               ><span><i class="line-key dashed"></i>Action / service</span
-              ><span title="A dot summarizes a newly observed topic batch, not one dot per message."><i class="flow-key"></i>Sampled activity</span
+              ><span title="Dots keep moving while fresh message counters advance; their speed is illustrative."><i class="flow-key"></i>Live activity</span
               ><span title="Subscriber routes are discovered; receipt at each subscriber is not measured."><i class="flow-key hollow"></i>Receipt unverified</span>
             </div>
             <div

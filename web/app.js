@@ -79,7 +79,9 @@ function connection(info) {
     "connection",
     connected ? "Connected" : info.reason || info.state || "Disconnected",
   );
-  graph?.setConnected(connected);
+  // A transient motor/status poll error must not retire read-only graph watches.
+  // The graph endpoint checks its own freshness; explicit disconnect still pauses it.
+  graph?.setConnected(connected || info.state === "degraded");
   policies?.setConnected(connected);
   $("disconnect").hidden = false;
   $("disconnect").disabled = info.state === "connecting";

@@ -110,6 +110,7 @@ Paths below are relative to the gateway. `{arm_id}`, `{camera_id}`, `{host_id}` 
 | GET | `/api/cameras/{camera_id}.jpg` | Latest JPEG; source timestamp in `X-Source-Time-Ns`. |
 | WSS | `/ws/camera/{camera_id}` | New camera frames as binary JPEG messages; no camera-device ownership transfer. |
 | GET | `/api/v1/ros/graph` | Discovered ROS nodes, topics, services, actions, QoS and sampling metadata. Alias: `/api/graph`. |
+| POST | `/api/v1/ros/watch` | Acquire/renew/release a scoped continuous graph-watch lease; body contains `operation` and `client_id` or `lease_id`. |
 | POST | `/api/v1/ros/sample` | Observe topic traffic: `{topic, duration_s}` or `{topic, stop:true}`. Alias: `/api/graph/sample`; no message-payload export or robot command. |
 
 ### Operations and kinematics

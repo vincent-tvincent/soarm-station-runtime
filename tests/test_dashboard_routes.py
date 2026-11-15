@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import types
 import pytest
 
@@ -23,11 +24,16 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
     async def unused(request):raise AssertionError('Actuation route was not requested')
     owner=types.SimpleNamespace(config=config,public_resources=resources(config),motor_records={},motor_record_errors={},states={},inference={},joints={},images={},upload={},events=[],workflows={},decisions=[])
     for name in ('permission','hold','stream_input','operate','operation_status','start_workflow','history','image','control','camera_stream'):setattr(owner,name,unused)
-    for name in ('index','asset','api_resources','graph_status','graph_sample','resource_view','state','status','camera_stream'):
+    for name in ('index','asset','api_resources','graph_status','graph_sample','graph_watch','resource_view','state','status','camera_stream'):
         setattr(owner,name,types.MethodType(getattr(DashboardNode,name),owner))
     owner.images={'forward':(b'\xff\xd8camera',1)};owner.stopping=False
+    watch_calls=[];request_thread=threading.get_ident()
+    def watch(body):
+        watch_calls.append((dict(body),threading.get_ident()))
+        if body.get('operation') not in ('acquire','renew','release'):raise ValueError('Unknown watch operation')
+        return {'schema_version':1,'accepted':True,'lease_id':'test-lease','expires_in_ms':12000}
     owner.graph_observer=types.SimpleNamespace(snapshot=lambda:{'schema_version':1,'nodes':[],'topics':[],'services':[],'actions':[],'edges':[]},
-        sample=lambda body:{'schema_version':1,'accepted':True,'topic':body['topic'],'state':'sampling','sample_id':'test'})
+        sample=lambda body:{'schema_version':1,'accepted':True,'topic':body['topic'],'state':'sampling','sample_id':'test'},watch=watch)
     async def exercise():
         async with TestClient(TestServer(DashboardNode.create_app(owner,token))) as client:
             for path in ('/api/status','/api/resources','/api/graph','/api/v1/ros/graph'):
@@ -50,6 +56,25 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
             for path in ('/api/graph/sample','/api/v1/ros/sample'):
                 async with client.post(path,json={'topic':'/arbitrary','duration_s':5},headers=headers) as response:assert (await response.json())['accepted']
                 async with client.post(path,json={'topic':'/arbitrary'}) as response:assert response.status==401
+            watch_path='/api/v1/ros/watch'
+            async with client.post(watch_path,json={'operation':'acquire'}) as response:assert response.status==401
+            assert watch_calls==[]
+            requests=[{'operation':'acquire','client_id':'81255bed-f260-4430-b00c-5913871ff6e2'},
+                {'operation':'renew','lease_id':'test-lease'},{'operation':'release','lease_id':'test-lease'}]
+            for body in requests:
+                async with client.post(watch_path,json=body,headers=headers) as response:
+                    result=await response.json()
+                    assert response.status==200 and result['accepted'] and result['expires_in_ms']==12000
+                    assert response.headers['Cache-Control']=='no-store'
+            assert [body for body,thread in watch_calls]==requests
+            assert all(thread!=request_thread for body,thread in watch_calls)
+            for body in ([],None,'text'):
+                async with client.post(watch_path,json=body,headers=headers) as response:
+                    result=await response.json()
+                    assert response.status==400 and not result['accepted'] and result['schema_version']==1
+            assert len(watch_calls)==3
+            async with client.post(watch_path,json={'operation':'invalid'},headers=headers) as response:
+                assert response.status==400 and (await response.json())['reason']=='Unknown watch operation'
     asyncio.run(exercise())
 
 
@@ -90,7 +115,7 @@ def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
         states={'arm1':{'controller_session':'controller','operation_id':'','permission':False}},
         state=expanded_state,policy_manager=manager)
     for name in ('index','status','history','permission','hold','stream_input','operate','operation_status',
-                 'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample'):
+                 'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample','graph_watch'):
         setattr(owner,name,unused)
     app=DashboardNode.create_app(owner)
     original_close=owner.leader_registry.close

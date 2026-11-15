@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections import Counter,OrderedDict
+from .graph_watch import GraphWatch, action_activity, empty_activity
 
 
 def node_name(name,namespace):
@@ -169,9 +170,11 @@ class TrafficSampler:
 
 
 class GraphObserver:
-    def __init__(self,node,config=None,action_api=None,sampler=None,clock=time.monotonic,wall=time.time_ns):
+    def __init__(self,node,config=None,action_api=None,sampler=None,clock=time.monotonic,wall=time.time_ns,
+                 activity_provider=None,watcher=None):
         self.node=node;self.config=config or {};self.clock=clock;self.wall=wall;self.lock=threading.RLock()
         self.sampler=sampler or TrafficSampler(node,self.config.get('sampling',{}),clock=clock,wall=wall)
+        self.watcher=watcher or GraphWatch(node,self.config.get('watch',{}),activity_provider=activity_provider,clock=clock,wall=wall)
         if action_api is None:
             try:from rclpy.action import graph as action_api
             except ImportError:action_api=False
@@ -194,6 +197,10 @@ class GraphObserver:
                 self.sampler.expire()
                 with self.lock:self.loop_errors.pop('cleanup',None)
             except Exception as exc:self._loop_error('cleanup',exc)
+            try:
+                self.watcher.reconcile()
+                with self.lock:self.loop_errors.pop('watch',None)
+            except Exception as exc:self._loop_error('watch',exc)
             self.stop.wait(.1)
 
     def _loop_error(self,method,error):
@@ -259,6 +266,7 @@ class GraphObserver:
                 'nodes':sorted(nodes.values(),key=lambda n:n['id']),'topics':sorted(topics,key=lambda t:t['name']),
                 'services':sorted(services.values(),key=lambda s:s['name']),'actions':sorted(actions.values(),key=lambda a:a['name']),
                 'edges':edges,'coverage':coverage,'errors':errors}
+        self.watcher.discover(topics)
 
     def snapshot(self):
         with self.lock:
@@ -268,12 +276,19 @@ class GraphObserver:
         result['age_ms']=max(0.,(self.wall()-result['captured_at_ns'])/1e6) if result['captured_at_ns'] else None
         if result['age_ms'] is not None and result['age_ms']>max(5000.,self.refresh_s*3000):result['state']='stale'
         result['sampling']=self.sampler.status()
+        result['watch'],activity=self.watcher.snapshot()
         with self.lock:loop_errors=list(self.loop_errors.values())
         if loop_errors:
             result['errors'].extend(loop_errors)
             if result['state']!='stale':result['state']='partial'
-        for topic in result['topics']:topic['traffic']=self.sampler.snapshot(topic['name'])
+        for topic in result['topics']:
+            topic['traffic']=self.sampler.snapshot(topic['name'])
+            topic['activity']=activity.get(topic['name'],empty_activity('unavailable','Waiting for discovery reconciliation'))
+        for action in result['actions']:action['activity']=action_activity(action['name'],activity)
         return result
+
+    def watch(self,request):
+        return self.watcher.request(request)
 
     def sample(self,request):
         topic=request.get('topic')
@@ -288,3 +303,4 @@ class GraphObserver:
         self.stop.set()
         if self.thread:self.thread.join(timeout=5)
         self.sampler.close()
+        self.watcher.close()

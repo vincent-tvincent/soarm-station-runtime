@@ -20,6 +20,7 @@ from .conversion import goal_from_dict,stream_from_dict
 from .common import BaseNode,STATE,SENSOR,run,topic
 from soarm_station.dashboard_data import resources,render_motors,validate_motor_record
 from soarm_station.graph_observer import GraphObserver
+from soarm_station.subscription_activity import SubscriptionActivity,observe_subscription
 from soarm_station.web_access import dashboard_access_middleware
 from soarm_station.web_streams import stream_camera_frames
 from soarm_station.manual_http import ManualRoutes
@@ -42,7 +43,8 @@ class DashboardNode(BaseNode):
         super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
         self.motor_records={};self.motor_record_errors={};self.public_resources=resources(self.config)
         self.policy_manager=PolicyManager(self.config,resources=lambda:self.public_resources,bridge=Client(self.config['socket']))
-        self.graph_observer=GraphObserver(self,self.config.get('graph_observer',{}));self.graph_observer.start()
+        self.subscription_activity=SubscriptionActivity()
+        self.graph_observer=GraphObserver(self,self.config.get('graph_observer',{}),activity_provider=self.subscription_activity.snapshot)
         group=ReentrantCallbackGroup()
         self.permission_client=self.create_client(SetControlPermission,'/soarm_station/lerobot/set_permission',callback_group=group)
         self.hold_client=self.create_client(Hold,'/soarm_station/lerobot/hold',callback_group=group)
@@ -50,17 +52,20 @@ class DashboardNode(BaseNode):
         self.operation=ActionClient(self,ExecuteOperation,'/soarm_station/lerobot/operate',callback_group=group)
         self.workflow=ActionClient(self,ExecuteWorkflow,'/soarm_station/workflows/execute',callback_group=group)
         self.command=self.create_publisher(OperationInput,'/soarm_station/lerobot/command_stream',SENSOR)
+        def subscribe(message_type,name,callback,qos):
+            return observe_subscription(self.subscription_activity,self.create_subscription,message_type,name,callback,qos)
         for a in self.config['arms']:
-            n=a['id'];self.create_subscription(JointState,topic(n,'joint_states'),lambda m,n=n:self.joints.__setitem__(n,asdict(m)),SENSOR)
-            self.create_subscription(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.states.__setitem__(n,asdict(m)),STATE)
-            self.create_subscription(DiagnosticArray,topic(n,'lerobot/inference_status'),lambda m,n=n:self.inference.__setitem__(n,asdict(m)),STATE)
+            n=a['id'];subscribe(JointState,topic(n,'joint_states'),lambda m,n=n:self.joints.__setitem__(n,asdict(m)),SENSOR)
+            subscribe(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.states.__setitem__(n,asdict(m)),STATE)
+            subscribe(DiagnosticArray,topic(n,'lerobot/inference_status'),lambda m,n=n:self.inference.__setitem__(n,asdict(m)),STATE)
         for c in self.config['cameras']:
-            self.create_subscription(CompressedImage,'/soarm_station/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.images.__setitem__(n,(bytes(m.data),m.header.stamp.sec*10**9+m.header.stamp.nanosec)),SENSOR)
-        self.create_subscription(Event,'/soarm_station/events',self.event,STATE)
-        self.create_subscription(UploadStatus,'/soarm_station/telemetry/upload_status',lambda m:setattr(self,'upload',asdict(m)),STATE)
-        self.create_subscription(WorkflowDecision,'/soarm_station/workflow/decision',lambda m:self.decisions.append(asdict(m)) or self.decisions.__delitem__(slice(None,-50)),STATE)
-        self.create_subscription(WorkflowStatus,'/soarm_station/workflow/status',lambda m:self.workflows.__setitem__(m.arm_id,asdict(m)),STATE)
-        self.create_subscription(DiagnosticArray,'/soarm_station/health',self.motor_health,STATE)
+            subscribe(CompressedImage,'/soarm_station/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.images.__setitem__(n,(bytes(m.data),m.header.stamp.sec*10**9+m.header.stamp.nanosec)),SENSOR)
+        subscribe(Event,'/soarm_station/events',self.event,STATE)
+        subscribe(UploadStatus,'/soarm_station/telemetry/upload_status',lambda m:setattr(self,'upload',asdict(m)),STATE)
+        subscribe(WorkflowDecision,'/soarm_station/workflow/decision',lambda m:self.decisions.append(asdict(m)) or self.decisions.__delitem__(slice(None,-50)),STATE)
+        subscribe(WorkflowStatus,'/soarm_station/workflow/status',lambda m:self.workflows.__setitem__(m.arm_id,asdict(m)),STATE)
+        subscribe(DiagnosticArray,'/soarm_station/health',self.motor_health,STATE)
+        self.graph_observer.start()
         self.loop=asyncio.new_event_loop();self.thread=threading.Thread(target=self.serve,daemon=True);self.thread.start()
     def event(self,m):self.events.append(asdict(m));self.events=self.events[-100:]
     def serve(self):
@@ -89,6 +94,7 @@ class DashboardNode(BaseNode):
         app.router.add_get('/api/resources',self.api_resources)
         app.router.add_get('/api/graph',self.graph_status);app.router.add_get('/api/v1/ros/graph',self.graph_status)
         app.router.add_post('/api/graph/sample',self.graph_sample);app.router.add_post('/api/v1/ros/sample',self.graph_sample)
+        app.router.add_post('/api/v1/ros/watch',self.graph_watch)
         ManualRoutes(self.config).mount(app)
         async def conditional_hold(arm,session,principal,operation_id=None):
             def call():
@@ -138,6 +144,14 @@ class DashboardNode(BaseNode):
         body=await request.json()
         if not isinstance(body,dict):raise ValueError('JSON object required')
         return web.json_response(self.graph_observer.sample(body))
+    async def graph_watch(self,request):
+        try:
+            body=await request.json()
+            if not isinstance(body,dict):raise ValueError('JSON object required')
+            result=await asyncio.to_thread(self.graph_observer.watch,body)
+        except (ValueError,KeyError) as exc:
+            return web.json_response({'schema_version':1,'accepted':False,'reason':str(exc)},status=400)
+        return web.json_response(result,headers={'Cache-Control':'no-store'})
     def state(self):return {'schema_version':1,'resources':self.resource_view(),
         'motor_status':render_motors(self.config,dict(self.motor_records),dict(self.joints),dict(self.states),time.time_ns(),dict(self.motor_record_errors)),'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
     async def status(self,r):return web.json_response(await asyncio.to_thread(self.state))

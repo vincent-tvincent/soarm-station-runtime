@@ -53,65 +53,150 @@ const palette = {
   publish: ["#d52b22", "#bb4c21", "#c76c26", "#a73a2d"],
   subscribe: ["#2359ba", "#327f9b", "#297987", "#5264a4"],
 };
-// A pulse summarizes a newly observed batch, never one animation per ROS message.
-export const FLOW_LIMITS = Object.freeze({maxEdges:64,maxFps:30,pulseMs:1400,staleMs:4500});
-const MESSAGE_FRESH_MS = 2500;
+// Motion is continuous while fresh counters advance; it never represents individual packets.
+export const FLOW_LIMITS = Object.freeze({maxEdges:128,maxFps:30,cycleMs:1400,evidenceMs:3500,staleMs:4500});
+const publisherKey = (id,gid) => `${id}::publisher:${gid}`;
+const unknownKey = id => `${id}::unknown`;
+const liveMetric = n => n?.activity || n?.traffic || {};
+const observed = t => ['watching','sampling'].includes(t?.state);
+const finiteAge = value => Number.isFinite(value) && value >= 0;
+export function activityLabel(entity) {
+  const t=liveMetric(entity);
+  if (entity.kind==='action' && ['watching','partial'].includes(t.state)) {
+    if (finiteAge(t.feedback?.last_message_age_ms) && t.feedback.last_message_age_ms<FLOW_LIMITS.evidenceMs) return 'Feedback active';
+    const counts=t.status?.status_summary?.counts;
+    if(counts) {
+      const active=(counts.accepted||0)+(counts.executing||0)+(counts.canceling||0);
+      return active ? `${active} goal${active===1?'':'s'} last reported active` : 'No active goals last reported';
+    }
+    return finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs ? 'Status activity' : 'No recent response';
+  }
+  if (observed(t)) return finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs && t.messages>0 ? 'Active' : 'No recent data';
+  return ({inactive:'Monitoring off',blocked:'Not measured',limited:'Capacity limit',throttled:'Throttled',unavailable:'Unknown',cleanup_pending:'Cleanup pending'}[t.state] || 'Unknown');
+}
 export class TopicFlowActivity {
   constructor() { this.samples = new Map(); }
   clear() { this.samples.clear(); }
-  beginSample(id, sampleId) {
-    if (typeof sampleId==='string' && sampleId) this.samples.set(id,{sampleId,messages:0,until:0});
-  }
   observe(graph, now) {
-    const fresh = ['ready','partial'].includes(graph.state) &&
-      Number.isFinite(graph.age_ms) && graph.age_ms >= 0 && graph.age_ms < FLOW_LIMITS.staleMs;
-    const seen = new Set(); let pulsed = false;
-    for (const topic of graph.topics || []) {
-      seen.add(topic.id);
-      const t = topic.traffic || {}, old = this.samples.get(topic.id);
-      const valid = t.state === 'sampling' && typeof t.sample_id === 'string' && t.sample_id &&
-        Number.isSafeInteger(t.messages) && t.messages >= 0;
-      if (!valid) { this.samples.delete(topic.id); continue; }
-      const current = {sampleId:t.sample_id,messages:t.messages,start:old?.start,until:old?.until || 0};
-      const same = old?.sampleId === t.sample_id;
-      const recent = Number.isFinite(t.last_message_age_ms) && t.last_message_age_ms >= 0 &&
-        t.last_message_age_ms < MESSAGE_FRESH_MS;
-      if (!same || !fresh || !recent || t.messages < old.messages || t.messages === 0) current.until = 0;
-      else if (t.messages > old.messages) {
-        current.start = now;
-        current.until = now + Math.min(FLOW_LIMITS.pulseMs,
-          FLOW_LIMITS.staleMs - graph.age_ms, MESSAGE_FRESH_MS - t.last_message_age_ms);
-        pulsed = true;
-      }
-      else current.until=Math.min(current.until,now+FLOW_LIMITS.staleMs-graph.age_ms,
-        now+MESSAGE_FRESH_MS-t.last_message_age_ms);
-      // Even a stale observation advances the watermark: it must not replay later.
-      this.samples.set(topic.id,current);
+    const fresh=['ready','partial'].includes(graph.state) && finiteAge(graph.age_ms) && graph.age_ms<FLOW_LIMITS.staleMs;
+    const sources=new Map();
+    for (const topic of graph.topics||[]) {
+      const t=liveMetric(topic); sources.set(topic.id,t);
+      if(typeof t.sample_id!=='string' || !t.sample_id) continue;
+      for(const pub of t.publisher_counts||[]) sources.set(publisherKey(topic.id,pub.publisher_gid),{...t,...pub,sample_id:`${t.sample_id}:${pub.publisher_gid}`});
+      if(Number.isSafeInteger(t.unknown_publisher_messages)) sources.set(unknownKey(topic.id),{...t,messages:t.unknown_publisher_messages,sample_id:`${t.sample_id}:unknown`});
     }
-    for (const id of this.samples.keys()) if (!seen.has(id)) this.samples.delete(id);
-    return pulsed;
+    for(const action of graph.actions||[]) {
+      const a=action.activity||{}, parts=[a.status,a.feedback].filter(t=>observed(t) && typeof t.sample_id==='string' && t.sample_id);
+      const counts=parts.map(t=>t.messages),ages=parts.map(t=>t.last_message_age_ms).filter(finiteAge);
+      sources.set(action.id,{...a,state:['watching','partial'].includes(a.state)&&parts.length?'watching':a.state,
+        messages:counts.length&&counts.every(n=>Number.isSafeInteger(n)&&n>=0)?counts.reduce((a,b)=>a+b,0):null,
+        last_message_age_ms:ages.length?Math.min(...ages):null,
+        sample_id:parts.length?JSON.stringify(parts.map(x=>x.sample_id)):null});
+    }
+    let advanced=false;
+    for(const [id,t] of sources) {
+      const old=this.samples.get(id);
+      if(!observed(t) || typeof t.sample_id!=='string' || !t.sample_id ||
+          !Number.isSafeInteger(t.messages) || t.messages<0) {this.samples.delete(id);continue;}
+      const same=old?.sampleId===t.sample_id;
+      const recent=finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs;
+      const current={sampleId:t.sample_id,messages:t.messages,start:old?.start,until:old?.until||0};
+      if(!same || !fresh || !recent || t.messages<old.messages || t.messages===0) current.until=0;
+      else if(t.messages>old.messages) {
+        if(!this.active(id,now)) current.start=now;
+        current.until=now+Math.min(FLOW_LIMITS.evidenceMs-t.last_message_age_ms,FLOW_LIMITS.staleMs-graph.age_ms);
+        advanced=true;
+      } else current.until=Math.min(current.until,now+FLOW_LIMITS.evidenceMs-t.last_message_age_ms,now+FLOW_LIMITS.staleMs-graph.age_ms);
+      this.samples.set(id,current);
+    }
+    for(const id of this.samples.keys()) if(!sources.has(id)) this.samples.delete(id);
+    return advanced;
   }
-  active(id, now) { const s=this.samples.get(id); return Boolean(s && now >= s.start && now < s.until); }
-  progress(id, now) { return this.active(id,now) ? (now-this.samples.get(id).start)/FLOW_LIMITS.pulseMs : null; }
+  active(id,now) {const s=this.samples.get(id);return Boolean(s && now>=s.start && now<s.until);}
+  progress(id,now) {return this.active(id,now)?((now-this.samples.get(id).start)%FLOW_LIMITS.cycleMs)/FLOW_LIMITS.cycleMs:null;}
 }
-export function cubicPoint(points, t) {
-  const u=1-t, weights=[u*u*u,3*u*u*t,3*u*t*t,t*t*t];
+export function cubicPoint(points,t) {
+  const u=1-t,weights=[u*u*u,3*u*u*t,3*u*t*t,t*t*t];
   return [0,1].map(axis=>points.reduce((sum,p,i)=>sum+p[axis]*weights[i],0));
 }
-export function flowEdges(graph, visibleEdges, activity, now, {focus=null}={}) {
+export function flowEdges(graph,visibleEdges,activity,now,{focus=null}={}) {
   const publishers=new Map();
-  for (const e of graph.edges) if (e.kind==='publish') {
-    if (!publishers.has(e.to)) publishers.set(e.to,new Set());
-    publishers.get(e.to).add(e.endpoint_id || e.id);
+  for(const e of graph.edges) if(e.kind==='publish') {
+    if(!publishers.has(e.to)) publishers.set(e.to,new Set());
+    publishers.get(e.to).add(e.endpoint_id||e.id);
   }
-  return visibleEdges.flatMap(e=>{
-    if (!['publish','subscribe'].includes(e.kind)) return [];
-    const topicId=e.kind==='publish'?e.to:e.from;
-    if (graph.entities.get(topicId)?.kind!=='topic' || !activity.active(topicId,now)) return [];
-    if (e.kind==='publish' && publishers.get(topicId)?.size!==1) return [];
-    return [{...e,topicId,hollow:e.kind==='subscribe'}];
-  }).sort((a,b)=>Number(b.from===focus||b.to===focus)-Number(a.from===focus||a.to===focus)||a.id.localeCompare(b.id))
-    .slice(0,FLOW_LIMITS.maxEdges);
+  function publication(topic,nodeId,endpointId=null) {
+    const metric=liveMetric(topic);
+    const endpoints=(topic.publishers||[]).filter(p=>endpointId?p.id===endpointId:p.node_id===nodeId);
+    for(const endpoint of endpoints) if(endpoint.gid && activity.active(publisherKey(topic.id,endpoint.gid),now))
+      return {sourceKey:publisherKey(topic.id,endpoint.gid),hollow:false,attribution:'publisher_gid'};
+    // A lone discovered source can be illustrated without claiming GID attribution.
+    const aggregateKey=(metric.publisher_counts||[]).length?unknownKey(topic.id):topic.id;
+    if(publishers.get(topic.id)?.size===1 && activity.active(aggregateKey,now))
+      return {sourceKey:aggregateKey,hollow:true,attribution:'single_discovered_publisher'};
+    return null;
+  }
+  const result=visibleEdges.flatMap(e=>{
+    if(e.kind==='publish'||e.kind==='subscribe') {
+      const topicId=e.kind==='publish'?e.to:e.from,topic=graph.entities.get(topicId);
+      if(topic?.kind!=='topic') return [];
+      const source=e.kind==='publish'?publication(topic,e.from,e.endpoint_id):
+        activity.active(topicId,now)?{sourceKey:topicId,hollow:true,attribution:'subscription_route'}:null;
+      return source?[{...e,topicId,reverse:false,...source}]:[];
+    }
+    if(e.kind==='action_server'||e.kind==='action_client') {
+      const id=e.kind==='action_server'?e.from:e.to,action=graph.entities.get(id),a=action?.activity;
+      if(!a||!activity.active(id,now)) return [];
+      if(e.kind==='action_client') return [{...e,topicId:id,sourceKey:id,reverse:true,hollow:true,attribution:'action_response_route'}];
+      const topics=[a.feedback_topic,a.status_topic].map(name=>(graph.topics||[]).find(t=>t.name===name)).filter(Boolean);
+      for(const topic of topics) {const source=publication(topic,e.to);if(source)return[{...e,topicId:id,reverse:true,...source}];}
+      if((action.servers||[]).length===1) return [{...e,topicId:id,sourceKey:id,reverse:true,hollow:true,attribution:'single_discovered_server'}];
+    }
+    return [];
+  });
+  return result.sort((a,b)=>Number(b.from===focus||b.to===focus)-Number(a.from===focus||a.to===focus)||a.id.localeCompare(b.id)).slice(0,FLOW_LIMITS.maxEdges);
+}
+export class GraphLiveWatch {
+  constructor({request,now=()=>performance.now(),clientId=crypto.randomUUID()}) {
+    this.request=request;this.now=now;this.clientId=clientId;
+    this.enabled=true;this.active=false;this.leaseId=null;this.expiresAt=0;this.renewAt=0;
+    this.error='';this.pending=null;this.capability=null;this.generation=0;this.retryAt=0;
+  }
+  setEnabled(value) {if(this.enabled!==value){this.enabled=value;this.generation++;}if(!value)void this.sync();}
+  setActive(value) {if(this.active!==value){this.active=value;this.generation++;}if(!value)void this.sync();}
+  async release(id) {
+    if(!id)return;
+    try{await this.request('/api/v1/ros/watch',{operation:'release',lease_id:id});}catch{}
+  }
+  sync(capability=this.capability) {
+    this.capability=capability;
+    if(this.pending)return this.pending;
+    this.pending=Promise.resolve().then(async()=>{
+      const ready=this.enabled&&this.active&&this.capability?.enabled;
+      if(!ready){const id=this.leaseId;this.leaseId=null;this.expiresAt=0;await this.release(id);return false;}
+      const started=this.now();
+      if(started<this.retryAt)return false;
+      if(this.leaseId&&started<this.renewAt&&started<this.expiresAt)return true;
+      if(started>=this.expiresAt)this.leaseId=null;
+      const generation=this.generation,oldId=this.leaseId;
+      try{
+        const reply=await this.request('/api/v1/ros/watch',oldId?
+          {operation:'renew',lease_id:oldId}:{operation:'acquire',client_id:this.clientId});
+        if(generation!==this.generation||!this.enabled||!this.active){
+          this.leaseId=null;await this.release(reply.lease_id||oldId);return false;
+        }
+        if(!reply.accepted||typeof reply.lease_id!=='string'||!Number.isFinite(reply.expires_in_ms)||reply.expires_in_ms<=0){
+          this.leaseId=null;throw Error(reply.reason||reply.message||'Live watch was not acknowledged.');
+        }
+        this.leaseId=reply.lease_id;this.expiresAt=started+reply.expires_in_ms;
+        this.renewAt=started+Math.min(4000,reply.expires_in_ms/2);
+        this.error='';this.retryAt=0;return true;
+      }catch(error){this.error=error.message;this.retryAt=this.now()+2000;return false;}
+    }).finally(()=>{this.pending=null;});
+    return this.pending;
+  }
+  dispose(){this.enabled=false;this.active=false;this.generation++;return this.sync();}
 }
 function pieces(value, max = 27) {
   const result = [];
@@ -128,7 +213,8 @@ function pieces(value, max = 27) {
 }
 export function normalizeGraph(data) {
   if (data?.schema_version !== 1) throw Error("Unsupported ROS graph schema.");
-  const nodes = (data.nodes || []).map((n) => ({ ...n, kind: "node" }));
+  const nodes = (data.nodes || []).map((n) => ({ ...n,
+    name:n.name || (n.discovery_state==='unresolved_endpoint_owner'?'Unresolved owner':n.fully_qualified_name||n.id),kind: "node" }));
   const topics = (data.topics || []).map((n) => ({ ...n, kind: "topic" }));
   const services = (data.services || []).map((n) => ({
     ...n,
@@ -228,9 +314,7 @@ export class GraphExplorer {
     this.flowDots = [];
     this.flowFrame = null;
     this.flowLastFrame = -Infinity;
-    this.watchTopic = null;
-    this.watchPending = false;
-    this.watchError = '';
+    this.liveWatch = new GraphLiveWatch({request:this.request});
     this.reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     this.motionChanged = () => {
       if (this.reduceMotion.matches) this.stopFlow();
@@ -238,7 +322,7 @@ export class GraphExplorer {
     };
     this.reduceMotion.addEventListener('change',this.motionChanged);
     this.visibilityChanged = () => {
-      this.flowActivity.clear(); this.stopFlow();
+      this.flowActivity.clear(); this.stopFlow(); this.updateWatchActivity();
       if (!document.hidden && this.visible && this.connected) this.refresh();
     };
     document.addEventListener('visibilitychange',this.visibilityChanged);
@@ -262,7 +346,8 @@ export class GraphExplorer {
   setConnected(value) {
     if (this.disposed) return;
     this.connected = value;
-    if (!value) { this.watchTopic=null; this.flowActivity.clear(); this.stopFlow(); }
+    if (!value) { this.flowActivity.clear(); this.stopFlow(); }
+    this.updateWatchActivity();
     if (!value && this.data)
       $("graph-meta").textContent = "Disconnected · last discovery snapshot";
   }
@@ -271,6 +356,10 @@ export class GraphExplorer {
     this.visible = value;
     if (value) requestAnimationFrame(() => this.fit());
     else { this.flowActivity.clear(); this.stopFlow(); }
+    this.updateWatchActivity();
+  }
+  updateWatchActivity() {
+    this.liveWatch.setActive(!this.disposed && this.visible && this.connected && !document.hidden);
   }
   stopFlow() {
     if (this.flowFrame!==null) cancelAnimationFrame(this.flowFrame);
@@ -279,20 +368,20 @@ export class GraphExplorer {
     this.flowDots=[];
   }
   animateFlow() {
-    if (this.flowFrame!==null || !this.flowDots.length || !this.visible || !this.connected ||
+    if (this.flowFrame!==null || !this.flowDots.length || !this.liveWatch.enabled || !this.visible || !this.connected ||
         document.hidden || this.reduceMotion.matches) return;
     const tick = now => {
       this.flowFrame=null;
-      if (!this.visible || !this.connected || document.hidden || this.reduceMotion.matches) { this.stopFlow(); return; }
+      if (!this.liveWatch.enabled || !this.visible || !this.connected || document.hidden || this.reduceMotion.matches) { this.stopFlow(); return; }
       if (now-this.flowLastFrame >= 1000/FLOW_LIMITS.maxFps) {
         this.flowLastFrame=now; let active=false;
         for (const dot of this.flowDots) {
-          const phase=this.flowActivity.progress(dot.topicId,now);
+          const phase=this.flowActivity.progress(dot.sourceKey,now);
           if (phase===null) { dot.element.setAttribute('opacity','0'); continue; }
           active=true;
-          // Show publication first, then illustrative subscriber routes.
-          const t=dot.hollow?(phase-.5)*2:phase*2;
-          if (t<0 || t>1) { dot.element.setAttribute('opacity','0'); continue; }
+          // All observed directions move concurrently, with a stable phase.
+          const forward=(phase+(dot.hollow ? 0.45 : 0))%1;
+          const t=dot.reverse?1-forward:forward;
           const [x,y]=cubicPoint(dot.points,t);
           dot.element.setAttribute('transform',`translate(${x},${y})`);
           dot.element.setAttribute('opacity','1');
@@ -303,45 +392,27 @@ export class GraphExplorer {
     };
     this.flowFrame=requestAnimationFrame(tick);
   }
-  async watchSelected({retry=false}={}) {
-    const topic=this.selected(), target=this.watchTopic;
-    if (this.disposed || !target || target!==topic?.id || topic.kind!=='topic' || this.watchPending ||
-        !this.visible || !this.connected || document.hidden) return;
-    if (!['ready','partial'].includes(this.data.state) || !Number.isFinite(this.data.age_ms) ||
-        this.data.age_ms<0 || this.data.age_ms>=FLOW_LIMITS.staleMs) return;
-    const t=topic.traffic || {};
-    // Reuse an observation reported active. The topic-scoped API does not reserve
-    // ownership across clients; never issue an automatic Stop on its behalf.
-    if (t.state==='sampling') return;
-    if (this.data.sampling?.enabled===false || (!retry && (['blocked','unavailable'].includes(t.state) ||
-        /budget|exceeds/i.test(t.reason||'')))) {
-      this.watchTopic=null;
-      this.watchError=t.reason || 'Traffic sampling is unavailable.';
-      this.inspector(); return;
-    }
-    const active=this.data.topics.filter(n=>n.traffic?.state==='sampling').length;
-    if (active+(this.data.sampling?.cleanup_pending||0) >= (this.data.sampling?.max_topics||2)) return;
-    this.watchPending=true;
-    try {
-      const result=await this.request('/api/v1/ros/sample',{
-        topic:topic.name,duration_s:Math.min(5,this.data.sampling?.max_duration_s||5),
-      });
-      if (this.watchTopic===target && result.accepted===false) {
-        this.watchTopic=null; this.watchError=result.reason || 'Traffic sampling is unavailable.';
-      }
-      else if (this.watchTopic===target && result.accepted===true && this.visible && !document.hidden) {
-        this.flowActivity.beginSample(topic.id,result.sample_id);
-      }
-    } catch(error) {
-      if (this.watchTopic===target) { this.watchTopic=null; this.watchError=error.message; }
-    } finally {
-      this.watchPending=false;
-      if (this.visible && !document.hidden) this.inspector();
-    }
+  async syncLiveWatch() {
+    this.updateWatchActivity();
+    await this.liveWatch.sync(this.data?.watch);
+    if(!this.disposed) this.renderLiveStatus();
+  }
+  renderLiveStatus() {
+    const el=$("graph-flow-status");if(!el)return;
+    $("graph-live-flow").checked=this.liveWatch.enabled;
+    const watch=this.data?.watch;
+    if(!this.liveWatch.enabled){el.textContent='Live monitoring paused';return;}
+    if(!this.connected){el.textContent='Live monitoring paused · connection unavailable';return;}
+    if(!watch?.enabled){el.textContent='Live monitoring unavailable on this backend';return;}
+    if(this.liveWatch.error){el.textContent=this.liveWatch.error;return;}
+    const coverage=watch.coverage||{};
+    const observing=coverage.watching||0;
+    const unknown=Object.entries(coverage).reduce((n,[key,value])=>n+(key==='watching'?0:Number(value)||0),0);
+    el.textContent=watch.active?`Live · ${observing} topics observed${unknown?` · ${unknown} not measured`:''}${this.reduceMotion.matches?' · reduced motion':''}`:'Connecting live monitor…';
   }
   dispose() {
     this.disposed=true; this.visible=false; this.connected=false;
-    clearInterval(this.timer); this.stopFlow(); this.flowActivity.clear(); this.watchTopic=null;
+    clearInterval(this.timer); this.stopFlow(); this.flowActivity.clear(); void this.liveWatch.dispose();
     document.removeEventListener('visibilitychange',this.visibilityChanged);
     this.reduceMotion.removeEventListener('change',this.motionChanged);
     this.resizeObserver.disconnect();
@@ -353,9 +424,9 @@ export class GraphExplorer {
       const data = normalizeGraph(await this.request("/api/v1/ros/graph"));
       if (this.disposed || !this.connected) return;
       this.data = data;
-      if (this.visible && !document.hidden) this.flowActivity.observe(data,performance.now());
+      if (this.liveWatch.enabled && this.visible && !document.hidden) this.flowActivity.observe(data,performance.now());
       else this.flowActivity.clear();
-      if (this.focus && !data.entities.has(this.focus)) { this.focus = null; this.watchTopic=null; }
+      if (this.focus && !data.entities.has(this.focus)) { this.focus = null; }
       if (!this.focus && !this.initialized) {
         const topics = data.topics.filter((t) => !infrastructure(t.name));
         const score = (t) =>
@@ -368,7 +439,7 @@ export class GraphExplorer {
       }
       this.render();
       this.inspector();
-      void this.watchSelected();
+      void this.syncLiveWatch();
     } catch (e) {
       this.flowActivity.clear(); this.stopFlow();
       if (!this.data) this.message("ROS discovery unavailable. " + e.message);
@@ -379,6 +450,12 @@ export class GraphExplorer {
   }
   bind() {
     $("refresh-graph").onclick = () => this.refresh();
+    $("graph-live-flow").onchange = () => {
+      this.liveWatch.setEnabled($("graph-live-flow").checked);
+      this.flowActivity.clear();this.stopFlow();
+      void this.syncLiveWatch();
+      if(this.liveWatch.enabled) void this.refresh();
+    };
     $("graph-search").oninput = () => {
       this.didFit = false;
       this.render();
@@ -388,7 +465,6 @@ export class GraphExplorer {
       this.render();
     };
     $("graph-clear").onclick = () => {
-      this.watchTopic=null; this.watchError='';
       this.focus = null;
       this.render();
       this.inspector();
@@ -460,7 +536,6 @@ export class GraphExplorer {
     return this.data?.entities.get(this.focus);
   }
   select(id) {
-    if (id!==this.focus) { this.watchTopic=null; this.watchError=''; }
     this.focus = id;
     this.render();
     this.inspector();
@@ -476,7 +551,6 @@ export class GraphExplorer {
     }
   }
   isolate(id) {
-    if (id!==this.focus) { this.watchTopic=null; this.watchError=''; }
     if (this.scope === "all") this.savedOverview = { ...this.transform };
     this.scope = "focus";
     this.isolatedId = id;
@@ -553,7 +627,7 @@ export class GraphExplorer {
         mid.length * 96,
       );
     const nodeWidth = 230, topicWidth = 238, margin = 24,
-      columnGap = Math.ceil(Math.max(nodeWidth, topicWidth) * 0.6),
+      columnGap = Math.ceil(Math.max(nodeWidth, topicWidth) * 1.6),
       middleX = margin + nodeWidth + columnGap,
       rightX = middleX + topicWidth + columnGap;
     for (const [list, x, w] of [
@@ -638,7 +712,7 @@ export class GraphExplorer {
           refY: 3,
           markerWidth: 6,
           markerHeight: 6,
-          orient: "auto",
+          orient: "auto-start-reverse",
         });
         marker.append(svg("path", { d: "M0 0 L7 3 L0 6 Z", fill: color }));
         defs.append(marker);
@@ -675,13 +749,14 @@ export class GraphExplorer {
           "stroke-width": isFocus ? 1.55 : 1,
           "stroke-dasharray": kind === "api" ? "5 4" : "none",
           "marker-end": `url(#${markerId})`,
+          ...(kind === "api" ? {"marker-start": `url(#${markerId})`} : {}),
           "data-edge-id": e.id,
         }),
       );
     }
     const flowLayer=svg('g',{'aria-hidden':'true',class:'graph-flow-layer','pointer-events':'none'});
     this.viewport.append(flowLayer);
-    if (!this.reduceMotion.matches) for (const edge of flowEdges(d,edges,this.flowActivity,performance.now(),{focus:this.focus})) {
+    if (this.liveWatch.enabled && !this.reduceMotion.matches) for (const edge of flowEdges(d,edges,this.flowActivity,performance.now(),{focus:this.focus})) {
       const route=flowPaths.get(edge.id); if (!route) continue;
       const dot=svg('circle',{r:3.1,fill:edge.hollow?'#fff':route.color,stroke:route.color,
         'stroke-width':1.4,'vector-effect':'non-scaling-stroke',opacity:0,
@@ -783,9 +858,10 @@ export class GraphExplorer {
           12,
           muted,
         );
-        if (n.kind === "topic") {
-          label(g, 10, p.h - 10, rate(n.traffic), 11, muted);
-          const history = n.traffic?.history || [];
+        if (n.kind === "topic" || n.kind === "action") {
+          const activity=liveMetric(n);
+          label(g, 10, p.h - 10, rate(activity), 11, muted);
+          const history = activity.history || (activity.feedback?.history?.length?activity.feedback.history:activity.status?.history) || [];
           if (history.length) {
             const values = history.map((b) => b.messages || 0),
               max = Math.max(1, ...values);
@@ -854,6 +930,7 @@ export class GraphExplorer {
     this.applyTransform();
     if (!this.didFit && this.visible) this.fit();
     this.list();
+    this.renderLiveStatus();
     this.animateFlow();
   }
   fit() {
@@ -911,8 +988,8 @@ export class GraphExplorer {
         html(
           "small",
           "",
-          n.kind === "topic"
-            ? rate(n.traffic)
+          (n.kind === "topic" || n.kind === "action")
+            ? rate(liveMetric(n))
             : `${n.clients?.length || 0} clients`,
         ),
       );
@@ -1037,79 +1114,29 @@ export class GraphExplorer {
     }
     if (!edges.length)
       bindings.append(html("p", "muted", "No discovered bindings."));
-    if (n.kind === "topic") {
-      const traffic = section("Observed at collector"),
-        t = n.traffic || {};
-      traffic.append(html("div", "activity-value", rate(t)));
-      row(
-        traffic,
-        "Sample state",
-        (t.state || "not_sampled").replaceAll("_", " "),
-      );
-      row(
-        traffic,
-        "Messages",
-        t.messages === null || t.messages === undefined
-          ? "—"
-          : String(t.messages),
-      );
-      row(
-        traffic,
-        "Serialized bytes",
-        t.bytes === null || t.bytes === undefined
-          ? "—"
-          : Number(t.bytes).toLocaleString(),
-      );
-      if (t.reason) traffic.append(html("p", "inspector-note", t.reason));
-      const button = html(
-        "button",
-        "sample-button",
-        t.state === "sampling" ? "Stop sampling" : "Sample activity for 5 s",
-      );
-      button.disabled = this.data.sampling?.enabled === false || this.watchPending;
-      button.onclick = async () => {
-        this.watchTopic=null; this.watchError='';
-        button.disabled = true;
-        try {
-          const result = await this.request(
-            "/api/graph/sample",
-            t.state === "sampling"
-              ? { topic: n.name, stop: true }
-              : { topic: n.name, duration_s: 5 },
-          );
-          if (result.accepted === false)
-            throw Error(result.reason || "Sampling unavailable");
-          await this.refresh();
-        } catch (e) {
-          this.onError(e);
-        } finally {
-          button.disabled = false;
-        }
-      };
-      const watch=html('button','sample-button watch-button',this.watchTopic===n.id?'Stop live watch':'Watch live');
-      watch.disabled=this.data.sampling?.enabled===false || this.watchPending;
-      watch.onclick=async()=>{
-        if (this.watchTopic===n.id) {
-          this.watchTopic=null; this.watchError='';
-          this.flowActivity.clear(); this.stopFlow(); this.inspector();
-        } else {
-          this.watchTopic=n.id; this.watchError='';
-          await this.watchSelected({retry:true}); await this.refresh();
-        }
-      };
-      const buttons=html('div','sampling-actions'); buttons.append(button,watch);
-      traffic.append(
-        buttons,
-        html(
-          "p",
-          "inspector-note",
-          "Dots summarize new topic activity. Filled dots trace a single discovered publisher; hollow dots show subscription routes, not confirmed receipt. Multiple publishers cannot be distinguished. Message contents are never exported.",
-        ),
-        html('p','inspector-note',this.watchError || (this.watchTopic===n.id?
-          'Live watch renews a bounded 5 s sample while this topic is selected and the graph is visible.':
-          'Watch live for repeated 5 s samples. Leaving this view or stopping a watch lets its current bounded sample finish.')),
-      );
-      if(this.reduceMotion.matches) traffic.append(html('p','inspector-note','Reduced motion: activity is shown as counters; moving dots are disabled.'));
+    if (n.kind === "topic" || n.kind === "action") {
+      const t=liveMetric(n), traffic=section(n.kind==='action'?'Action status / feedback':'Observed activity');
+      traffic.append(html('div','activity-value',rate(t)));
+      row(traffic,'Live state',activityLabel(n));
+      row(traffic,'Monitor',t.state||'Unknown');
+      row(traffic,'Messages',t.messages==null?'—':String(t.messages));
+      if(n.kind==='topic') row(traffic,'Serialized bytes',t.bytes==null?'Not measured':Number(t.bytes).toLocaleString());
+      row(traffic,'Last received',finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed');
+      if(t.source) row(traffic,'Source',t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer');
+      if(t.reason)traffic.append(html('p','inspector-note',t.reason));
+      if(n.kind==='action') {
+        row(traffic,'Status messages',t.status_messages==null?'—':String(t.status_messages));
+        row(traffic,'Feedback messages',t.feedback_messages==null?'—':String(t.feedback_messages));
+        const counts=t.status?.status_summary?.counts;
+        if(counts)row(traffic,'Last reported goals',Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None');
+        traffic.append(html('p','inspector-note','Action dots follow observed server status/feedback toward clients. Goal requests and per-client receipt are not inferred.'));
+      } else traffic.append(html('p','inspector-note','Filled dots use publisher identity where available. Hollow dots indicate a discovered route without verified endpoint receipt. Unknown or idle traffic is not animated.'));
+      if(!this.data.watch?.enabled && n.kind==='topic') {
+        const button=html('button','sample-button','Sample activity for 5 s');
+        button.onclick=async()=>{button.disabled=true;try{await this.request('/api/v1/ros/sample',{topic:n.name,duration_s:5});await this.refresh();}catch(e){this.onError(e);}finally{button.disabled=false;}};
+        traffic.append(button,html('p','inspector-note','This backend supports finite samples only; it cannot provide continuous live monitoring.'));
+      }
+      if(this.reduceMotion.matches)traffic.append(html('p','inspector-note','Reduced motion: live rates and histories remain available; moving dots are disabled.'));
     }
     if (n.kind === "node") {
       const note = section("Comment");

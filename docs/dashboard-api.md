@@ -70,6 +70,51 @@ Discovery refresh defaults to 2 seconds. Topic types/hidden action infrastructur
 
 Request `{"topic":"/data","duration_s":5}`. Response `{"schema_version":1,"accepted":true,"topic":"/data","sample_id":"...","state":"sampling"}`. Stop with `{"topic":"/data","stop":true}`. This controls only observer subscriptions, never robot operations.
 
+## Continuous live watch
+
+`POST /api/v1/ros/watch` uses the same gateway access policy. It adds continuous,
+graph-wide observation alongside the unchanged finite-sample routes:
+
+| Operation | JSON body | Meaning |
+| --- | --- | --- |
+| Acquire | `{"operation":"acquire","client_id":"UUID"}` | Acquire a browser-owned lease; same-client retries are idempotent. |
+| Renew | `{"operation":"renew","lease_id":"OPAQUE_ID"}` | Extend this lease without replacing subscriptions/counter identities. |
+| Release | `{"operation":"release","lease_id":"OPAQUE_ID"}` | Release only this lease; other clients retain their observations. |
+
+Responses contain `schema_version`, `accepted`, `lease_id`, `expires_in_ms` and
+`active` when successful. Rejections include `reason`/`code`; malformed requests
+return JSON HTTP 400. Default lifetime is 12 seconds, with at most eight clients.
+Browser renewal is approximately every four seconds, using local elapsed time.
+No credentials or lease identifiers belong in URLs.
+
+Graph snapshots add `watch` coverage/limits and `topics[].activity`, independent
+of historical `traffic` finite samples. Activity includes `state`, `sample_id`,
+`source`, cumulative message counts, nullable bytes/rates/ages, bounded `history`
+and `publisher_counts` keyed by actual publisher GID. Unknown attribution is
+reported separately. States are `watching`, `inactive`, `blocked`, `unavailable`,
+`limited`, `throttled`, or `cleanup_pending`; watching with zero receipts is not
+proof of a dead publisher. Passive existing subscriptions can supply data,
+including compressed images, without duplicate subscriptions or serialization.
+
+`actions[].activity` references its standard hidden status/feedback topics and
+their observations. GoalStatusArray may provide bounded counts by status, never
+goal payloads or IDs. Feedback content is not decoded/exported. Goal requests,
+results and receipt by individual clients are explicitly unobserved.
+
+Additional raw observations are capped at 64 topics. Each source defaults to a
+rolling five-second 10,000-message / 8-MiB budget, with global raw limits of
+50,000 messages / 16 MiB and a 64-KiB individual-message limit. Histories retain
+20 half-second buckets. Existing passive receipts do not consume extra raw
+subscription budgets. Unsupported or high-bandwidth sources without passive
+data remain unknown/blocked; a viewer must not synthesize their activity.
+
+Configure `graph_observer.watch` with `enabled`, `max_topics`, `max_clients`,
+`lease_s`, `max_messages_per_window` and `max_bytes_per_window`. Fixed global
+ceilings are advertised in the snapshot. These bounds limit observer work;
+they are not guarantees of transport delivery or zero publisher-side cost.
+
+### Finite-sample bounds
+
 Only explicitly selected topics are sampled, best-effort/volatile/depth 1, at most 2 concurrent topics and 10 seconds. Known high-bandwidth image/pointcloud/audio types are blocked; unknown/unavailable message types report unavailable. Serialized bytes are counted, never decoded/exported. Message/byte budgets terminate sampling early. No payload contents or secrets/command payloads are returned.
 
 `traffic.state`: `not_sampled`, `sampling`, `complete`, `blocked`, `unavailable`. Active/completed samples include `sample_id`, `started_at_ns`, `ended_at_ns`, `messages`, `bytes`, `rate_hz`, `bytes_per_second`, `last_message_age_ms`, `reason` and at most 20 history buckets `{"at_ns":123,"messages":3,"bytes":200}`. Rates refer only to this local observer subscription, not global transport/delivery. Zero messages is observed zero during this sample, not proof the topic is dead. Default raw payload export is always false, including on command-bearing topics.

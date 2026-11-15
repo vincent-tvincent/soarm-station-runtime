@@ -106,42 +106,57 @@ show a shortened name/type, observed-rate label and sample-history sparkline;
 the inspector retains the exact fully qualified name, type and endpoint QoS.
 Comments are local to the current view. Actions/services use subdued dashed
 links and can be inspected from the interface list. Crossings never join.
-Both column gaps are at least 60% of the widest block width. With the current
-230/238-unit blocks, each gap is 143 units; zoom and Fit preserve this ratio.
+Both column gaps are at least 160% of the widest block width. With the current
+230/238-unit blocks, each gap is 381 units; zoom and Fit preserve this ratio.
 
 Sampling is an explicit, bounded observer operation, not a robot command.
 Unsampled, unavailable and measured-zero states are different. Counts and
 serialized bytes describe only that observer subscription, not guaranteed
 network delivery or wire bandwidth. Message contents are not exported.
 
-### Sampled flow animation
+### Continuous graph-wide activity
 
-Select a topic and use **Sample activity for 5 s**, or **Watch live** to repeat
-bounded five-second samples while that topic and graph page are visible.
-This reuses the existing observer and two-second graph polling; it does not
-subscribe to the entire graph or create a message-per-frame event stream.
-Image, point-cloud and other high-bandwidth types retain the observer's blocks.
+**Live flow** monitors the graph while its page/tab is visible. It covers topics
+and action status/feedback regardless of which block is selected; selection
+still controls the original warm publication / cool subscription highlights.
+Every topic and action block retains its activity history plot. Unknown,
+blocked, idle and observed-active states are distinct.
 
-New counter increments trigger a short batch pulse along the existing curves.
-Filled warm dots follow a single discovered publisher into its topic. Hollow
-cool dots follow subscription routes; they do not prove receipt or processing
-at those subscribers. If multiple publisher endpoints are discovered, their
-individual contributions are unknown and publisher dots are omitted. Action
-and service links have no traffic measurements and remain static. Completed
-sample rates remain readable without replaying animation from old counts.
+A renewable 12-second browser lease keeps shared observations alive, with
+renewal approximately every four seconds. Renewing does not recreate
+subscriptions, reset counters or interrupt observation. Turning Live flow off,
+hiding the page or disconnecting releases only that browser's lease; expiry
+handles closed/lost clients. Transient motor-status polling failures do not
+permanently cancel read-only graph monitoring. The existing finite-sample API
+is retained for external clients and older-backend diagnostics.
 
-One shared animation loop updates at most 64 dots at 30 FPS using cached curve
-coordinates. It updates only SVG marker transforms/opacity, not graph layout.
-Counter watermarks, sample IDs and local elapsed time stop stale/duplicate data
-from keeping motion alive. Hidden pages/tabs, disconnects and reduced-motion
-preferences stop animation; hidden tabs also stop graph polling.
+Moving dots have a stable repeating phase while fresh counters advance.
+Publication and subscription directions animate concurrently; no one-shot
+traversal is restarted on each HTTP poll. Frozen counters expire even if HTTP
+requests keep succeeding. Animation remains local at up to 30 FPS / 128 dots,
+with the existing two-second graph polling and cached curve coordinates.
+Hidden tabs and reduced-motion preferences stop animation. No per-message
+browser event stream is used.
 
-Live watch is opt-in and reuses any sample reported active. No automatic Stop
-request is sent when hiding/stopping a watch, since the backend's Stop endpoint
-is topic-scoped and could affect another client. Its last finite sample expires
-naturally. Sampling slots, byte/message limits and cleanup limits still apply;
-budget/type failures pause live watching instead of causing automatic retries.
-The explicit **Stop sampling** button retains its existing topic-wide meaning.
+Publisher GIDs from actual ROS MessageInfo attribute incoming topic traffic
+when available, including multiple publishers. Unattributed single-source
+routes and subscriber paths use hollow dots; subscriber delivery is not
+confirmed by this observer. Action dots follow observed server status/feedback
+back toward clients, with bidirectional dashed routes. They do not infer
+unobserved goal requests or per-client receipt. Historical goal-state summaries
+are labeled as last reported, rather than treated as perpetual traffic.
+
+Existing dashboard subscriptions provide passive counts/history for their
+exact topics, including compressed camera frames, without another image
+subscription or payload serialization. Other eligible topics use bounded raw
+observations. Raw image/cloud/audio types without passive data remain explicitly
+unmeasured. The monitor never invents traffic for such connections.
+
+At most 64 additional raw topics are watched. Rolling five-second budgets
+(default 10,000 messages / 8 MiB per topic; global 50,000 messages / 16 MiB),
+64-KiB individual-message limits, 20 history buckets and bounded publisher maps
+limit work. Throttled/unavailable sources are reported, not shown as healthy.
+Graph metadata and traffic are read-only; no robot operation is submitted.
 
 ## Files and verification
 

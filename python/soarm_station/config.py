@@ -81,6 +81,17 @@ def load(path):
     if type(topics)!=int or not 1<=topics<=2:raise ValueError('At most two graph topics may be sampled concurrently')
     if isinstance(duration,bool) or not isinstance(duration,(int,float)) or not math.isfinite(duration) or not .1<=duration<=10:
         raise ValueError('Graph sampling duration must be in [0.1,10]')
+    watch=graph.get('watch',{})
+    if not isinstance(watch,dict) or type(watch.get('enabled',True))!=bool:
+        raise ValueError('Invalid graph watch settings')
+    for key,default,maximum in (('max_topics',64,64),('max_clients',8,8),
+            ('max_messages_per_window',10000,50000),('max_bytes_per_window',8388608,33554432)):
+        value=watch.get(key,default)
+        if type(value)!=int or not 1<=value<=maximum:
+            raise ValueError(f'Graph watch {key} must be an integer in [1,{maximum}]')
+    lease=watch.get('lease_s',12.)
+    if isinstance(lease,bool) or not isinstance(lease,(int,float)) or not math.isfinite(lease) or not 3<=lease<=30:
+        raise ValueError('Graph watch lease_s must be in [3,30]')
     management=c.setdefault('policy_management',{})
     if not isinstance(management,dict):raise ValueError('policy_management must be a mapping')
     root=Path(__file__).resolve().parents[2]
