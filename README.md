@@ -6,6 +6,13 @@ The runtime owns devices and dispatches commands. Demonstration collection, data
 
 Repository: [vincent-tvincent/soarm-station-runtime](https://github.com/vincent-tvincent/soarm-station-runtime). Companion repository: `soarm-station-training` (separate).
 
+The ROS graph explorer is also available as the independent open-source project
+[ros2graph](https://github.com/vincent-tvincent/ros2graph). It preserves this
+dashboard's graph components, interface filters and live traffic visualization,
+and can attach to other ROS 2 systems without Station, LeRobot or application-code
+changes. See its README for installation, the hardware-free demo and optional
+service/action tracing. Station continues to include its integrated graph page.
+
 ## Requirements
 
 The tested installation uses Ubuntu 26.04 aarch64, ROS 2 Lyrical and system Python 3.14. The bootstrap creates a separate Python 3.12 environment for LeRobot 0.7.0 and CPU PyTorch 2.11.0. Other Linux/ROS combinations require validation; see [installation coverage](docs/reproducibility-2026-11-13.md).
