@@ -269,12 +269,12 @@ export class GamepadInputEngine {
     }
     this._lastGrip = selectedValue;
     const gripperTarget = this.gripperState === "following" ? 100 * (1 - selectedValue) : this._heldOpening;
-    let translation = [-source.right[1], -source.right[0], -source.left[1]].map(value => value === 0 ? 0 : value);
+    let translation = [-source.left[1], -source.left[0], -source.right[1]].map(value => value === 0 ? 0 : value);
     const norm = Math.hypot(...translation);
     if (norm > 1) translation = translation.map(value => value / norm);
     const elevation = (Number(source.pressed[12]) - Number(source.pressed[13])) * this.dpadRollScale;
     const dpadRoll = source.pressed[14] || source.pressed[15];
-    const roll = dpadRoll ? (Number(source.pressed[15]) - Number(source.pressed[14])) * this.dpadRollScale : source.left[0];
+    const roll = dpadRoll ? (Number(source.pressed[15]) - Number(source.pressed[14])) * this.dpadRollScale : source.right[0];
     return {
       translation, elevation, roll, speed_scale: this.bodyNeutral ? 0 : 1,
       gripper_target: gripperTarget, actions, valid: true, connected: true,

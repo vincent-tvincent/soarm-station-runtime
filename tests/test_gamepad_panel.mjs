@@ -83,7 +83,7 @@ function fixture(t, { own = true, pad = raw(), requested = 50, admitted = 50, me
 test('motion speed meter follows normalized stick commands independently of gripper triggers', t => {
   const f=fixture(t);
   for(const [lt,rt] of [[0,0],[1,0],[0,1],[1,1]]) {
-    f.panel.output=output(f.panel.engine,raw({axes:[0,0,0,-.54],lt,rt}),50);
+    f.panel.output=output(f.panel.engine,raw({axes:[0, -.54, 0, 0],lt,rt}),50);
     assert.ok(Math.abs(f.panel.motionSpeedFraction()-.5)<1e-9);
     f.panel.render();
     assert.equal(f.element.querySelector('#gamepad-motion-speed-value').textContent,'50%');
@@ -102,11 +102,11 @@ test('motion rate readout scales with profile and keeps angular units separate',
   const f=fixture(t);
   f.manual.descriptor.speed_levels.push({level:3,translation_m_s:.08,orientation_rad_s:Math.PI/4});
   f.manual.setSpeed(3);
-  f.panel.output=output(f.panel.engine,raw({axes:[0,0,0,-.54]}),50);
+  f.panel.output=output(f.panel.engine,raw({axes:[0, -.54, 0, 0]}),50);
   f.panel.render();
   assert.equal(f.element.querySelector('#gamepad-motion-speed-value').textContent,'50%');
   assert.equal(f.element.querySelector('#gamepad-speed-cap').textContent,'40.0 mm/s');
-  f.panel.output=output(f.panel.engine,raw({axes:[.54,0,0,0]}),50);
+  f.panel.output=output(f.panel.engine,raw({axes:[0, 0, .54, 0]}),50);
   f.panel.render();
   assert.equal(f.element.querySelector('#gamepad-speed-cap').textContent,'0.0 mm/s · 22.5°/s');
 });
@@ -114,9 +114,9 @@ test('motion rate readout scales with profile and keeps angular units separate',
 test('motion speed includes angular-only and fine D-pad requests and caps combined translation', t => {
   const f=fixture(t);
   for(const [pad,expected] of [
-    [raw({axes:[.54,0,0,0]}),.5],
+    [raw({axes:[0, 0, .54, 0]}),.5],
     [raw({buttons:[12]}),.2],
-    [raw({axes:[0,-1,1,-1]}),1],
+    [raw({axes:[1, -1, 0, -1]}),1],
   ]) {
     f.panel.output=output(f.panel.engine,pad,50);
     assert.ok(Math.abs(f.panel.motionSpeedFraction()-expected)<1e-9);
@@ -125,7 +125,7 @@ test('motion speed includes angular-only and fine D-pad requests and caps combin
 
 test('motion meter clears inactive or suspended requests instead of retaining a previous speed', t => {
   const f=fixture(t);
-  f.panel.output=output(f.panel.engine,raw({axes:[0,0,0,-1]}),50);
+  f.panel.output=output(f.panel.engine,raw({axes:[0, -1, 0, 0]}),50);
   assert.equal(f.panel.motionSpeedFraction(),1);
   f.panel.needsNeutral=true; assert.equal(f.panel.motionSpeedFraction(),0); f.panel.needsNeutral=false;
   f.focus(false); assert.equal(f.panel.motionSpeedFraction(),0); f.focus(true);
@@ -165,42 +165,42 @@ test('controller read errors are visible, stop a lost source once, and clear wit
 test('only focused neutral sticks and released D-pad satisfy resume; triggers are not a speed gate', async t => {
   const f = fixture(t); f.focus(false); f.emit('blur');
   f.poll(raw({ rt: 1, lt: 1 })); assert.equal(f.panel.needsNeutral, true);
-  f.poll(raw({ rt: 1, axes: [0, 0, 0, -.6] }));
-  f.focus(true); f.poll(raw({ rt: 1, axes: [0, 0, 0, -.6] })); await flush();
+  f.poll(raw({ rt: 1, axes: [0, -.6, 0, 0] }));
+  f.focus(true); f.poll(raw({ rt: 1, axes: [0, -.6, 0, 0] })); await flush();
   assert.equal(f.panel.needsNeutral, true); assert.equal(f.calls.requests.length, 0);
   f.poll(raw({ rt: 1, buttons: [12] })); await flush();
   assert.equal(f.panel.needsNeutral, true); assert.equal(f.calls.requests.length, 0);
   f.panel.setActive(false); f.poll(raw({ rt: 1, lt: 1 })); assert.equal(f.panel.needsNeutral, true);
   f.panel.setActive(true); // Focused body-neutral input, despite both triggers being squeezed.
   assert.equal(f.panel.needsNeutral, false);
-  f.poll(raw({ rt: 0, lt: 1, axes: [0, 0, 0, -.6] })); await flush();
+  f.poll(raw({ rt: 0, lt: 1, axes: [0, -.6, 0, 0] })); await flush();
   assert.equal(f.calls.requests.length, 1); assert.equal(f.calls.stops, 0);
   assert.equal(f.calls.requests[0].body.speed_scale, 1);
 });
 
 test('Start uses raw body neutrality even when inactive preview has zero motion output', async t => {
-  const f = fixture(t, { own: false, pad: raw({ axes: [0, 0, 0, -.5] }) });
+  const f = fixture(t, { own: false, pad: raw({ axes: [0, -.5, 0, 0] }) });
   assert.deepEqual(f.panel.output.translation, [0, 0, 0]);
   assert.equal(f.panel.canStart(), false);
-  f.poll(raw({ axes: [0, 0, 0, -.5], buttons: [0] })); await flush(); assert.equal(f.calls.starts, 0);
+  f.poll(raw({ axes: [0, -.5, 0, 0], buttons: [0] })); await flush(); assert.equal(f.calls.starts, 0);
   f.poll(raw({ buttons: [12] })); assert.equal(f.panel.canStart(), false);
   f.poll(raw({ rt: 1, lt: 1 })); assert.equal(f.panel.canStart(), true);
   f.poll(raw({ rt: 1, lt: 1, buttons: [0] })); await flush(); assert.equal(f.calls.starts, 1);
 });
 
 test('sticks request the same body speed with RT released or squeezed', async t => {
-  const f = fixture(t, { pad: raw({ axes: [0, 0, 0, -.5], rt: 0 }) });
+  const f = fixture(t, { pad: raw({ axes: [0, -.5, 0, 0], rt: 0 }) });
   await f.panel.solve();
   const released = f.calls.requests.at(-1).body;
   assert.equal(released.speed_scale, 1); assert.ok(released.translation[0] > 0);
-  f.poll(raw({ axes: [0, 0, 0, -.5], rt: 1 })); await flush();
+  f.poll(raw({ axes: [0, -.5, 0, 0], rt: 1 })); await flush();
   const squeezed = f.calls.requests.at(-1).body;
   assert.equal(squeezed.speed_scale, 1); assert.deepEqual(squeezed.translation, released.translation);
 });
 
-for (const [label, nextAxes] of [['neutral', [0, 0, -.5, 0]], ['reverse', [0, 0, -.5, .5]]]) {
+for (const [label, nextAxes] of [['neutral', [-.5, 0, 0, 0]], ['reverse', [-.5, .5, 0, 0]]]) {
   test(`an individual body-axis ${label} retires a pending solve while another axis stays active`, async t => {
-    const f = fixture(t, { pad: raw({ rt: 1, axes: [0, 0, -.5, -.5] }) });
+    const f = fixture(t, { pad: raw({ rt: 1, axes: [-.5, -.5, 0, 0] }) });
     const gate = deferred(); f.handler(() => gate.promise);
     const pending = f.panel.solve(); const epoch = f.panel.sourceEpoch;
     f.poll(raw({ rt: 1, axes: nextAxes })); assert.ok(f.panel.sourceEpoch > epoch);
@@ -210,11 +210,11 @@ for (const [label, nextAxes] of [['neutral', [0, 0, -.5, 0]], ['reverse', [0, 0,
 }
 
 test('same-direction stick jitter does not starve a valid pending solve', async t => {
-  const f = fixture(t, { pad: raw({ rt: 1, axes: [0, 0, 0, -.5] }) });
+  const f = fixture(t, { pad: raw({ rt: 1, axes: [0, -.5, 0, 0] }) });
   const gate = deferred(); f.handler(() => gate.promise);
   const pending = f.panel.solve(); const epoch = f.panel.sourceEpoch;
-  f.poll(raw({ rt: 1, axes: [0, 0, 0, -.51] }));
-  f.poll(raw({ rt: 1, axes: [0, 0, 0, -.49] }));
+  f.poll(raw({ rt: 1, axes: [0, -.51, 0, 0] }));
+  f.poll(raw({ rt: 1, axes: [0, -.49, 0, 0] }));
   assert.equal(f.panel.sourceEpoch, epoch);
   gate.resolve({ status: 'OK', step_fraction: 1, target: { positions: { joint: .6 }, gripper: 50 } });
   await pending; assert.equal(f.calls.targets.length, 1);
@@ -348,7 +348,7 @@ test('preview trigger selection does not grant permission, start, stop, or send 
 });
 
 test('R3 wraps speed 5 to 1 once per press and rejects an outstanding old-profile response', async t => {
-  const source = buttons => raw({ axes: [0, 0, 0, -.5], buttons });
+  const source = buttons => raw({ axes: [0, -.5, 0, 0], buttons });
   const f = fixture(t, { pad: source([]) }); f.manual.level = 5;
   const gate = deferred(); f.handler(() => gate.promise);
   const pending = f.panel.solve(); assert.equal(f.calls.requests[0].body.level, 5);
@@ -387,7 +387,7 @@ test('discovery, reconnect and held Start cannot auto-start; idle active session
 
 for (const action of ['stop', 'home', 'blur', 'mode']) {
   test(`${action} invalidates an outstanding analog response`, async t => {
-    const f = fixture(t, { pad: raw({ rt: 1, axes: [0, 0, 0, -.5] }) });
+    const f = fixture(t, { pad: raw({ rt: 1, axes: [0, -.5, 0, 0] }) });
     const gate = deferred(); f.handler(() => gate.promise);
     const pending = f.panel.solve();
     if (action === 'stop') f.poll(raw({ rt: 1, buttons: [1] }));

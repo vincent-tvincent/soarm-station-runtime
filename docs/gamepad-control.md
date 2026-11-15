@@ -14,10 +14,10 @@ operation with support torque retained. Home uses the existing configured pose.
 
 | Control | Operation |
 | --- | --- |
-| Right stick up/down | +X / −X |
-| Right stick left/right | +Y / −Y |
-| Left stick up/down | +Z / −Z |
-| Left stick left/right | Tool roll − / + |
+| Left stick up/down | +X / −X |
+| Left stick left/right | +Y / −Y |
+| Right stick up/down | +Z / −Z |
+| Right stick left/right | Tool roll − / + |
 | D-pad up/down | Fine elevation + / − relative to ground |
 | D-pad left/right | Fine tool roll − / +; overrides stick roll |
 | LB / L1 | Select LT/L2 as gripper trigger |

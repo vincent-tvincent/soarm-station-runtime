@@ -14,12 +14,31 @@ const active = (engine, raw, heldOpening = 40) => engine.sample(raw, { enabled: 
 
 test("standard stick signs, radial deadzone and remapped residual", () => {
   const e = new GamepadInputEngine(); e.reset(40, pad());
-  let out = active(e, pad({ axes: [.04, -.04, .03, -.03], rt: 1 }));
+  let out = active(e, pad({ axes: [.03, -.03, .04, -.04], rt: 1 }));
   assert.deepEqual(out.translation, [0, 0, 0]); close(out.roll, 0);
-  out = active(e, pad({ axes: [0, 0, 0, -.54], rt: 1 }));
+  out = active(e, pad({ axes: [0, -.54, 0, 0], rt: 1 }));
   close(out.translation[0], .5); close(out.translation[1], 0); close(out.translation[2], 0);
   out = active(e, pad({ axes: [.54, -.54, .54, -.54], rt: 1 }));
   assert.ok(out.translation[0] > 0 && out.translation[1] < 0 && out.translation[2] > 0 && out.roll > 0);
+});
+
+test("left stick independently controls XY and right stick independently controls Z and roll", () => {
+  const e = new GamepadInputEngine(); e.reset(40, pad());
+  const cases = [
+    [[0, -.54, 0, 0], [.5, 0, 0], 0],
+    [[0, .54, 0, 0], [-.5, 0, 0], 0],
+    [[-.54, 0, 0, 0], [0, .5, 0], 0],
+    [[.54, 0, 0, 0], [0, -.5, 0], 0],
+    [[0, 0, 0, -.54], [0, 0, .5], 0],
+    [[0, 0, 0, .54], [0, 0, -.5], 0],
+    [[0, 0, -.54, 0], [0, 0, 0], -.5],
+    [[0, 0, .54, 0], [0, 0, 0], .5],
+  ];
+  for (const [axes, translation, roll] of cases) {
+    const result = active(e, pad({axes}));
+    result.translation.forEach((value, index) => close(value, translation[index]));
+    close(result.roll, roll); close(result.elevation, 0);
+  }
 });
 
 test("sticks set body fractions independently of either trigger and translation norm is capped", () => {
@@ -31,7 +50,7 @@ test("sticks set body fractions independently of either trigger and translation 
   const neutralRT = active(e, pad({ axes: [0, -1, 0, -1], rt: .015 }));
   close(neutralRT.speed_scale, 1);
   close(Math.hypot(...neutralRT.translation), 1);
-  const axes = [0, 0, 0, -.54];
+  const axes = [0, -.54, 0, 0];
   for (const [lt, rt] of [[0, 0], [1, 0], [0, 1], [.2, .9]]) {
     const body = active(e, pad({ axes, lt, rt }));
     close(body.translation[0], .5); close(body.speed_scale, 1);
@@ -41,13 +60,13 @@ test("sticks set body fractions independently of either trigger and translation 
 
 test("D-pad elevation and fine roll override without extra yaw", () => {
   const e = new GamepadInputEngine(); e.reset(40, pad());
-  let out = active(e, pad({ axes: [1, 0, 0, 0], pressed: [12, 14], rt: 1 }));
+  let out = active(e, pad({ axes: [0, 0, 1, 0], pressed: [12, 14], rt: 1 }));
   close(out.elevation, .2); close(out.roll, -.2); assert.ok(!("yaw" in out));
-  out = active(e, pad({ axes: [1, 0, 0, 0], pressed: [13, 15], rt: 1 }));
+  out = active(e, pad({ axes: [0, 0, 1, 0], pressed: [13, 15], rt: 1 }));
   close(out.elevation, -.2); close(out.roll, .2);
-  out = active(e, pad({ axes: [1, 0, 0, 0], pressed: [12, 13, 14, 15], rt: 1 }));
+  out = active(e, pad({ axes: [0, 0, 1, 0], pressed: [12, 13, 14, 15], rt: 1 }));
   assert.equal(out.elevation, 0); close(out.roll, 0);
-  close(active(e, pad({ axes: [1, 0, 0, 0], rt: 1 })).roll, 1);
+  close(active(e, pad({ axes: [0, 0, 1, 0], rt: 1 })).roll, 1);
 });
 
 test("first-sample/selection baseline prevents held Start and standard validation never guesses", () => {
@@ -130,22 +149,22 @@ test("onscreen toggle uses current admitted opening and refuses unknown referenc
 
 test("disconnect/invalid input latch resume and emit source loss once", () => {
   const e = new GamepadInputEngine(); e.reset(40, pad());
-  active(e, pad({ axes: [0, 0, 0, -1], rt: 1 }));
+  active(e, pad({ axes: [0, -1, 0, 0], rt: 1 }));
   let out = active(e, null); assert.equal(out.source_lost, true); assert.equal(out.resume_required, true);
   out = active(e, null); assert.equal(out.source_lost, false); assert.deepEqual(out.actions, []);
-  out = active(e, pad({ axes: [0, 0, 0, -1], rt: 1, pressed: [0] }));
+  out = active(e, pad({ axes: [0, -1, 0, 0], rt: 1, pressed: [0] }));
   assert.deepEqual(out.actions, []); assert.deepEqual(out.translation, [0, 0, 0]);
   e.sample(pad());
   out = e.sample(pad({ pressed: [0] })); assert.deepEqual(out.actions, ["start"]);
   assert.equal(e.resume_required, true);
   e.reset(40, pad({ pressed: [0] }));
-  out = active(e, pad({ axes: [0, 0, 0, -1], rt: 1, pressed: [0] }));
+  out = active(e, pad({ axes: [0, -1, 0, 0], rt: 1, pressed: [0] }));
   close(out.translation[0], 1); assert.deepEqual(out.actions, []);
 });
 
 test("stable held controls and unchanged browser timestamp have no inactivity timeout", () => {
   const e = new GamepadInputEngine(); e.reset(40, pad());
-  const held = pad({ axes: [0, 0, 0, -.7], rt: rawTrigger(.3), timestamp: 123 });
+  const held = pad({ axes: [0, -.7, 0, 0], rt: rawTrigger(.3), timestamp: 123 });
   const initial = active(e, held);
   for (let i = 0; i < 10000; i += 1) assert.deepEqual(active(e, held), initial);
 });
@@ -157,7 +176,7 @@ test("controller replacement and malformed analog values cannot resume or emit m
   e.reset(40, pad());
   e.resetButtonBaseline(pad({ id: "new selection", pressed: [0] }));
   assert.equal(e.resume_required, true);
-  assert.deepEqual(active(e, pad({ id: "new selection", axes: [0, 0, 0, -1], rt: 1 })).translation, [0, 0, 0]);
+  assert.deepEqual(active(e, pad({ id: "new selection", axes: [0, -1, 0, 0], rt: 1 })).translation, [0, 0, 0]);
   e.reset(40, pad());
   const bad = pad(); bad.axes[2] = NaN;
   assert.equal(active(e, bad).valid, false);
@@ -178,7 +197,7 @@ test("bodyNeutral reflects processed sticks and any D-pad control during inactiv
   const e = new GamepadInputEngine();
   e.reset(40, pad({ axes: [.04, -.04, .04, -.04], lt: 1, rt: 1 }));
   assert.equal(e.bodyNeutral, true);
-  e.sample(pad({ axes: [0, 0, 0, -.2] }), { enabled: false });
+  e.sample(pad({ axes: [0, -.2, 0, 0] }), { enabled: false });
   assert.equal(e.bodyNeutral, false);
   let out = e.sample(pad({ pressed: [12, 13] }), { enabled: false });
   assert.equal(e.bodyNeutral, false); assert.equal(out.elevation, 0); assert.equal(out.gripper_target, null);
@@ -192,7 +211,7 @@ test("partial trigger switches both directions capture admitted opening and igno
   assert.equal(e.activeTrigger, "left");
   active(e, pad({ lt: rawTrigger(.8), rt: rawTrigger(.2) }));
   assert.equal(e.gripperState, "following");
-  let out = active(e, pad({ pressed: [5], lt: rawTrigger(.8), rt: rawTrigger(.2), axes: [0, 0, 0, -.54] }), 35);
+  let out = active(e, pad({ pressed: [5], lt: rawTrigger(.8), rt: rawTrigger(.2), axes: [0, -.54, 0, 0] }), 35);
   assert.equal(e.activeTrigger, "right"); assert.equal(out.trigger_changed, true);
   assert.equal(e.gripperState, "pickup"); close(e.liveGrip, .2); close(out.gripper_target, 35);
   close(out.translation[0], .5); close(out.speed_scale, 1);
@@ -263,7 +282,7 @@ test("background shoulders only baseline edges; focused inactive setup may selec
   out = e.sample(pad({ pressed: [5], rt: 1 }), { enabled: false, heldOpening: 35, allowSelection: true });
   assert.equal(e.activeTrigger, "left"); assert.equal(out.trigger_changed, false);
   e.sample(pad(), { enabled: false, allowSelection: true });
-  out = e.sample(pad({ pressed: [5], rt: 1, axes: [0, 0, 0, -1] }), { enabled: false, heldOpening: 35, allowSelection: true });
+  out = e.sample(pad({ pressed: [5], rt: 1, axes: [0, -1, 0, 0] }), { enabled: false, heldOpening: 35, allowSelection: true });
   assert.equal(e.activeTrigger, "right"); assert.equal(out.trigger_changed, true);
   assert.equal(out.gripper_target, null); assert.deepEqual(out.translation, [0, 0, 0]);
   assert.equal(e.gripperState, "pickup"); close(e.heldClosing, .65);
