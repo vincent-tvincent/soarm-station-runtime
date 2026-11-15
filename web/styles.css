@@ -2156,3 +2156,32 @@ kbd {
     flex-basis: 900px;
   }
 }
+
+/* Gamepad entry shares the Control panel's rectangular grid and restrained palette. */
+.gamepad-device-line { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:-6px 0 14px; color:var(--muted); font-size:11px; }
+.gamepad-trigger-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.gamepad-trigger-grid > section { border-top:1px solid var(--line); padding-top:10px; min-width:0; }
+.gamepad-value { display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin:2px 0 10px; }
+.gamepad-value strong { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+.gamepad-value span { color:var(--muted); font-size:10px; text-align:right; }
+.gamepad-meter { position:relative; height:7px; background:#e8e8e4; margin-bottom:9px; }
+.gamepad-meter i { display:block; height:100%; width:0; background:#191919; }
+.gamepad-meter b { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; background:var(--accent,#d9231b); }
+.gamepad-trigger-grid .detail-note { min-height:2.6em; margin:8px 0; font-size:10px; }
+.gamepad-trigger-grid .manual-toggle { padding:7px; font-size:11px; margin:0; }
+.gamepad-speeds { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:100%; margin-top:13px; }
+.gamepad-speeds button { padding:6px 0; font-size:11px; min-width:0; }
+.gamepad-motion-readout { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0 12px; border-top:1px solid var(--line); padding-top:10px; }
+.gamepad-motion-readout span { display:flex; flex-direction:column; gap:4px; font-size:10px; color:var(--muted); }
+.gamepad-motion-readout b { color:#191919; font-size:11px; font-weight:500; }
+.gamepad-bindings { margin:10px 0; }
+.gamepad-bindings dl { margin:0; font-size:10px; }
+.gamepad-bindings dl > div { display:grid; grid-template-columns:1fr 1fr; gap:10px; border-bottom:1px solid var(--line); padding:6px 0; }
+.gamepad-bindings dt { font-weight:600; }
+.gamepad-bindings dd { margin:0; color:var(--muted); }
+@media(min-width:1000px){
+  #panel-manual:not([hidden]):has(#gamepad-panel:not([hidden])) {
+    grid-template-rows:auto minmax(350px,1fr) auto auto minmax(230px,.9fr);
+  }
+}
+@media(max-width:400px){.gamepad-trigger-grid{gap:10px}.gamepad-value{flex-wrap:wrap}.gamepad-motion-readout{gap:6px}}

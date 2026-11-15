@@ -1651,6 +1651,19 @@ manual = new ManualPanel({
   client,
   onError: showError,
   onNotice: notice,
+  onCameraCycle: () => {
+    if (!cameraIds.length) return;
+    primaryCamera = cameraIds[(cameraIds.indexOf(primaryCamera) + 1) % cameraIds.length];
+    if (cameraLayout === 'equal') cameraLayout = 'primary';
+    document.querySelectorAll('[data-layout]').forEach(button => button.classList.toggle('active',button.dataset.layout === cameraLayout));
+    arrangeCameras();
+  },
+  onCameraLayout: () => {
+    const layouts = ['equal','primary','floating'];
+    cameraLayout = layouts[(layouts.indexOf(cameraLayout) + 1) % layouts.length];
+    document.querySelectorAll('[data-layout]').forEach(button => button.classList.toggle('active',button.dataset.layout === cameraLayout));
+    arrangeCameras();
+  },
 });
 policies = new PolicyManagement({ element: $("policies"), client, onError: showError, onNotice: notice });
 loadExample();

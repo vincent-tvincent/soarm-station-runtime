@@ -1,11 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ManualPanel} from '../web/manual-panel.js';
+import {StationClient} from '../web/transport.js';
 
 globalThis.document = {hidden:false};
 globalThis.Option = class { constructor(text,value){this.text=text;this.value=value;} };
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
 const target=(q=0,g=50)=>({positions:{joint:q},gripper:g,gripper_unit:'percent'});
+function emitTransportClose(panel,reason='stopping',arm=panel.arm){
+  let emitted;
+  const transport=new StationClient({onOperation:event=>{emitted=event;panel.updateOperation(event);}});
+  transport._active={armId:arm,type:'DIRECT',mode:'STREAM',transport:'websocket',state:'active',
+    grant:null,timers:new Set(),pending:null,finished:{resolve(){}}};
+  transport._stopLocalOperation(reason,'Test close event');
+  return emitted;
+}
 function fixture(){
   const panel=Object.create(ManualPanel.prototype),calls=[];
   const states={a:{runtime_boot_id:'boot',controller_session:'session',feedback_valid:true,gripper_percent:50,permission:false},b:{runtime_boot_id:'bootB',controller_session:'sessionB',feedback_valid:true,gripper_percent:50,permission:false}};
@@ -14,7 +23,7 @@ function fixture(){
   const client={operatorSessionId:'operator',currentOperation:null,
     async enable(arm){calls.push(['enable',arm]);states[arm].permission=true;return{accepted:true};},
     async startManual(arm){calls.push(['start',arm]);this.currentOperation={armId:arm,type:'DIRECT',mode:'STREAM',ready:true};return this.currentOperation;},
-    async hold(arm){calls.push(['hold',arm]);this.currentOperation=null;states[arm].permission=false;panel.updateOperation({event:'closed',state:'stopping'});return{success:true};},
+    async hold(arm){calls.push(['hold',arm]);this.currentOperation=null;states[arm].permission=false;emitTransportClose(panel,'stopping',arm);return{success:true};},
     setManualTarget(value){calls.push(['target',structuredClone(value)]);},
     async request(path,body){calls.push(['request',path,structuredClone(body)]);return{target:target(1)};},
   };
@@ -137,6 +146,37 @@ test('unexpected operation fault invalidates pending Home even during internal t
   const home=panel.preset('home');panel.expectedTermination=1;panel.updateOperation({event:'error',state:'error'});panel.expectedTermination=0;
   gate.resolve({target:target(.8)});await home;
   assert(!calls.some(x=>['enable','start','target'].includes(x[0])));
+});
+
+test('real transport expected-hold event preserves a gamepad mode-change intent',async()=>{
+  const{panel,client,calls,states}=fixture();panel.mode='gamepad';panel.ownsStream=true;states.a.permission=true;
+  panel.gamepad={suspend(){},operationEnded(){},setActive(){}};
+  client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',ready:true};
+  await panel.changeMode('ik');
+  assert.equal(panel.mode,'ik');assert.equal(panel.intentGeneration,1,'only the explicit mode change invalidates the old intent');
+  assert.equal(panel.expectedTermination,0);assert.equal(panel.busy,false);
+  assert.equal(calls.filter(call=>call[0]==='hold').length,1);
+  assert(!calls.some(call=>['enable','start','target'].includes(call[0])));
+});
+
+test('gamepad Home survives the real close event when replacing another same-arm operation',async()=>{
+  const{panel,client,calls,states}=fixture();panel.mode='gamepad';panel.ownsStream=false;states.a.permission=true;
+  panel.gamepad={suspend(){},operationEnded(){}};
+  client.currentOperation={armId:'a',type:'TRAJECTORY',mode:'INLINE',ready:true};
+  client.request=async()=>({target:target(.4,60)});
+  await panel.preset('home');
+  assert.deepEqual(calls.filter(call=>['hold','enable','start'].includes(call[0])),[['hold','a'],['enable','a'],['start','a']]);
+  assert.deepEqual(calls.filter(call=>call[0]==='target'),[['target',target(.4,60)]]);
+  assert.equal(panel.intentGeneration,1);assert.equal(panel.ownsStream,true);assert.equal(panel.busy,false);
+});
+
+test('a real disconnect close still cancels Home while an internal hold is expected',async()=>{
+  const{panel,client,calls}=fixture(),gate=deferred();client.request=async()=>gate.promise;
+  const home=panel.preset('home');panel.expectedTermination=1;
+  const event=emitTransportClose(panel,'disconnected');panel.expectedTermination=0;
+  assert.equal(event.state,'closed');assert.equal(event.terminalReason,'disconnected');
+  gate.resolve({target:target(.8)});await home;
+  assert(!calls.some(call=>['enable','start','target'].includes(call[0])));
 });
 
 test('uncertain late permission reply after Stop still receives cleanup hold',async()=>{

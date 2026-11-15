@@ -21,7 +21,7 @@ from aiohttp import web
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST, PORT = "127.0.0.1", 8767
-ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js", "manual-panel.js", "fk-view.js"}
+ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js", "manual-panel.js", "gamepad-panel.js", "gamepad-input.js", "fk-view.js"}
 
 
 class Preview:

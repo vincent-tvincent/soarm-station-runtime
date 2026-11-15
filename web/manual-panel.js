@@ -1,4 +1,5 @@
 import { FKView } from "./fk-view.js";
+import { GamepadPanel } from "./gamepad-panel.js";
 const AXES = [
   ["X", "KeyK", "K", "KeyJ", "J"],
   ["Y", "KeyL", "L", "KeyH", "H"],
@@ -11,7 +12,7 @@ const MOVE_KEYS = new Set(AXES.flatMap((a) => [a[1], a[3]]));
 const finite = Number.isFinite;
 const copy = (value) => structuredClone(value);
 export class ManualPanel {
-  constructor({ element, client, onError, onNotice }) {
+  constructor({ element, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
     Object.assign(this, { element, client, onError, onNotice });
     this.arm = "";
     this.mode = "joint";
@@ -29,15 +30,17 @@ export class ManualPanel {
     this.dirty = false;
     this.descriptor = null;
     this.hosts = [];
-    element.innerHTML = `<label class="field-label manual-mode-label">Control mode<select id="manual-mode" aria-label="Control mode"><option value="joint">Joint targets</option><option value="ik">IK · keyboard jog</option><option value="leader">Leader arm</option></select></label>
+    element.innerHTML = `<label class="field-label manual-mode-label">Control mode<select id="manual-mode" aria-label="Control mode"><option value="joint">Joint targets</option><option value="ik">IK · keyboard jog</option><option value="leader">Leader arm</option><option value="gamepad">Gamepad · Xbox / DualSense</option></select></label>
     <div class="manual-control-area">
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
       <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Normal</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 2 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
+      <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
       <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">The selected leader follows through the station. Home stops following.</p></div>
     </div>
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p><div id="manual-fk"></div>`;
     this.el = (id) => element.querySelector("#" + id);
     this.fk = new FKView(this.el("manual-fk"));
+    this.gamepad = new GamepadPanel({element:this.el('gamepad-panel'),manual:this,onCameraCycle,onCameraLayout,env:gamepadEnv});
     this.el("manual-mode").onchange = () =>
       this.safe(() => this.changeMode(this.el("manual-mode").value));
     this.el("reset-targets").onclick = () => {
@@ -146,6 +149,7 @@ export class ManualPanel {
   }
   setVisible(value) {
     this.visible = value;
+    this.gamepad?.setActive(value && this.mode === "gamepad");
     if (!value) this.clearKeys();
     else {
       this.refreshPose();
@@ -175,6 +179,7 @@ export class ManualPanel {
       this.ownsStream = false;
       this.config = (resources.arms || []).find((a) => a.id === arm) || {};
       this.resetTargets();
+      this.gamepad?.resetForArm();
     }
     // Initial status can select the default arm before connect() announces its
     // connected state. Fetch capabilities when that connection becomes ready.
@@ -208,9 +213,10 @@ export class ManualPanel {
       const expectedHold =
         this.expectedTermination &&
         event.event === "closed" &&
-        event.state === "stopping";
+        (event.terminalReason ?? event.state) === "stopping";
       if (!expectedHold) this.cancelIntent();
       else this.clearKeys();
+      this.gamepad?.operationEnded();
       this.note("Stream stopped. Targets remain local.");
     }
     this.updateControls();
@@ -240,13 +246,16 @@ export class ManualPanel {
       !ready ||
       active ||
       this.busy ||
-      (this.mode === "ik" && !this.descriptor?.available) ||
+      (["ik","gamepad"].includes(this.mode) && !this.descriptor?.available) ||
+      (this.mode === "gamepad" && (!this.descriptor?.analog_rates || !this.gamepad?.canStart())) ||
       (this.mode === "leader" && !this.el("leader-device").value);
-    this.el("start-manual").textContent = this.busy
+    this.el("start-manual").innerHTML = this.busy
       ? "Starting…"
       : this.mode === "leader"
         ? "Follow"
-        : "Start";
+        : this.mode === "gamepad" ? "Start <kbd>A / ✕</kbd>" : "Start";
+    this.el("stop-manual").innerHTML = this.mode === "gamepad" ? "Stop <kbd>B / ○</kbd>" : "Stop <kbd>Esc</kbd>";
+    this.el("home-manual").innerHTML = this.mode === "gamepad" ? "Home <kbd>Y / △</kbd>" : "Home <kbd>N</kbd>";
     this.el("stop-manual").disabled = !this.connected || !this.arm;
     for (const name of ["home", "fold"]) {
       const available = !!this.descriptor?.presets?.[name];
@@ -263,6 +272,7 @@ export class ManualPanel {
       b.disabled = this.busy || !this.isOwnStream();
     for (const b of this.element.querySelectorAll("[data-roll]"))
       b.disabled = this.busy || !ready || !this.descriptor?.available;
+    this.gamepad?.updateControls();
   }
   resetTargets() {
     this.dirty = false;
@@ -349,6 +359,7 @@ export class ManualPanel {
   cancelIntent() {
     this.intentGeneration++;
     this.clearKeys();
+    this.gamepad?.suspend();
   }
   intentContext() {
     const state = this.stateForArm();
@@ -424,6 +435,7 @@ export class ManualPanel {
       if (generation !== this.intentGeneration || arm !== this.arm) return;
       this.ownsStream = false;
       this.mode = mode;
+      this.gamepad?.setActive(this.visible && mode === "gamepad");
       this.el("manual-mode").value = mode;
       for (const v of this.element.querySelectorAll("[data-manual-view]"))
         v.hidden = v.dataset.manualView !== mode;
@@ -441,6 +453,10 @@ export class ManualPanel {
   }
   async start() {
     if (this.busy || !this.connected || !this.arm) return;
+    if (this.mode === "gamepad") {
+      if (!this.descriptor?.available || !this.descriptor?.analog_rates) throw Error(this.descriptor?.reason || "Gamepad kinematics are not ready.");
+      if (!this.gamepad?.canStart()) throw Error(this.gamepad?.startReason() || "Controller unavailable.");
+    }
     this.cancelIntent();
     const context = this.intentContext();
     this.actionBusy(1);
@@ -492,10 +508,11 @@ export class ManualPanel {
         this.target = copy(staged);
         this.reference = copy(staged);
         this.lastSolveAt = null;
+        if (context.mode === "gamepad") this.gamepad?.operationStarted();
         this.note(
           context.mode === "ik"
             ? "IK active · hold a key or jog button to move."
-            : "Joint stream active · target edits are sent immediately.",
+            : context.mode === "gamepad" ? "Gamepad active · RT / R2 sets the arm speed range." : "Joint stream active · target edits are sent immediately.",
         );
       }
     } catch (error) {
@@ -639,6 +656,7 @@ export class ManualPanel {
     this.lastSolveAt = null;
     this.dirty = true;
     this.renderSliders();
+    if (this.mode === "gamepad") this.gamepad?.suspend();
     this.note(message);
     this.updateControls();
   }
