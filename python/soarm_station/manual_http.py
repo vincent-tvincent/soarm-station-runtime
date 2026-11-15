@@ -32,15 +32,23 @@ class ManualRoutes:
                 target = body.get('target')
                 overlay = await asyncio.to_thread(model.fk, target['positions'], target['gripper']) if target else None
                 return web.json_response({'measured': measured, 'target': overlay})
-            if operation == 'step':
+            if operation in ('step', 'analog-step'):
                 lock = self.step_locks.setdefault(arm, asyncio.Lock())
                 if lock.locked():
                     return web.json_response({'message': 'Previous IK calculation is still running'}, status=409)
                 async with lock:
-                    result = await asyncio.to_thread(model.step, positions, gripper,
-                        keys=body.get('keys', []), dt_s=body.get('dt_s', 1/30), level=body.get('level', 2),
-                        shift=body.get('shift', False), position_only=body.get('position_only', False),
-                        reference_positions=body.get('reference_positions'), reference_gripper=body.get('reference_gripper'))
+                    shared = {'level': body.get('level', 2),
+                              'reference_positions': body.get('reference_positions'),
+                              'reference_gripper': body.get('reference_gripper')}
+                    if operation == 'analog-step':
+                        result = await asyncio.to_thread(model.analog_step, positions, gripper,
+                            translation=body['translation'], elevation=body['elevation'], roll=body['roll'],
+                            speed_scale=body['speed_scale'], gripper_target=body.get('gripper_target'),
+                            dt_s=body['dt_s'], **shared)
+                    else:
+                        result = await asyncio.to_thread(model.step, positions, gripper,
+                            keys=body.get('keys', []), dt_s=body.get('dt_s', 1/30),
+                            shift=body.get('shift', False), position_only=body.get('position_only', False), **shared)
             elif operation == 'preset':
                 result = await asyncio.to_thread(model.preset, body['name'], positions, body.get('reference_gripper',gripper),
                                                  preserve_wrist=body.get('preserve_wrist', False))
@@ -56,5 +64,5 @@ class ManualRoutes:
 
     def mount(self, app):
         app.router.add_get('/api/manual/{arm}/{operation:describe}', self.handle)
-        app.router.add_post('/api/manual/{arm}/{operation:fk|step|preset|roll}', self.handle)
+        app.router.add_post('/api/manual/{arm}/{operation:fk|step|analog-step|preset|roll}', self.handle)
         return self

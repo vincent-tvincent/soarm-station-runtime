@@ -64,7 +64,7 @@ The caller handles one-shot keys and position-only toggle (Tab); `step` receives
 
 Position-only ignores orientation keys/constraints. Ordinary XYZ/elevation jogging freezes the wrist-roll motor unless G/S is active, avoiding an extra independent roll constraint on the five-axis arm. G/S solves position, elevation and tool roll with free azimuth. R/T/E instead select an absolute **motor wrist-roll** target and preserve the other joints; repeated presses do not accumulate angles.
 
-The solver uses URDF rotational-chain FK, analytic translational Jacobians, bounded damped least-squares and checked final residuals. A local orientation chart avoids a reference-axis singularity; full six-dimensional pose is not imposed. It tries progressively smaller increments down to 1/64 when the full increment does not converge. Default computation budget is 40 ms, capped at 100 ms, with at most 24 iterations per attempt. Checks are cooperative, not a hard real-time guarantee. No collision/path safety claim is made by these lines/spheres.
+The solver uses URDF rotational-chain FK, analytic translational Jacobians, bounded damped least-squares and checked final residuals. A local orientation chart avoids a reference-axis singularity; full six-dimensional pose is not imposed. A joint-displacement/Jacobian prediction reduces the initial increment when a near-straight Newton estimate crosses a singular branch, while motion away from that branch can retain its full step. This is only an initial-step hint, never a reachability verdict or an added motion constraint. Nonlinear correction stops on accepted residuals or no improving bounded update. Further step halving ends at the existing 1 µm position / 10 µrad angular numerical-resolution floors, replacing the fixed 1/64 search cutoff. A 96-iteration per-candidate arithmetic guard is a final fallback; the last iterate is still checked for convergence. There is no wall-clock success/failure cutoff: legacy `solve_budget_ms` is accepted but ignored. CPU scheduling must not turn an otherwise converged target into BLOCKED. The one-pending-request UI and operation/key generation checks remain responsible for dropping obsolete results; motor dispatch remains independent. No collision/path safety claim is made by these lines/spheres.
 
 Use one pending solve per browser. Compute `dt_s` from actual elapsed held-input time when producing the next request; it is capped at 100 ms and never accumulated into catch-up requests. At 60 ms round-trip, fixed 1/30-s increments would unnecessarily halve the requested speed. Pass the latest **admitted/applied** reference when available rather than repeatedly integrating from lagged measured joints. Do not accumulate unresolved Cartesian targets. Keep request operation/session/generation identity in the UI and drop responses after key release, mode/arm change, stop, Home, or disconnect. The calculator does not validate network identity and does not refresh any input window.
 
@@ -94,7 +94,6 @@ manual_control:
   wrist_roll_reference_rad: 0.0
   control_frame_yaw_rad: 0.0
   operator_tool_rpy: [0.0, 0.0, 3.141592653589793]
-  solve_budget_ms: 40.0
 ```
 
 Omitted/null `gripper` also preserves the supplied measured percentage. A finite explicit percentage is supported. The named-pose template includes the operator-observed Fold from August 5, 2026, with its original joint values converted to radians and jaw preservation. On November 15 the user approved extending the shoulder lower bound and rounding it down to **−105°** (`-1.8325957145940461 rad`); the vendored URDF matches that bound. The selected arm's `shoulder_lift.min_rad` must match when installing this preset. Other joint limits and the recorded Fold target are unchanged. Unknown pose names and incomplete/out-of-range configured poses still reject; there is no all-zero fallback.
@@ -114,3 +113,20 @@ Nine tests cover an independently calculated two-link FK chain/fixed TCP, SO-101
 `web/manual-panel.js` uses separate intent generation and held-key epochs. Start/Home/roll are single-flight user intents; Stop remains available while one is pending. Cancellation invalidates delayed responses and retires late grants/runs rather than sending a target. Key release invalidates a solve without canceling an explicit Home/Start. Normal jogging updates its accepted reference, uses measured pose separately, and keeps at most one pending request.
 
 Run `node --test tests/test_manual_panel.mjs` for 17 hardware-free cases covering delayed permission/Start/Home/roll/leader replies, mode/arm/disconnect cancellation, late uncertain permission cleanup, current reference advancement, no parallel solves, and Home reseeding. These tests instantiate behavioral methods with an injectable minimal client; they do not simulate browser rendering or physical motion.
+
+## Positive-Y convergence correction — November15
+
+A read-only snapshot on baseline `67e8fcf` reproduced H/+Y returning BLOCKED while L/−Y worked. The admitted reference was near straight (about 1.27° between the relevant links); its TCP differed from measured feedback by centimeters. An independently solved 1/8 increment satisfied the unchanged position and 10 µrad elevation criteria, but the original full candidate consumed almost all of the 40 ms deadline before that fallback ran. This was computation-budget starvation, not proof that all positive-Y movement was physically impossible.
+
+The correction preserves the admitted reference, locked wrist rule, configured joint/velocity bounds and residual tolerances. It removes elapsed-time rejection and selects a smaller first candidate near a singular branch. Captured-case regression asserts +Y progress, full-step −Y preservation, keyboard/analog equivalence, and unchanged results under a jumping clock or deliberately slowed FK. No measured-pose reseeding, automatic position-only fallback or tolerance relaxation is used. Run `python -m unittest discover -s tests -p test_manual_ik_regression.py -v`. These are isolated model calculations, not physical motion validation.
+
+## Analog manual input
+
+`analog_step` accepts normalized `translation:[x,y,z]`, `elevation`, `roll`,
+`speed_scale`, optional absolute `gripper_target` in opening percent, `dt_s`,
+`level`, and the same measured/admitted references as keyboard jogging. The
+HTTP entry is `POST /api/manual/{arm}/analog-step`. Diagonal translation is
+norm-capped without amplifying small input; the trigger scale multiplies body
+rates only. The absolute jaw target advances independently under the existing
+jaw velocity limit. Both producers share the corrected solver and per-arm
+calculation lock. This endpoint calculates a target and never dispatches it.

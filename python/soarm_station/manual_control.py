@@ -9,7 +9,6 @@ import copy
 import hashlib
 import math
 from pathlib import Path
-import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -126,7 +125,8 @@ class ManualControl:
         self.frame = self.config.get('base_frame')
         self.tcp = self.config.get('tcp_frame', 'gripper_frame_link')
         self.operator_rotation = _rpy(_vector(self.settings.get('operator_tool_rpy', [0., 0., math.pi]), 3, 'operator_tool_rpy'))
-        self.budget = min(.1, max(.001, _finite(self.settings.get('solve_budget_ms', 40.), 'solve_budget_ms')/1000))
+        # Legacy solve_budget_ms remains accepted in configuration, but CPU timing
+        # never determines geometric success. Work stops on convergence/no progress.
         self.model_error = None
         self.chain = []
         self.branch = None
@@ -261,11 +261,62 @@ class ManualControl:
                 'model_sha256': self.model_sha256, 'joint_names': list(self.names),
                 'keymap': copy.deepcopy(KEYS), 'default_level': 2, 'max_dt_s': .1,
                 'speed_levels': [{'level': i+1, 'translation_m_s': s[0], 'orientation_rad_s': s[1], 'gripper_percent_s': s[2]} for i, s in enumerate(SPEEDS)],
-                'position_only': True, 'poses': poses, 'presets': {name: value['available'] for name, value in poses.items()}, 'wrist_roll_reference_rad': reference,
+                'position_only': True, 'analog_rates': True, 'poses': poses, 'presets': {name: value['available'] for name, value in poses.items()}, 'wrist_roll_reference_rad': reference,
                 'roll_presets_rad': None if reference is None else {'minus_90': reference-math.pi/2, 'reference': reference, 'plus_90': reference+math.pi/2},
                 'geometry_is_collision_check': False}
 
-    def _solve(self, q0, target_position, target_semantics, orientation_rows, free, lower, upper, reference, deadline, p_tol, a_tol):
+    def _task_jacobian(self, pose, origins, axes, semantics, orientation_rows, free, reference):
+        """Derivative of position plus the existing scaled semantic residuals."""
+        jac = np.empty((3+len(orientation_rows), len(free)))
+        rotation = pose[:3, :3] @ self.operator_rotation
+        for column, index in enumerate(free):
+            axis = axes[self.mapping[index]]
+            jac[:3, column] = np.cross(axis, pose[:3, 3]-origins[self.mapping[index]])
+            if orientation_rows:
+                perturbed, _ = _semantics(_rotation(axis, 1e-6) @ rotation, reference)
+                jac[3:, column] = [_wrap(perturbed[i]-semantics[i])/1e-6*.06 for i in orientation_rows]
+        return jac
+
+    def _starting_fraction(self, q0, pose, origins, axes, semantics, translation, angles,
+                           orientation_rows, free, lower, upper, reference):
+        """Skip predictably oversized increments, without claiming infeasibility.
+
+        The local undamped estimate is only a step-size hint. A blocked or
+        sub-resolution estimate falls back to the normal nonlinear search.
+        """
+        if not free: return 1.
+        error = np.concatenate((translation, angles[orientation_rows]*.06))
+        jac = self._task_jacobian(pose, origins, axes, semantics, orientation_rows, free, reference)
+        delta = np.linalg.lstsq(jac, error, rcond=1e-8)[0]
+        bound_fraction = 1.
+        for column, index in enumerate(free):
+            amount = delta[column]
+            if abs(amount) <= 1e-12: continue
+            room = upper[index]-q0[index] if amount > 0 else q0[index]-lower[index]
+            bound_fraction = min(bound_fraction, max(0., room)/abs(amount))
+        def same_local_branch(fraction):
+            trial = q0.copy()
+            trial[free] = np.clip(q0[free]+delta*fraction, lower[free], upper[free])
+            candidate, candidate_origins, candidate_axes, _ = self._forward(trial)
+            candidate_semantics, _ = _semantics(candidate[:3, :3] @ self.operator_rotation, reference)
+            candidate_jac = self._task_jacobian(candidate, candidate_origins, candidate_axes,
+                                               candidate_semantics, orientation_rows, free, reference)
+            return np.linalg.slogdet(candidate_jac @ jac.T)[0] > 0
+        # Near a straight arm, a full Newton estimate can cross the singular
+        # branch. Reduce that starting request before spending iterations on it.
+        # Moving away from the singularity retains the full request: a linear
+        # joint-displacement estimate alone can otherwise slow feasible motion.
+        if same_local_branch(1.): return 1.
+        fraction = .5
+        if 0 < bound_fraction < 1:
+            fraction = min(fraction, math.ldexp(1., math.floor(math.log2(bound_fraction))))
+        while np.linalg.norm(translation)*fraction > 1e-6 or np.linalg.norm(angles)*fraction > 1e-5:
+            if same_local_branch(fraction): return fraction
+            fraction *= .5
+        # This predictor is advisory, never a global reachability test.
+        return 1.
+
+    def _solve(self, q0, target_position, target_semantics, orientation_rows, free, lower, upper, reference, p_tol, a_tol):
         q = q0.copy(); best = None; angular_scale = .06
         def evaluate(values):
             pose, origins, axes, _ = self._forward(values)
@@ -274,20 +325,14 @@ class ManualControl:
             ae = np.array([_wrap(target_semantics[i]-semantics[i]) for i in orientation_rows])
             error = np.concatenate((pe, ae*angular_scale))
             return pose, origins, axes, semantics, pe, ae, error
-        for _ in range(24):
-            if time.perf_counter() >= deadline: break
+        # A generous arithmetic guard, not a time/latency gate. Ordinary exits
+        # are accepted residuals or absence of an improving bounded update.
+        for _ in range(96):
             pose, origins, axes, semantics, pe, ae, error = evaluate(q)
             best = {'position_m': float(np.linalg.norm(pe)), 'orientation_rad': float(np.max(np.abs(ae))) if len(ae) else 0.}
             if best['position_m'] <= p_tol and best['orientation_rad'] <= a_tol: return q, best
-            jac = np.empty((len(error), len(free)))
-            rotation = pose[:3, :3] @ self.operator_rotation
-            for column, index in enumerate(free):
-                axis = axes[self.mapping[index]]
-                jac[:3, column] = np.cross(axis, pose[:3, 3]-origins[self.mapping[index]])
-                if orientation_rows:
-                    perturbed, _ = _semantics(_rotation(axis, 1e-6) @ rotation, reference)
-                    jac[3:, column] = [_wrap(perturbed[i]-semantics[i])/1e-6*angular_scale for i in orientation_rows]
-            if not len(free): break
+            if not free: break
+            jac = self._task_jacobian(pose, origins, axes, semantics, orientation_rows, free, reference)
             delta = jac.T @ np.linalg.solve(jac @ jac.T + 1e-6*np.eye(len(error)), error)
             improved = False
             for scale in (1., .5, .25, .125):
@@ -295,10 +340,59 @@ class ManualControl:
                 if np.linalg.norm(evaluate(candidate)[-1]) < np.linalg.norm(error)-1e-12:
                     q = candidate; improved = True; break
             if not improved: break
-        return None, best
+        # The last update may have converged exactly at the arithmetic guard.
+        _, _, _, _, pe, ae, _ = evaluate(q)
+        best = {'position_m': float(np.linalg.norm(pe)), 'orientation_rad': float(np.max(np.abs(ae))) if len(ae) else 0.}
+        return (q if best['position_m'] <= p_tol and best['orientation_rad'] <= a_tol else None), best
 
     def step(self, positions_rad, gripper_percent, *, keys, dt_s, level=2, shift=False, position_only=False, reference_positions=None, reference_gripper=None):
         """Return one incremental target; caller rejects obsolete responses before DIRECT."""
+        rates = keyboard_rates(keys, level, shift, self.settings.get('control_frame_yaw_rad', 0.), position_only)
+        return self._step_rates(positions_rad, gripper_percent, rates=rates, dt_s=dt_s,
+                               position_only=position_only, reference_positions=reference_positions,
+                               reference_gripper=reference_gripper)
+
+    def analog_step(self, positions_rad, gripper_percent, *, translation, elevation, roll,
+                    speed_scale, gripper_target=None, dt_s, level=2,
+                    reference_positions=None, reference_gripper=None):
+        """Integrate normalized analog rates, independently tracking an absolute jaw target.
+
+        Individual axes must lie in [-1,1]; translation diagonals are norm-capped
+        to one without magnifying subunit input. speed_scale affects body rates,
+        never the gripper. Results still require the existing DIRECT grant.
+        """
+        if type(level) is not int or not 1 <= level <= 5:
+            raise ValueError('level must be an integer in [1,5]')
+        values = np.asarray(translation, dtype=object)
+        if values.shape != (3,):
+            raise ValueError('translation must contain three normalized axes')
+        direction = np.array([_finite(value, 'translation axis') for value in values])
+        elevation = _finite(elevation, 'elevation')
+        roll = _finite(roll, 'roll')
+        speed_scale = _finite(speed_scale, 'speed_scale')
+        if np.any(np.abs(direction) > 1) or abs(elevation) > 1 or abs(roll) > 1:
+            raise ValueError('Analog axes must be in [-1,1]')
+        if not 0 <= speed_scale <= 1:
+            raise ValueError('speed_scale must be in [0,1]')
+        if gripper_target is not None:
+            gripper_target = self._gripper(gripper_target)
+        magnitude = np.linalg.norm(direction)
+        if magnitude > 1:
+            direction /= magnitude
+        yaw = _finite(self.settings.get('control_frame_yaw_rad', 0.), 'yaw_rad')
+        direction = _rotation(np.array([0., 0., 1.]), yaw) @ direction
+        linear, angular, _ = SPEEDS[level-1]
+        rates = {'translation_m_s': (direction*linear*speed_scale).tolist(),
+                 'elevation_rad_s': elevation*angular*speed_scale,
+                 'roll_rad_s': roll*angular*speed_scale,
+                 'gripper_percent_s': 0., 'level': level}
+        return self._step_rates(positions_rad, gripper_percent, rates=rates, dt_s=dt_s,
+                               position_only=False, reference_positions=reference_positions,
+                               reference_gripper=reference_gripper, gripper_target=gripper_target)
+
+    def _step_rates(self, positions_rad, gripper_percent, *, rates, dt_s, position_only,
+                    reference_positions=None, reference_gripper=None, gripper_target=None):
+        """Common bounded integration/IK; producer-specific mapping is already complete."""
         self._q(positions_rad)  # Retain measured-state validation even when an admitted reference is supplied.
         self._gripper(gripper_percent)
         q0 = self._q(reference_positions if reference_positions is not None else positions_rad, bounded=True)
@@ -306,20 +400,22 @@ class ManualControl:
         dt = _finite(dt_s, 'dt_s')
         if dt < 0: raise ValueError('dt_s must be nonnegative')
         dt = min(dt, .1)  # No accumulated catch-up movement after a delayed browser tick.
-        rates = keyboard_rates(keys, level, shift, self.settings.get('control_frame_yaw_rad', 0.), position_only)
-        pose, _, _, _ = self._forward(q0)
+        pose, origins, axes, _ = self._forward(q0)
         rotation = pose[:3, :3] @ self.operator_rotation
         reference = np.eye(3)[int(np.argmin(np.abs(rotation[:, 2])))]
         semantics, _ = _semantics(rotation, reference)
         translation = np.array(rates['translation_m_s'])*dt
         angles = np.array([rates['elevation_rad_s'], rates['roll_rad_s']])*dt
-        jaw_velocity = min(abs(rates['gripper_percent_s']), self.config.get('gripper', {}).get('velocity_percent_s', 100.))
-        jaw_delta = math.copysign(jaw_velocity*dt, rates['gripper_percent_s']) if rates['gripper_percent_s'] else 0.
+        gripper_velocity = self.config.get('gripper', {}).get('velocity_percent_s', 100.)
+        if gripper_target is None:
+            jaw_velocity = min(abs(rates['gripper_percent_s']), gripper_velocity)
+            jaw_delta = math.copysign(jaw_velocity*dt, rates['gripper_percent_s']) if rates['gripper_percent_s'] else 0.
+        else:
+            jaw_delta = float(np.clip(gripper_target-g0, -gripper_velocity*dt, gripper_velocity*dt))
         jaw = float(np.clip(g0+jaw_delta, 0., 100.))
         result = q0; residuals = {'position_m': 0., 'orientation_rad': 0.}; fraction = 1.
         requested = np.linalg.norm(translation) > 0 or np.linalg.norm(angles) > 0
         if requested:
-            deadline = time.perf_counter()+self.budget
             free = list(range(len(q0)))
             roll_joint = self.settings.get('wrist_roll_joint', 'wrist_roll')
             roll_input = rates['roll_rad_s'] != 0.
@@ -327,19 +423,25 @@ class ManualControl:
             rows = [] if position_only else [0, 1] if roll_input else [0]
             lower = np.maximum(self.lower, q0-self.velocity*dt); upper = np.minimum(self.upper, q0+self.velocity*dt)
             result = None
-            for fraction in (1., .5, .25, .125, .0625, .03125, .015625):
+            fraction = self._starting_fraction(q0, pose, origins, axes, semantics, translation, angles,
+                                               rows, free, lower, upper, reference)
+            # Stop reducing when neither requested component exceeds the existing
+            # acceptance-resolution floor; a smaller no-op must not claim success.
+            while np.linalg.norm(translation)*fraction > 1e-6 or np.linalg.norm(angles)*fraction > 1e-5:
                 target_semantics = semantics+angles*fraction
-                if abs(target_semantics[0]) > math.pi/2: continue
+                if abs(target_semantics[0]) > math.pi/2:
+                    fraction *= .5
+                    continue
                 p_tol = min(.00015, max(.000001, np.linalg.norm(translation)*fraction*.08))
                 a_tol = min(.002, max(.00001, np.linalg.norm(angles)*fraction*.08))
-                result, residuals = self._solve(q0, pose[:3, 3]+translation*fraction, target_semantics, rows, free, lower, upper, reference, deadline, p_tol, a_tol)
+                result, residuals = self._solve(q0, pose[:3, 3]+translation*fraction, target_semantics, rows, free, lower, upper, reference, p_tol, a_tol)
                 if result is not None: break
-                if time.perf_counter() >= deadline: break
+                fraction *= .5
         status = 'OK' if requested or jaw_delta else 'IDLE'
         reason = ''
         if result is None:
             result = q0; fraction = 0.; status = 'PARTIAL' if jaw != g0 else 'BLOCKED'
-            reason = 'No converged incremental IK target within configured bounds and computation budget'
+            reason = 'No converged incremental IK target within configured bounds and numerical resolution'
         positions = dict(zip(self.names, map(float, result)))
         target = {'positions': positions, 'gripper': jaw, 'gripper_unit': 'percent'}
         return {'status': status, 'reason': reason, 'target': target, 'geometry': self.fk(positions, jaw),

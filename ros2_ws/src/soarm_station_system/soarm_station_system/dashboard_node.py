@@ -29,7 +29,7 @@ from soarm_station.policy_manager import PolicyManager
 from soarm_station.policy_http import mount_policy_routes
 from soarm_station.ipc import Client
 
-ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
+ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','gamepad-panel.js','gamepad-input.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
 def telemetry_view(config,upload):
