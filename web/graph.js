@@ -212,7 +212,10 @@ function rpcMetricText(metric) {
 }
 function rpcInspectorFields(entity) {
   if(entity.kind==='service')return Object.fromEntries(Object.entries(RPC_NAMES).map(([phase,label])=>
-    [label,rpcMetricText(entity.activity?.channels?.[phase])]));
+    [label,entity.activity?.state==='watching' && entity.activity?.channels?.[phase]?.messages==null &&
+      !(entity[RPC_PHASES[phase]==='client'?'clients':'servers']||[]).length &&
+      !(entity.activity?.endpoints||[]).some(e=>e.role===RPC_PHASES[phase])
+      ?`No ${RPC_PHASES[phase]} endpoint`:rpcMetricText(entity.activity?.channels?.[phase])]));
   if(entity.kind==='action')return Object.fromEntries(Object.keys(RPC_PARTS).flatMap(part=>
     Object.entries(RPC_NAMES).map(([phase,label])=>[`${part[0].toUpperCase()+part.slice(1)} · ${label.toLowerCase()}`,
       rpcMetricText(entity.activity?.rpc?.[part]?.channels?.[phase])])));
