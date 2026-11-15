@@ -123,7 +123,9 @@ Moving spheres appear only on those highlighted connections of the current
 selection. Unfocused interfaces keep their live rates and plots without spheres.
 The number above each sphere is the observed message-count increase since the
 previous graph update. Publisher labels use attributed counts where available;
-hollow subscriber labels show the topic count, not verified subscriber delivery.
+subscriber labels show the topic count, not verified subscriber delivery.
+Both publish and subscribe flow dots are solid, using their warm and cool route
+colors. Marker fill does not encode delivery confirmation.
 Action server labels combine its observed status/feedback contributions.
 Every topic and action block retains its activity history plot. Unknown,
 blocked, idle and observed-active states are distinct.
@@ -161,8 +163,9 @@ This setting does not change ROS publication rates or the robot control loop.
 
 Publisher GIDs from actual ROS MessageInfo attribute incoming topic traffic
 when available, including multiple publishers. Unattributed single-source
-routes and subscriber paths use hollow dots; subscriber delivery is not
-confirmed by this observer. Action dots follow observed server status/feedback
+routes and subscriber paths also use solid dots; subscriber delivery is not
+confirmed by this observer. Attribution remains in the inspector and tooltips.
+Action dots follow observed server status/feedback
 back toward clients, with bidirectional dashed routes. They do not infer
 unobserved goal requests or per-client receipt. Historical goal-state summaries
 are labeled as last reported, rather than treated as perpetual traffic.
@@ -170,13 +173,16 @@ are labeled as last reported, rather than treated as perpetual traffic.
 Existing dashboard subscriptions provide passive counts/history for their
 exact topics, including compressed camera frames, without another image
 subscription or payload serialization. Other eligible topics use bounded raw
-observations. Raw image/cloud/audio types without passive data remain explicitly
-unmeasured. The monitor never invents traffic for such connections.
+observations, including raw images, point clouds and audio when ROS type support
+is available. Internal buffer channels use exact publisher-GID projections from
+logical-topic receipts instead of recursive adaptive subscriptions.
 
 At most 64 additional raw topics are watched. Rolling five-second budgets
-(default 10,000 messages / 8 MiB per topic; global 50,000 messages / 16 MiB),
-64-KiB individual-message limits, 20 history buckets and bounded publisher maps
+(default 10,000 messages per topic; global 50,000 messages),
+20 history buckets and bounded publisher maps
 limit work. Throttled/unavailable sources are reported, not shown as healthy.
+Continuous counting has no media-type or byte-volume exclusion; the separate
+finite-sample endpoint retains its documented sampling limits.
 Graph metadata and traffic are read-only; no robot operation is submitted.
 
 ## Files and verification
