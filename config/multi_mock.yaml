@@ -90,8 +90,9 @@ collector:
   token_env: SOARM_STATION_COLLECTOR_TOKEN
   ca: ''
 monitoring:
-  period_s: 1
+  period_s: 10
   stale_ms: 500
   drift_rad: 0.15
   debounce_s: 1
-  storage_limit_mb: 2048
+  storage_limit_mb: 512
+  retention_days: 30

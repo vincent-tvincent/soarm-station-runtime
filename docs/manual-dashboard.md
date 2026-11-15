@@ -46,8 +46,11 @@ cannot stop a replacement operation.
 
 ## Telemetry collector
 
-The records-queued metric is retained. It counts durable local telemetry awaiting
-external acknowledgment, not robot commands. The course guide page 1 requires
+With no collector configured, the metric shows **Local history** and SQLite disk
+usage on the Pi. Routine samples default to every 10 seconds, with 30-day
+retention and a 512-MiB budget. It is a disk-backed history, not a RAM queue.
+When a collector is configured, the metric instead shows durable local records
+awaiting external acknowledgment. The course guide page 1 requires
 wireless upload plus live/history dashboard and unattended 72-hour recovery;
 page 4 section 5.4 calls for expected/received messages and explanations of gaps.
 The exact large counter is a UI choice, not a rubric item.
@@ -56,8 +59,8 @@ A read-only audit found 50,342 local rows, 128 acknowledged and 50,214 queued,
 with no collector endpoint configured. The 128 acknowledgments were the earlier
 loopback HTTPS test, not proof of an off-device wireless deployment. Collector
 and outbox software exist; choosing/deploying an external collector and the
-72-hour measured run remain distinct work. The dashboard names the missing
-configuration rather than hiding the queue.
+72-hour measured run remain distinct work. Local-only mode reports no upload
+queue and does not claim those records were remotely acknowledged.
 
 Leader **Gripper follow / O** can freeze the last sent gripper reference while
 body poses continue. Re-enabling uses fresh calibrated leader samples; this

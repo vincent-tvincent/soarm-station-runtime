@@ -70,6 +70,14 @@ def load(path):
         if profile.get('bundle'):profile['bundle']=str((path.parent/Path(profile['bundle']).expanduser()).resolve())
     if c.get('collector',{}).get('ca'):
         c['collector']['ca']=str((path.parent/Path(c['collector']['ca']).expanduser()).resolve())
+    monitoring=c.get('monitoring',{})
+    if not isinstance(monitoring,dict):raise ValueError('monitoring must be a mapping')
+    for name,default in (('period_s',10),('retention_days',30),('storage_limit_mb',512)):
+        value=monitoring.get(name,default)
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
+            raise ValueError(f'Monitoring {name} must be finite and positive')
+    if type(monitoring.get('event_limit',10000))!=int or monitoring.get('event_limit',10000)<1:
+        raise ValueError('Monitoring event_limit must be a positive integer')
     graph=c.get('graph_observer',{})
     if not isinstance(graph,dict):raise ValueError('graph_observer must be a mapping')
     refresh=graph.get('refresh_s',2.)

@@ -12,6 +12,32 @@ from soarm_station_interfaces.srv import QueryHistory,RecordEvent
 from soarm_station.journal import Journal
 from .common import BaseNode,STATE,SENSOR,run,stamp_ns,topic
 
+def configure_monitoring_schedule(journal,period_ns,wall_ns,run_id,boot_id):
+    """Commit cadence and its evidence together; never fabricate old readings."""
+    previous=journal.schedule_info()
+    old_period=previous.get('period_ns');old_next=previous.get('next_ns')
+    changed=old_period is not None and old_period!=period_ns
+    migrating=old_period is None and previous.get('has_samples',False)
+    event=None
+    if changed or migrating:
+        next_ns=max(wall_ns,old_next) if old_next is not None else wall_ns
+        gap_start=old_next if old_next is not None and old_next<next_ns else None
+        missed=(next_ns-old_next+old_period-1)//old_period if gap_start is not None and old_period else (0 if gap_start is None else None)
+        detail={'old_period_s':None if old_period is None else old_period/1e9,
+            'new_period_s':period_ns/1e9,'effective_from_ns':next_ns,
+            'previous_next_ns':old_next,'missed_old_slots_per_arm':missed,
+            'gap_start_ns':gap_start,'gap_end_exclusive_ns':next_ns if gap_start is not None else None}
+        event={'event_id':uuid4().hex,'source_role':'telemetry_node','source_boot_id':boot_id,
+            'arm_id':'','operation_or_run_id':run_id,'time':{'sec':wall_ns//10**9,'nanosec':wall_ns%10**9},
+            'severity':'INFO','code':'MONITORING_PERIOD_CHANGED' if changed else 'MONITORING_SCHEDULE_MIGRATED',
+            'detail':json.dumps(detail,separators=(',',':'),allow_nan=False)}
+        if len(event['detail'])>512:raise ValueError('Cadence transition detail exceeds Event bound')
+    else:next_ns=wall_ns if old_next is None else old_next
+    # The journal transaction includes the event and both schedule metadata keys.
+    # A storage error must not silently change cadence without its evidence.
+    committed=journal.configure_schedule(period_ns,next_ns,event=event)
+    return next_ns,committed.get('event')
+
 def to_msg(s):
     m=TelemetrySample();m.schema_version=1
     for k in ('device_id','runtime_boot_id','sequence','monitoring_run_id','arm_id','valid','source_age_ms','phase','reason'):
@@ -22,14 +48,29 @@ def to_msg(s):
     return m
 class TelemetryNode(BaseNode):
     def __init__(self):
-        super().__init__('telemetry_node');self.cache={};self.states={};self.health={};self.error='' if self.config.get('collector',{}).get('url') else 'Collector endpoint not configured';self.stop=threading.Event()
-        self.journal=Journal(self.config['database'],self.config.get('monitoring',{}).get('storage_limit_mb',2048))
-        self.run_id=self.journal.meta('monitoring_run_id') or uuid4().hex;self.journal.set_meta('monitoring_run_id',self.run_id)
-        self.boot=uuid4().hex;self.period_ns=int(self.config.get('monitoring',{}).get('period_s',1)*1e9)
-        self.next_ns=self.journal.meta('next_ns',time.time_ns());self.journal.set_meta('start_ns',self.journal.meta('start_ns',self.next_ns))
+        super().__init__('telemetry_node');self.cache={};self.states={};self.health={};self.error='';self.storage_error='';self.maintenance_error='';self.stop=threading.Event()
+        monitoring=self.config.get('monitoring',{});self.collector_enabled=bool(self.config.get('collector',{}).get('url'))
+        self.journal=Journal(self.config['database'],monitoring.get('storage_limit_mb',512),
+            retention_days=monitoring.get('retention_days',30),preserve_unacked=self.collector_enabled,
+            event_limit=monitoring.get('event_limit',10000))
+        self.maintenance_due=0.;self.maintenance_status=None
+        self.boot=uuid4().hex;self.period_ns=int(monitoring.get('period_s',10)*1e9)
+        try:
+            # Explicit retention policy runs before quota-gated metadata writes,
+            # so eligible old data can be retired after an extended shutdown.
+            self.maintenance_status=self.journal.maintain(time.time_ns())
+            self.maintenance_due=time.monotonic()+3600.
+            self.run_id=self.journal.meta('monitoring_run_id') or uuid4().hex;self.journal.set_meta('monitoring_run_id',self.run_id)
+            self.next_ns,cadence_event=configure_monitoring_schedule(self.journal,self.period_ns,time.time_ns(),self.run_id,self.boot)
+            self.journal.set_meta('start_ns',self.journal.meta('start_ns',self.next_ns))
+        except Exception:
+            self.journal.close();raise
         self.pub=self.create_publisher(TelemetrySample,'/soarm_station/telemetry/sample',STATE)
         self.upload_pub=self.create_publisher(UploadStatus,'/soarm_station/telemetry/upload_status',STATE)
         self.event_pub=self.create_publisher(Event,'/soarm_station/events',STATE)
+        if cadence_event:
+            from rosidl_runtime_py.set_message import set_message_fields
+            message=Event();set_message_fields(message,cadence_event);self.event_pub.publish(message)
         for a in self.config['arms']:
             self.create_subscription(JointState,topic(a['id'],'joint_states'),lambda m,n=a['id']:self.cache.__setitem__(n,(m,time.monotonic())),SENSOR)
             self.create_subscription(OperationStatus,topic(a['id'],'lerobot/status'),lambda m,n=a['id']:self.states.__setitem__(n,m),STATE)
@@ -43,6 +84,7 @@ class TelemetryNode(BaseNode):
         for d in m.status:self.health[d.hardware_id]={x.key:x.value for x in d.values}
     def sample(self):
         wall=time.time_ns();count=0
+        self.maintain_if_due(wall)
         while self.next_ns<=wall and count<1000:
             samples=[]
             for arm in self.config['arms']:
@@ -51,7 +93,7 @@ class TelemetryNode(BaseNode):
                 age=max(0,(wall-source_ns)//10**6) if source_ns else 2**32-1
                 stale=self.config.get('monitoring',{}).get('stale_ms',500)
                 # Historical schedule gaps cannot be filled with a current observation.
-                valid=bool(cached and age<=stale and abs(source_ns-self.next_ns)<self.period_ns and state and state.feedback_valid)
+                valid=bool(cached and age<=stale and abs(source_ns-self.next_ns)<=min(self.period_ns,stale*10**6) and state and state.feedback_valid)
                 sample={'schema_version':1,'device_id':self.config['device_id'],'runtime_boot_id':state.runtime_boot_id if state else self.boot,
                     'monitoring_run_id':self.run_id,'scheduled_ns':self.next_ns,'arm_id':name,
                     'positions':dict(zip(cached[0].name,cached[0].position)) if cached and valid else {},
@@ -62,9 +104,17 @@ class TelemetryNode(BaseNode):
                 samples.append(sample)
             try:
                 committed=self.journal.append(samples,self.next_ns+self.period_ns)
+                self.storage_error=''
                 for s in committed:self.pub.publish(to_msg(s))
                 self.next_ns+=self.period_ns;count+=1
-            except Exception as exc:self.error=str(exc);break
+            except Exception as exc:self.storage_error=str(exc);break
+    def maintain_if_due(self,wall_ns):
+        monotonic=time.monotonic()
+        if monotonic<self.maintenance_due:return
+        self.maintenance_due=monotonic+3600.
+        try:
+            self.maintenance_status=self.journal.maintain(wall_ns);self.maintenance_error=''
+        except Exception as exc:self.maintenance_error='Telemetry maintenance failed: '+str(exc)
     def record_event(self,request,response):
         from rosidl_runtime_py.convert import message_to_ordereddict
         try:
@@ -101,8 +151,11 @@ class TelemetryNode(BaseNode):
             except Exception as exc:self.error=str(exc)
     def publish_upload(self):
         m=UploadStatus();m.header.stamp=self.get_clock().now().to_msg()
-        for k,v in self.journal.counts().items():setattr(m,k,v)
-        m.error=self.error[:512];self.upload_pub.publish(m)
+        counts=dict(self.journal.counts())
+        if not self.collector_enabled:counts['queued']=0
+        for k,v in counts.items():setattr(m,k,v)
+        m.error='; '.join(value for value in (self.storage_error,self.maintenance_error,self.error) if value)[:512]
+        self.upload_pub.publish(m)
     def destroy_node(self):
         self.stop.set();self.uploader.join(timeout=4);self.journal.close();super().destroy_node()
 def main():run(TelemetryNode)

@@ -32,6 +32,27 @@ from soarm_station.ipc import Client
 ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
+def telemetry_view(config,upload):
+    """Describe local durable history without opening SQLite or exposing paths."""
+    monitoring=config.get('monitoring',{})
+    remote=bool(config.get('collector',{}).get('url'))
+    storage_bytes=None
+    database=config.get('database')
+    if database:
+        try:
+            storage_bytes=Path(database).stat().st_size
+            for suffix in ('-wal','-shm'):
+                try:storage_bytes+=Path(str(database)+suffix).stat().st_size
+                except FileNotFoundError:pass
+        except OSError:storage_bytes=None
+    value={**upload,'delivery_mode':'remote' if remote else 'local',
+        'sample_period_s':monitoring.get('period_s',10),
+        'retention_days':monitoring.get('retention_days',30),
+        'storage_limit_mb':monitoring.get('storage_limit_mb',512),'storage_bytes':storage_bytes}
+    if not remote:
+        value['queued']=0
+        if value.get('error')=='Collector endpoint not configured':value['error']=''
+    return value
 async def resolved(f,timeout=5):
     deadline=time.monotonic()+timeout
     while not f.done():
@@ -177,7 +198,7 @@ class DashboardNode(BaseNode):
             return web.json_response({'schema_version':1,'accepted':False,'reason':str(exc)},status=400)
         return web.json_response(result,headers={'Cache-Control':'no-store'})
     def state(self):return {'schema_version':1,'resources':self.resource_view(),
-        'motor_status':render_motors(self.config,dict(self.motor_records),dict(self.joints),dict(self.states),time.time_ns(),dict(self.motor_record_errors)),'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':self.upload,'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
+        'motor_status':render_motors(self.config,dict(self.motor_records),dict(self.joints),dict(self.states),time.time_ns(),dict(self.motor_record_errors)),'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':telemetry_view(self.config,self.upload),'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
     async def status(self,r):return web.json_response(await asyncio.to_thread(self.state))
     async def history(self,r):
         q=QueryHistory.Request();q.arm_id=r.query.get('arm','');q.after_sequence=int(r.query.get('after',0));q.page_size=min(500,int(r.query.get('limit',100)))

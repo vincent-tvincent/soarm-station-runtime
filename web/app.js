@@ -307,10 +307,19 @@ function renderState(state) {
   text("policy-state", inf?.status?.[0]?.message || "No policy running");
   text("local-count", state.upload?.local_committed?.toLocaleString() ?? "—");
   text("remote-count", state.upload?.remote_committed?.toLocaleString() ?? "—");
-  text("queued", state.upload?.queued?.toLocaleString() ?? "—");
+  const upload = state.upload || {}, localHistory = upload.delivery_mode === "local";
+  text("queued", localHistory
+    ? Number.isFinite(upload.storage_bytes) ? `${(upload.storage_bytes / 1048576).toFixed(1)} MiB` : "—"
+    : upload.queued?.toLocaleString() ?? "—");
+  text("queued-unit", localHistory ? "stored on Pi" : "records queued");
+  $("remote-records-row").hidden = localHistory;
+  $("upload-label").parentElement.title = localHistory
+    ? `One sample every ${upload.sample_period_s} s · ${upload.retention_days} days retention · ${upload.storage_limit_mb} MiB budget`
+    : "Durable local records awaiting acknowledgment from the configured collector";
   text(
     "upload-label",
-    state.upload?.error === "Collector endpoint not configured"
+    localHistory ? upload.error ? "Local history · logging issue" : "Local history"
+      : state.upload?.error === "Collector endpoint not configured"
       ? "Telemetry · collector not configured"
       : state.upload?.error
         ? "Telemetry · upload pending"

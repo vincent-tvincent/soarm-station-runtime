@@ -57,7 +57,7 @@
           </div>
           <div>
             <span id="upload-label">Telemetry upload</span
-            ><strong id="queued">—</strong><small>records queued</small>
+            ><strong id="queued">—</strong><small id="queued-unit">records queued</small>
           </div>
         </div>
         <div class="operations-workspace">
@@ -162,10 +162,10 @@
                       <dd id="policy-state">—</dd>
                     </div>
                     <div>
-                      <dt>Locally committed</dt>
+                      <dt>Stored locally</dt>
                       <dd id="local-count">—</dd>
                     </div>
-                    <div>
+                    <div id="remote-records-row">
                       <dt>Remotely committed</dt>
                       <dd id="remote-count">—</dd>
                     </div>

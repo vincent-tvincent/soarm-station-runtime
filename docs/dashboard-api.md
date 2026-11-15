@@ -70,6 +70,16 @@ Discovery refresh defaults to 2 seconds. Topic types/hidden action infrastructur
 
 Request `{"topic":"/data","duration_s":5}`. Response `{"schema_version":1,"accepted":true,"topic":"/data","sample_id":"...","state":"sampling"}`. Stop with `{"topic":"/data","stop":true}`. This controls only observer subscriptions, never robot operations.
 
+## Local telemetry storage
+
+The dashboard status response also enriches `upload` with `delivery_mode`
+(`local` or `remote`), `storage_bytes` (database + WAL + SHM; null if unavailable),
+`sample_period_s`, `retention_days` and `storage_limit_mb`. Local-only mode has
+`queued: 0`, since no destination is configured; `remote_committed` retains its
+actual acknowledgment count. File paths and collector credentials are omitted.
+The dashboard displays local disk usage in local mode and actual pending
+uploads in remote mode. This metadata does not change the ROS UploadStatus type.
+
 ## Continuous live watch
 
 `POST /api/v1/ros/watch` uses the same gateway access policy. It adds continuous,
