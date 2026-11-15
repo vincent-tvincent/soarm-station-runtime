@@ -808,11 +808,20 @@ small {
 }
 .graph-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
   margin-bottom: 9px;
 }
+.graph-type-filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .search-field {
   flex: 1;
+  min-width: 220px;
 }
 .search-field input {
   width: 100%;

@@ -322,7 +322,11 @@
               placeholder="Find a node, topic or interface…" /></label
           ><span class="graph-tip"
             >Click to highlight · double-click to focus</span
-          ><label class="check-label"
+          ><div class="graph-type-filters" role="group" aria-label="Visible interface types">
+            <label class="check-label"><input id="graph-show-topics" type="checkbox" checked />Topics</label>
+            <label class="check-label"><input id="graph-show-actions" type="checkbox" checked />Actions</label>
+            <label class="check-label"><input id="graph-show-services" type="checkbox" checked />Services</label>
+          </div><label class="check-label"
             ><input
               id="show-infrastructure"
               type="checkbox"

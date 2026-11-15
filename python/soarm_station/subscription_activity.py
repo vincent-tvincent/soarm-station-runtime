@@ -76,7 +76,9 @@ class SubscriptionActivity:
                 recent=entry['recent'];cutoff=now-self.window_s
                 while recent and recent[0]<=cutoff:recent.popleft()
                 observed=min(self.window_s,max(0.,now-entry['created']))
-                rate=(len(recent)/observed if entry['last'] is not None and observed>0
+                # A registered subscription has observed zero receipts during
+                # a nonzero interval even when its first message has not arrived.
+                rate=(len(recent)/observed if observed>0
                       and now>=entry['history_overflow_until'] else None)
                 end=int(max(0.,now-entry['created'])/.5);start=max(0,end-19)
                 buckets=entry['buckets']

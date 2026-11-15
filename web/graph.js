@@ -67,6 +67,15 @@ export const GRAPH_UPDATE_INTERVALS = Object.freeze([500,1000,2000,5000,10000]);
 export function normalizeUpdateInterval(value) {
   const parsed=Number(value);return GRAPH_UPDATE_INTERVALS.includes(parsed)?parsed:2000;
 }
+export const GRAPH_INTERFACE_VISIBILITY_KEY='ros-graph-interface-visibility';
+export const GRAPH_INTERFACE_KINDS=Object.freeze(['topics','actions','services']);
+const interfaceCollection={topic:'topics',action:'actions',service:'services'};
+export function normalizeInterfaceVisibility(value) {
+  if(typeof value==='string')try{value=JSON.parse(value);}catch{value=null;}
+  if(!value || typeof value!=='object' || Array.isArray(value))value={};
+  return Object.fromEntries(GRAPH_INTERFACE_KINDS.map(kind=>[kind,
+    typeof value[kind]==='boolean'?value[kind]:true]));
+}
 export const GRAPH_INTERFACE_PANE = Object.freeze({
   defaultHeight:152,minHeight:100,minCanvasHeight:120,maxFraction:.7,
   step:20,largeStep:60,storageKey:'ros-graph-interface-height',
@@ -432,19 +441,21 @@ export function normalizeGraph(data) {
 }
 export function selectGraphView(
   d,
-  { focus = null, scope = "all", search = "", showInfrastructure = false } = {},
+  { focus = null, scope = "all", search = "", showInfrastructure = false, interfaceVisibility } = {},
 ) {
   if (!d) return { entities: [], edges: [] };
   search = search.trim().toLowerCase();
   const showInfra = showInfrastructure;
+  const visibility=normalizeInterfaceVisibility(interfaceVisibility);
   let allowed = new Set(
     [...d.entities.values()]
+      .filter(n=>n.kind==='node' || visibility[interfaceCollection[n.kind]])
       .filter((n) => showInfra || n.kind === "node" || !internalInterface(n))
       .map((n) => n.id),
   );
   // These placeholders describe endpoints, not independently discovered nodes.
   // Keep them only when an interface remains visible; named idle nodes stay.
-  if(!showInfra)for(const n of d.nodes)if(n.discovery_state==='unresolved_endpoint_owner') {
+  for(const n of d.nodes)if(n.discovery_state==='unresolved_endpoint_owner') {
     const bindings=d.edges.filter(e=>e.from===n.id||e.to===n.id);
     if(bindings.length && bindings.every(e=>!allowed.has(e.from===n.id?e.to:e.from)))allowed.delete(n.id);
   }
@@ -518,6 +529,8 @@ export class GraphExplorer {
     this.pending = false;
     this.disposed = false;
     this.didFit = false;
+    let savedVisibility;try{savedVisibility=localStorage.getItem(GRAPH_INTERFACE_VISIBILITY_KEY);}catch{}
+    this.interfaceVisibility=normalizeInterfaceVisibility(savedVisibility);
     let savedInterval;try{savedInterval=localStorage.getItem('ros-graph-update-ms');}catch{}
     this.updateIntervalMs=normalizeUpdateInterval(savedInterval);
     this.flowActivity = new TopicFlowActivity({updateIntervalMs:this.updateIntervalMs});
@@ -592,8 +605,50 @@ export class GraphExplorer {
   updateWatchActivity() {
     this.liveWatch.setActive(!this.disposed && this.visible && this.connected && !document.hidden);
   }
+  syncInterfaceControls() {
+    const visibility=normalizeInterfaceVisibility(this.interfaceVisibility);
+    for(const kind of GRAPH_INTERFACE_KINDS) {
+      const control=$('graph-show-'+kind);if(control)control.checked=visibility[kind];
+    }
+  }
+  reconcileDiagramSelection() {
+    if(!this.data)return;
+    const visible=new Set(selectGraphView(this.data,{interfaceVisibility:this.interfaceVisibility,
+      showInfrastructure:$('show-infrastructure')?.checked||false}).entities.map(n=>n.id));
+    if(this.focus && !visible.has(this.focus)) {this.focus=null;this.lastClick=null;}
+    if(this.scope==='focus' && !visible.has(this.isolatedId)) {
+      this.scope='all';this.isolatedId=null;this.savedOverview=null;this.didFit=false;
+      const exit=$('graph-exit');if(exit)exit.hidden=true;
+    }
+  }
+  setInterfaceVisible(kind,value,{render=true}={}) {
+    if(this.disposed || !GRAPH_INTERFACE_KINDS.includes(kind) || typeof value!=='boolean')return false;
+    const visibility=normalizeInterfaceVisibility(this.interfaceVisibility);
+    if(visibility[kind]===value)return false;
+    this.interfaceVisibility={...visibility,[kind]:value};
+    try{localStorage.setItem(GRAPH_INTERFACE_VISIBILITY_KEY,JSON.stringify(this.interfaceVisibility));}catch{}
+    this.syncInterfaceControls();this.reconcileDiagramSelection();this.didFit=false;
+    if(render){this.render();this.inspector();}
+    return true;
+  }
+  revealSelection(id,{isolate=false}={}) {
+    const entity=this.data?.entities.get(id);if(!entity)return;
+    const collection=interfaceCollection[entity.kind];
+    if(collection)this.setInterfaceVisible(collection,true,{render:false});
+    const infra=$('show-infrastructure');
+    if(infra && ((entity.kind!=='node' && internalInterface(entity)) || entity.transport_endpoint))infra.checked=true;
+    const search=$('graph-search');
+    const overview=selectGraphView(this.data,{search:search?.value||'',showInfrastructure:infra?.checked||false,
+      interfaceVisibility:this.interfaceVisibility});
+    if(search?.value && !overview.entities.some(n=>n.id===id)) {search.value='';this.didFit=false;}
+    if(!isolate && this.scope==='focus' && !this.visibleData().entities.some(n=>n.id===id)) {
+      this.scope='all';this.isolatedId=null;this.savedOverview=null;this.didFit=false;
+      const exit=$('graph-exit');if(exit)exit.hidden=true;
+    }
+  }
   viewKey() {
-    return JSON.stringify([this.focus,this.scope,this.isolatedId,$('graph-search')?.value||'',$('show-infrastructure')?.checked||false]);
+    return JSON.stringify([this.focus,this.scope,this.isolatedId,$('graph-search')?.value||'',$('show-infrastructure')?.checked||false,
+      normalizeInterfaceVisibility(this.interfaceVisibility)]);
   }
   updateMeasurements() {
     const data=this.data;
@@ -736,14 +791,17 @@ export class GraphExplorer {
       if (this.liveWatch.enabled && this.visible && !document.hidden) this.flowActivity.observe(data,performance.now());
       else this.flowActivity.clear();
       if (this.focus && !data.entities.has(this.focus)) { this.focus = null; }
+      this.reconcileDiagramSelection();
       if (!this.focus && !this.initialized) {
-        const topics = data.topics.filter((t) => !internalInterface(t));
+        const eligible=selectGraphView(data,{interfaceVisibility:this.interfaceVisibility,
+          showInfrastructure:$('show-infrastructure')?.checked||false}).entities;
+        const topics = eligible.filter((t) => t.kind==='topic');
         const score = (t) =>
           (t.publishers?.length === 1 ? 12 : 0) +
           (t.subscriptions?.length || 0) -
           Math.max(0, (t.publishers?.length || 0) - 2) * 3;
         topics.sort((a, b) => score(b) - score(a));
-        this.focus = topics[0]?.id || data.nodes[0]?.id;
+        this.focus = topics[0]?.id || eligible.find(n=>n.kind==='node')?.id || eligible[0]?.id || null;
         this.initialized = true;
       }
       const signature=graphStructureSignature(data);
@@ -763,6 +821,11 @@ export class GraphExplorer {
   }
   bind() {
     $("refresh-graph").onclick = () => this.refresh();
+    this.syncInterfaceControls();
+    for(const kind of GRAPH_INTERFACE_KINDS) {
+      const control=$('graph-show-'+kind);
+      if(control)control.onchange=()=>this.setInterfaceVisible(kind,control.checked);
+    }
     const interval=$('graph-update-interval');
     if(interval){interval.value=String(this.updateIntervalMs);interval.onchange=()=>this.setUpdateInterval(interval.value);}
     $("graph-live-flow").onchange = () => {
@@ -776,13 +839,7 @@ export class GraphExplorer {
       this.render();
     };
     $("show-infrastructure").onchange = () => {
-      if(this.data && !$("show-infrastructure").checked) {
-        const visible=new Set(selectGraphView(this.data).entities.map(n=>n.id));
-        if(!visible.has(this.focus))this.focus=null;
-        if(this.scope==='focus' && !visible.has(this.isolatedId)) {
-          this.scope='all';this.isolatedId=null;this.savedOverview=null;$("graph-exit").hidden=true;
-        }
-      }
+      this.reconcileDiagramSelection();
       this.didFit = false;
       this.render();
       this.inspector();
@@ -859,6 +916,7 @@ export class GraphExplorer {
     return this.data?.entities.get(this.focus);
   }
   select(id) {
+    this.revealSelection(id);
     this.focus = id;
     this.render();
     this.inspector();
@@ -874,6 +932,7 @@ export class GraphExplorer {
     }
   }
   isolate(id) {
+    this.revealSelection(id,{isolate:true});
     if (this.scope === "all") this.savedOverview = { ...this.transform };
     this.scope = "focus";
     this.isolatedId = id;
@@ -904,6 +963,7 @@ export class GraphExplorer {
       scope: this.scope,
       search: $("graph-search").value,
       showInfrastructure: $("show-infrastructure").checked,
+      interfaceVisibility:this.interfaceVisibility,
     });
   }
   render() {

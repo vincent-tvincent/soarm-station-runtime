@@ -38,6 +38,19 @@ def test_passive_snapshot_counts_receipts_not_payloads_and_expires_rate():
     assert idle['rate_hz']==0. and idle['messages']==2 and idle['last_message_age_ms']==2500.
 
 
+@pytest.mark.parametrize('topic',['/events','/workflow/decision','/workflow/status'])
+def test_registered_idle_subscription_reports_observed_zero_after_nonzero_interval(topic):
+    clock=Clock();activity=SubscriptionActivity(clock=clock)
+    activity.register(topic)
+    assert activity.snapshot()[topic]['rate_hz'] is None
+    clock.value=.5;observed=activity.snapshot()[topic]
+    assert observed['messages']==0 and observed['rate_hz']==0.
+    assert observed['last_message_age_ms'] is None and observed['bytes'] is None
+    assert observed['publisher_counts']==[]
+    assert all(bucket['messages']==0 for bucket in observed['history'])
+    assert '/unregistered' not in activity.snapshot()
+
+
 def test_publisher_and_rate_history_limits_remain_explicit():
     clock=Clock();activity=SubscriptionActivity(clock=clock,max_publishers=2,max_receipts=2)
     activity.register('/feedback')
