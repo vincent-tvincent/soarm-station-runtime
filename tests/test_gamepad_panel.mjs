@@ -80,6 +80,61 @@ function fixture(t, { own = true, pad = raw(), requested = 50, admitted = 50, me
   };
 }
 
+test('motion speed meter follows normalized stick commands independently of gripper triggers', t => {
+  const f=fixture(t);
+  for(const [lt,rt] of [[0,0],[1,0],[0,1],[1,1]]) {
+    f.panel.output=output(f.panel.engine,raw({axes:[0,0,0,-.54],lt,rt}),50);
+    assert.ok(Math.abs(f.panel.motionSpeedFraction()-.5)<1e-9);
+    f.panel.render();
+    assert.equal(f.element.querySelector('#gamepad-motion-speed-value').textContent,'50%');
+    assert.equal(f.element.querySelector('#gamepad-speed-cap').textContent,'20.0 mm/s');
+    const meter=f.element.querySelector('#gamepad-motion-speed-meter');
+    assert.equal(meter.attributes['aria-valuenow'],'50');
+    assert.equal(meter.querySelector('i').style.width,'50%');
+  }
+  f.panel.output=output(f.panel.engine,raw({lt:1,rt:1}),50);
+  assert.equal(f.panel.motionSpeedFraction(),0,'gripper-only motion is not body speed');
+  f.panel.render();
+  assert.equal(f.element.querySelector('#gamepad-speed-cap').textContent,'0.0 mm/s');
+});
+
+test('motion rate readout scales with profile and keeps angular units separate',t=>{
+  const f=fixture(t);
+  f.manual.descriptor.speed_levels.push({level:3,translation_m_s:.08,orientation_rad_s:Math.PI/4});
+  f.manual.setSpeed(3);
+  f.panel.output=output(f.panel.engine,raw({axes:[0,0,0,-.54]}),50);
+  f.panel.render();
+  assert.equal(f.element.querySelector('#gamepad-motion-speed-value').textContent,'50%');
+  assert.equal(f.element.querySelector('#gamepad-speed-cap').textContent,'40.0 mm/s');
+  f.panel.output=output(f.panel.engine,raw({axes:[.54,0,0,0]}),50);
+  f.panel.render();
+  assert.equal(f.element.querySelector('#gamepad-speed-cap').textContent,'0.0 mm/s · 22.5°/s');
+});
+
+test('motion speed includes angular-only and fine D-pad requests and caps combined translation', t => {
+  const f=fixture(t);
+  for(const [pad,expected] of [
+    [raw({axes:[.54,0,0,0]}),.5],
+    [raw({buttons:[12]}),.2],
+    [raw({axes:[0,-1,1,-1]}),1],
+  ]) {
+    f.panel.output=output(f.panel.engine,pad,50);
+    assert.ok(Math.abs(f.panel.motionSpeedFraction()-expected)<1e-9);
+  }
+});
+
+test('motion meter clears inactive or suspended requests instead of retaining a previous speed', t => {
+  const f=fixture(t);
+  f.panel.output=output(f.panel.engine,raw({axes:[0,0,0,-1]}),50);
+  assert.equal(f.panel.motionSpeedFraction(),1);
+  f.panel.needsNeutral=true; assert.equal(f.panel.motionSpeedFraction(),0); f.panel.needsNeutral=false;
+  f.focus(false); assert.equal(f.panel.motionSpeedFraction(),0); f.focus(true);
+  f.manual.busy=true; assert.equal(f.panel.motionSpeedFraction(),0); f.manual.busy=false;
+  f.manual.own=false; f.panel.render();
+  assert.equal(f.element.querySelector('#gamepad-motion-speed-value').textContent,'0%');
+  assert.equal(f.element.querySelector('#gamepad-motion-speed-meter').querySelector('i').style.width,'0%');
+});
+
 test('an invalid current sample stops once without null dereference and polling can continue', async t => {
   const f = fixture(t); const bad = raw(); bad.axes[0] = NaN;
   assert.doesNotThrow(() => f.poll(bad)); await flush();

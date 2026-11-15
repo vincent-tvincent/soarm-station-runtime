@@ -85,6 +85,15 @@ The trigger bars display processed squeeze; the red marker is the pickup point
 on the selected trigger. The jaw remains subject to its configured velocity
 limit independently of the body speed profile.
 
+The **Motion speed** percentage/bar shows the current body command as a fraction
+of the selected profile: 0% at neutral, up to 100% at full input. It uses the
+larger of normalized XYZ magnitude, elevation magnitude and roll magnitude;
+neither gripper trigger affects it. The adjacent **mm/s** value is the normalized
+XYZ magnitude times the selected translation rate. An angular request also shows
+its **°/s** rate. Stopped, suspended or unavailable control shows 0%. These are
+requested speeds, not measured motor/TCP speeds; a constrained IK result can
+move more slowly. R3 still cycles profiles 1–5.
+
 ## Source and asynchronous behavior
 
 Motion advances while the Control/Gamepad pane is active and the browser is

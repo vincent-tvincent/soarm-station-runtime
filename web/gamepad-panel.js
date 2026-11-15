@@ -30,7 +30,7 @@ export class GamepadPanel {
       <div class="gamepad-device-line"><span id="gamepad-device-state">Waiting for a controller</span><button type="button" id="gamepad-refresh" class="text-button">Refresh</button></div>
       <div class="gamepad-trigger-grid">${[['left','LT / L2','LB / L1'],['right','RT / R2','RB / R1']].map(([side,trigger,shoulder])=>`<section><button type="button" class="gamepad-trigger-select" data-grip-trigger="${side}" aria-pressed="${side==='left'}">${side==='left'?'Left':'Right'} gripper <kbd>${shoulder}</kbd></button><div class="gamepad-value"><strong id="gamepad-${side}-value">—</strong><span>${trigger}</span></div><div class="gamepad-meter" role="meter" aria-label="${side==='left'?'Left':'Right'} gripper trigger squeeze" aria-valuemin="0" aria-valuemax="100" id="gamepad-${side}-meter"><i></i><b id="gamepad-${side}-pickup" hidden></b></div></section>`).join('')}</div>
       <div class="gamepad-grip-summary"><span id="gamepad-grip-state">Not started</span><button type="button" id="gamepad-grip-lock" class="manual-toggle" disabled>Lock gripper <kbd>X / □</kbd></button></div><p id="gamepad-grip-note" class="detail-note">Selected trigger takes over after pickup.</p>
-      <div class="gamepad-speed-profile"><div class="small-heading">Speed profile <span><span id="gamepad-speed-cap">— mm/s</span> · <kbd>R3</kbd></span></div><div class="segmented gamepad-speeds" role="group" aria-label="Gamepad maximum speed">${[1,2,3,4,5].map(value=>`<button type="button" data-gamepad-speed="${value}">${value}</button>`).join('')}</div></div>
+      <div class="gamepad-speed-profile"><div class="small-heading">Motion speed <span class="gamepad-speed-reading"><strong id="gamepad-motion-speed-value">0%</strong><span id="gamepad-speed-cap">— mm/s</span><kbd>R3</kbd></span></div><div class="gamepad-meter" role="meter" aria-label="Current requested motion speed" aria-valuemin="0" aria-valuemax="100" id="gamepad-motion-speed-meter" title="Requested translation/orientation as a percentage of the selected speed profile."><i></i></div><div class="segmented gamepad-speeds" role="group" aria-label="Gamepad maximum speed">${[1,2,3,4,5].map(value=>`<button type="button" data-gamepad-speed="${value}">${value}</button>`).join('')}</div></div>
       <div class="gamepad-motion-readout"><span>Right stick <b>X / Y</b></span><span>Left stick <b>Z / roll</b></span><span>D-pad <b>Fine tilt / roll</b></span></div>
       <button type="button" class="text-button" id="gamepad-bindings-toggle" aria-expanded="false">Show controller bindings</button>
       <div id="gamepad-bindings" class="gamepad-bindings" hidden><dl>
@@ -249,12 +249,29 @@ export class GamepadPanel {
       this.suspend(); this.errorMessage=error.message; m.onError(error);
     } finally { this.solving=false; if (this.pendingMotion === pending) this.pendingMotion = null; }
   }
+  motionSpeedFraction() {
+    const o = this.output, m = this.manual;
+    if (!o?.valid || o.resume_required || this.needsNeutral || !this.isFocused() ||
+        !m.isOwnStream() || !m.client.currentOperation?.ready || m.busy || !m.stateForArm().feedback_valid) return 0;
+    // Translation and orientation have different units. Compare their normalized
+    // profile fractions, showing the largest requested fraction instead of adding them.
+    return Math.min(1,Math.max(0,Math.hypot(...o.translation),Math.abs(o.elevation),Math.abs(o.roll)) * o.speed_scale);
+  }
   render() {
     const valid=!!this.raw && this.output?.valid===true;
     this.el('gamepad-device-state').textContent=this.deviceReadError?`Controller read failed: ${this.deviceReadError}`:!this.env.supported()?'Gamepad input is unavailable in this browser.':
       !this.raw?'Waiting for a controller':!valid?this.output?.reason||'Mapping unavailable':this.needsNeutral?'Center sticks and release D-pad to resume':this.manual.isOwnStream()?'Controller active':'Connected · ready to Start';
     const level=this.manual.descriptor?.speed_levels?.find(value=>value.level===this.manual.level);
-    this.el('gamepad-speed-cap').textContent=level?`0–${(level.translation_m_s*1000).toFixed(0)} mm/s`:'— mm/s';
+    const fraction=this.motionSpeedFraction();
+    const linear=fraction>0 ? Math.min(1,Math.hypot(...this.output.translation)*this.output.speed_scale) : 0;
+    const angular=fraction>0 ? Math.min(1,Math.max(Math.abs(this.output.elevation),Math.abs(this.output.roll))*this.output.speed_scale) : 0;
+    const rotationRate=angular>0&&Number.isFinite(level?.orientation_rad_s)?` · ${(angular*level.orientation_rad_s*180/Math.PI).toFixed(1)}°/s`:'';
+    this.el('gamepad-speed-cap').textContent=level?`${(linear*level.translation_m_s*1000).toFixed(1)} mm/s${rotationRate}`:'— mm/s';
+    const speed = percent(fraction);
+    this.el('gamepad-motion-speed-value').textContent=`${speed}%`;
+    const speedMeter=this.el('gamepad-motion-speed-meter');
+    speedMeter.querySelector('i').style.width=`${speed}%`;
+    speedMeter.setAttribute('aria-valuenow',String(speed));
     for(const [side,value]of[['left',this.engine.liveLT],['right',this.engine.liveRT]]){
       this.el(`gamepad-${side}-value`).textContent=valid?`${percent(value)}%`:'—';
       const meter=this.el(`gamepad-${side}-meter`);meter.querySelector('i').style.width=`${valid?percent(value):0}%`;meter.setAttribute('aria-valuenow',String(valid?percent(value):0));

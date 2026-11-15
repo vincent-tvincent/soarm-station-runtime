@@ -2174,6 +2174,9 @@ kbd {
 .gamepad-grip-summary .manual-toggle { width:auto; padding:6px 9px; font-size:11px; margin:0; }
 #gamepad-grip-note { margin:5px 0 10px; font-size:10px; }
 .gamepad-speed-profile .small-heading { margin-bottom:6px; }
+.gamepad-speed-profile .gamepad-speed-reading { display:flex; align-items:baseline; gap:10px; }
+.gamepad-speed-reading strong { color:#191919; font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; }
+.gamepad-speed-profile > .gamepad-meter { margin-bottom:7px; }
 .gamepad-speeds { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:100%; }
 .gamepad-speeds button { padding:6px 0; font-size:11px; min-width:0; }
 .gamepad-motion-readout { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:10px 0 8px; border-top:1px solid var(--line); padding-top:8px; }
@@ -2186,7 +2189,7 @@ kbd {
 .gamepad-bindings dd { margin:0; color:var(--muted); }
 @media(min-width:1000px){
   #panel-manual:not([hidden]):has(#gamepad-panel:not([hidden])) {
-    grid-template-rows:auto minmax(350px,1fr) auto auto minmax(230px,.9fr);
+    grid-template-rows:auto minmax(370px,1fr) auto auto minmax(230px,.9fr);
   }
 }
 @media(max-width:400px){.gamepad-trigger-grid{gap:10px}.gamepad-value{flex-wrap:wrap}.gamepad-motion-readout{gap:6px}}
