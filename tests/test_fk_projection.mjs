@@ -23,6 +23,12 @@ test('positive elevation looks down from above and painter depth includes height
  near(project(back).depth,1);
  assert.ok(project([0,0,.2]).depth>project([0,0,0]).depth);
 });
+test('the FK-verified Home plus-Y direction, base plus-Z, projects straight up at the default orbit',()=>{
+ // test_manual_home_orientation.py verifies the configured URDF Home +Y=[0,0,1].
+ const {project}=basis(-.68,.42),origin=project([0,0,0]),homeY=project([0,0,1]);
+ near(homeY.x,origin.x);
+ assert.ok(homeY.y<origin.y);
+});
 test('jaw opening in the independently checked measured pose projects to the right',()=>{
  // FK displacement from 0 to 100 percent at the inspected arm pose; its base Y
  // component is negative (right of the arm). Do not negate the hardware input.

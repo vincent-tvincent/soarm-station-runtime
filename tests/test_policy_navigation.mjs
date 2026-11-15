@@ -29,6 +29,31 @@ function manager(overrides={}){
 const modelOp=(requestId='request1',operationId='operation1',extra={})=>({type:'MODEL',mode:'STREAM',armId:'arm1',requestId,operationId,state:'active',ready:true,...extra});
 const owned=(m,op=modelOp())=>{m.client.currentOperation=op;m.startedRun={tracking:true,requestId:op.requestId,operationId:op.operationId,armId:op.armId,instruction:'Old',mode:op.mode};return m.startedRun;};
 
+test('camera binding labels refresh without changing resource values or the raw draft',()=>{
+  const options=[{value:'',textContent:'Unbound — required'},
+    {value:'cam_a',textContent:'Old label'},{value:'wrist',textContent:'Wrist'}];
+  const select={value:'cam_a',dataset:{camera:'observation.images.camera1'},options};
+  const m=manager({root:{querySelectorAll:selector=>{assert.equal(selector,'select[data-camera]');return[select];}},
+    resources:{cameras:[{id:'cam_a',label:'Old label'},{id:'wrist',label:'Wrist'}]}});
+  m.draft.setField(['bindings','cameras','observation.images.camera1'],'cam_a');
+  const raw=m.draft.raw,version=m.draft.editVersion;
+  m.updateState({resources:{cameras:[{id:'cam_a',label:'Overhead · 工作台'},{id:'wrist',label:'Tool view'}]}});
+  assert.deepEqual(options.map(o=>o.textContent),['Unbound — required','Overhead · 工作台','Tool view']);
+  assert.deepEqual(options.map(o=>o.value),['','cam_a','wrist']);
+  assert.equal(select.value,'cam_a');assert.equal(select.dataset.camera,'observation.images.camera1');
+  assert.equal(m.draft.raw,raw);assert.equal(m.draft.editVersion,version);assert.equal(m.renders,0);
+});
+
+test('policy binding choices show human names but serialize stable camera IDs',()=>{
+  const m=manager({resources:{arms:[{id:'arm1'}],cameras:[{id:'cam_a',label:'Left <scene>'},{id:'wrist'}]}});
+  const model={category:'act',camera_inputs:[{key:'observation.images.front',role:'Scene'}]};
+  const profile={name:'Test',execution:{kind:'local'},bindings:{arm:'arm1',cameras:{'observation.images.front':'cam_a'}}};
+  const markup=m.profileForm(profile,model);
+  assert.match(markup,/<option value="cam_a" selected>Left &lt;scene&gt;<\/option>/);
+  assert.match(markup,/data-camera="observation.images.front"/);
+  assert.match(markup,/<option value="wrist" >wrist<\/option>/);
+});
+
 test('discarding a new draft on navigation removes it rather than leaving a dirty phantom',async()=>{
   const m=manager({draft:draft('new_profile','New',null),dialog:async()=> 'discard'});
   assert.equal(await m.navigate('profiles'),true);

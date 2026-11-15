@@ -26,9 +26,21 @@ stream retains single motor ownership, windows, pickup and normal limiting.
 No game controller is included in this revision.
 
 Home preserves the admitted gripper reference when available, including under
-contact. The historical Home [0, −50, 65, 0, 0] degrees is an explicit optional
-configuration, installed with `scripts/configure-manual-home.py --config PATH
---arm ID`. The old Fold target is outside this Pi's declared shoulder bounds;
+contact. The explicit optional configuration is installed with
+`scripts/configure-manual-home.py --config PATH --arm ID`. Its November 15
+orientation revision keeps the historical shoulder/elbow targets [0, −50, 65]
+degrees and sets wrist flex to −14.999627° and wrist roll to −87.210718°.
+In the configured SO-101 URDF, the full Home TCP frame's +Y then aligns with
+base +Z and points vertically upward in the default FK view. Roll alone would
+leave about 15° of tilt. The modeled TCP moves about 49.8 mm from the historical
+Home; this is a changed preset, not an in-place orientation adjustment.
+
+The separate `wrist_roll_reference_rad` stays at zero, so R/T/E remain −90°/0°/+90°.
+Making the new Home roll the reference would put R at −177.21°, beyond the
+configured roll limit. Operator yaw and speed settings are unchanged. Partial
+Home still preserves the current roll, so its +Y direction is not guaranteed
+vertical. These are device-free FK checks, not a new physical motion validation.
+The old Fold target is outside this Pi's declared shoulder bounds;
 it is unavailable, with no change to those limits. Neither preset is an
 all-zero fallback. No new physical motion validation is implied by UI tests.
 

@@ -33,7 +33,7 @@ let snapshot = {},
   selectedArm = "",
   selectedMotor = "",
   activeTab = "status",
-  cameraLayout = "primary",
+  cameraLayout = "equal",
   primaryCamera = "",
   cameraIds = [],
   cameraFrames = new Map(),
@@ -200,8 +200,6 @@ async function setPage(value, { fromHash = false, initial = false } = {}) {
   document
     .querySelectorAll("[data-page]")
     .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-  document.querySelector(".brand").textContent =
-    page === "graph" ? "ROS / GRAPH EXPLORER" : "SO-ARM / STATION";
   $("operations").hidden = page !== "operations";
   $("graph").hidden = page !== "graph";
   $("policies").hidden = page !== "policies";
@@ -221,10 +219,6 @@ for (const item of document.querySelectorAll("[data-page]"))
     void safely(() => setPage(item.dataset.page));
   };
 window.addEventListener("hashchange", () => void safely(() => setPage(location.hash.slice(1), { fromHash: true })));
-document.querySelector(".brand").addEventListener("click", event => {
-  event.preventDefault();
-  void safely(() => setPage("operations"));
-});
 for (const tab of document.querySelectorAll("[data-tab]"))
   tab.onclick = () => {
     activeTab = tab.dataset.tab;
@@ -1181,7 +1175,18 @@ function cameraAspect(id) {
   const item = cameraFrames.get(id);
   return item?.aspect || 4 / 3;
 }
+function refreshCameraLabels() {
+  for (const [id, item] of cameraFrames) {
+    const descriptor = (resources.cameras || []).find(camera => camera.id === id);
+    const name = descriptor?.label || id;
+    item.label.textContent = name.toUpperCase();
+    item.name.textContent = name;
+    item.img.alt = name + " camera";
+    item.fig.setAttribute("aria-label", `Make ${name} primary camera`);
+  }
+}
 function updateCameras(ids) {
+  refreshCameraLabels();
   if (JSON.stringify(ids) === JSON.stringify(cameraIds)) return;
   for (const id of cameraIds)
     if (!ids.includes(id)) {
@@ -1198,10 +1203,10 @@ function updateCameras(ids) {
     fig.className = "camera-frame";
     fig.tabIndex = 0;
     fig.setAttribute("role", "button");
-    fig.setAttribute("aria-label", `Make ${id} primary camera`);
+    fig.setAttribute("aria-label", `Make ${config.label || id} primary camera`);
     fig.dataset.cameraId = id;
     const img = document.createElement("img");
-    img.alt = id + " camera";
+    img.alt = (config.label || id) + " camera";
     img.draggable = false;
     const label = document.createElement("span");
     label.className = "camera-label";
@@ -1219,6 +1224,8 @@ function updateCameras(ids) {
     const item = {
       fig,
       img,
+      label,
+      name,
       status,
       frames: 0,
       lastAt: 0,

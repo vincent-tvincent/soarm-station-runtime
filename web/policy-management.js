@@ -83,7 +83,12 @@ export class PolicyManagement {
   show(text,error=false){this.error=error?text:'';this.info=error?'':text;const el=this.q('[data-message]');el.textContent=text;el.hidden=!text;el.classList.toggle('error-box',error);}
   hasUnsavedChanges(){return Boolean(this.draft?.dirty || this.importDirty);}
   setConnected(connected){this.connected=Boolean(connected);if(this.visible)this.renderActive();}
-  updateState(state){this.robotState=state||{};this.resources=state?.resources||this.resources; if(this.visible && performance.now()-this.lastStateRender>300){this.lastStateRender=performance.now();this.renderActive();this.updateRunState();}}
+  updateState(state){
+    this.robotState=state||{};this.resources=state?.resources||this.resources;
+    const labels=JSON.stringify(this.cameras().map(c=>[c.id,c.label||c.id]));
+    if(labels!==this.cameraLabelsKey){this.cameraLabelsKey=labels;this.refreshCameraLabels();}
+    if(this.visible && performance.now()-this.lastStateRender>300){this.lastStateRender=performance.now();this.renderActive();this.updateRunState();}
+  }
   ownsOperation(operation=this.client.currentOperation, run=this.startedRun){
     if (!run?.tracking || !operation || operation.type!=='MODEL' || operation.armId!==run.armId) return false;
     if (run.requestId && operation.requestId && run.requestId!==operation.requestId) return false;
@@ -252,6 +257,13 @@ export class PolicyManagement {
   arms(){const v=this.resources.arms||[];return Array.isArray(v)?v:Object.entries(v).map(([id,a])=>({id,...a}));}
   cameras(){const v=this.resources.cameras||[];return (Array.isArray(v)?v:Object.values(v)).map(c=>typeof c==='string'?{id:c,label:c}:c);}
   cameraName(id){return this.cameras().find(c=>c.id===id)?.label||id;}
+  refreshCameraLabels(){
+    const names=new Map(this.cameras().map(c=>[c.id,c.label||c.id]));
+    // Update only visible option text. Keep focus, selection, tensor keys and
+    // the user's form/raw draft unchanged when resource metadata refreshes.
+    for(const select of this.root?.querySelectorAll('select[data-camera]')||[])
+      for(const item of select.options)if(names.has(item.value))item.textContent=names.get(item.value);
+  }
   rememberModels(models){this.modelCache??=new Map();for(const model of models||[])if(model?.id)this.modelCache.set(model.id,model);}
   model(id){return this.models.find(m=>m.id===id)||this.modelCache?.get(id);}
   value(){return this.draft?.parse().value||null;}

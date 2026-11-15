@@ -31,6 +31,36 @@ def test_public_resources_are_named_and_exclude_private_configuration():
     assert resources(c)['cameras'][0]['calibrated'] is True
 
 
+def test_camera_display_label_preserves_resource_and_frame_identity():
+    c=config();camera=c['cameras'][0];identifier=camera['id']
+    camera.update(label='Overhead · 工作台',device='/dev/private-camera')
+    public=resources(c)['cameras'][0]
+    assert public['label']=='Overhead · 工作台' and public['id']==identifier
+    assert public['frame_id']==identifier+'_optical_frame' and 'device' not in public
+    camera.pop('label')
+    assert resources(c)['cameras'][0]['label']==identifier
+
+
+@pytest.mark.parametrize('label',['','   ',None,False,12,'x'*129])
+def test_camera_config_rejects_unusable_explicit_labels(tmp_path,label):
+    import yaml
+    path=tmp_path/'robot.yaml'
+    path.write_text(yaml.safe_dump({'schema_version':1,'arms':[],
+        'cameras':[{'id':'cam_a','backend':'mock','label':label}]}))
+    with pytest.raises(ValueError,match='Camera labels'):load(path)
+
+
+def test_camera_config_accepts_label_at_device_binding_and_defaults_to_id(tmp_path):
+    import yaml
+    path=tmp_path/'robot.yaml'
+    camera={'id':'cam_a','backend':'mock','label':'Scene camera'}
+    path.write_text(yaml.safe_dump({'schema_version':1,'arms':[],'cameras':[camera]}))
+    assert resources(load(path))['cameras'][0]['label']=='Scene camera'
+    camera.pop('label')
+    path.write_text(yaml.safe_dump({'schema_version':1,'arms':[],'cameras':[camera]}))
+    assert resources(load(path))['cameras'][0]['label']=='cam_a'
+
+
 def test_missing_motor_data_is_null_and_measured_zero_is_preserved():
     c=config();empty=render_motors(c,{}, {},{},10**9)['arm1']
     assert empty['state']=='unavailable'

@@ -67,6 +67,103 @@ export const GRAPH_UPDATE_INTERVALS = Object.freeze([500,1000,2000,5000,10000]);
 export function normalizeUpdateInterval(value) {
   const parsed=Number(value);return GRAPH_UPDATE_INTERVALS.includes(parsed)?parsed:2000;
 }
+export const GRAPH_INTERFACE_PANE = Object.freeze({
+  defaultHeight:152,minHeight:100,minCanvasHeight:120,maxFraction:.7,
+  step:20,largeStep:60,storageKey:'ros-graph-interface-height',
+});
+function preferredInterfaceHeight(value) {
+  const parsed=Number(value);
+  return Number.isFinite(parsed) && parsed>0 ? parsed : GRAPH_INTERFACE_PANE.defaultHeight;
+}
+export function interfacePaneHeight(value,availableHeight) {
+  const available=Number.isFinite(availableHeight)?Math.max(0,availableHeight):0;
+  const max=Math.max(0,Math.floor(Math.min(available*GRAPH_INTERFACE_PANE.maxFraction,
+    available-GRAPH_INTERFACE_PANE.minCanvasHeight)));
+  const min=Math.min(GRAPH_INTERFACE_PANE.minHeight,max);
+  return {min,max,height:Math.min(max,Math.max(min,Math.round(preferredInterfaceHeight(value))))};
+}
+export class GraphInterfaceResizer {
+  constructor({main,canvas,pane,handle,storage,ResizeObserverClass=globalThis.ResizeObserver}) {
+    this.main=main;this.canvas=canvas;this.pane=pane;this.handle=handle;
+    this.drag=null;this.disposed=false;this.listeners=[];
+    try{this.storage=storage??globalThis.localStorage;}catch{}
+    let saved;try{saved=this.storage?.getItem(GRAPH_INTERFACE_PANE.storageKey);}catch{}
+    this.preferredHeight=preferredInterfaceHeight(saved);
+    for(const [key,value] of Object.entries({role:'separator',tabindex:'0','aria-orientation':'horizontal',
+      'aria-controls':pane.id,'aria-label':'Resize interface list',
+      'aria-keyshortcuts':'ArrowUp ArrowDown Home End',
+      title:'Drag up to enlarge the interface list. Up/Down: 20 px; Shift: 60 px; Home: reset; End: maximum.'}))
+      handle.setAttribute(key,value);
+    this.listen('pointerdown',event=>this.start(event));
+    this.listen('pointermove',event=>this.move(event));
+    this.listen('pointerup',event=>this.finish(event));
+    this.listen('pointercancel',event=>this.finish(event,true));
+    this.listen('lostpointercapture',event=>this.finish(event,true));
+    this.listen('keydown',event=>this.key(event));
+    this.observer=new ResizeObserverClass(()=>this.reflow());
+    this.observer.observe(main);
+    for(const child of main.children)if(child!==canvas && child!==pane)this.observer.observe(child);
+    this.reflow();
+  }
+  listen(type,listener) { this.handle.addEventListener(type,listener);this.listeners.push([type,listener]); }
+  reflow() {
+    if(this.disposed || this.main.clientHeight<=0)return false;
+    const fixed=Array.from(this.main.children).filter(child=>child!==this.canvas && child!==this.pane)
+      .reduce((height,child)=>height+child.getBoundingClientRect().height,0);
+    const size=interfacePaneHeight(this.preferredHeight,this.main.clientHeight-fixed);
+    this.size=size;
+    this.main.style.setProperty('--graph-interface-height',`${size.height}px`);
+    for(const [key,value] of Object.entries({'aria-valuemin':size.min,'aria-valuemax':size.max,
+      'aria-valuenow':size.height,'aria-valuetext':`${size.height} pixels`}))this.handle.setAttribute(key,String(value));
+    return true;
+  }
+  setHeight(value,{persist=false}={}) {
+    this.preferredHeight=preferredInterfaceHeight(value);this.reflow();
+    if(persist)try{this.storage?.setItem(GRAPH_INTERFACE_PANE.storageKey,String(this.preferredHeight));}catch{}
+  }
+  start(event) {
+    if(this.disposed || this.drag || event.button!==0 || event.isPrimary===false || !this.reflow() || !this.size.max)return;
+    event.preventDefault();event.stopPropagation();this.handle.focus({preventScroll:true});
+    this.drag={id:event.pointerId,y:event.clientY,height:this.size.height,preferred:this.preferredHeight};
+    this.main.classList.add('is-resizing-interfaces');
+    try{this.handle.setPointerCapture(event.pointerId);}catch{}
+  }
+  move(event) {
+    if(!this.drag || event.pointerId!==this.drag.id)return;
+    event.preventDefault();
+    const requested=this.drag.height+this.drag.y-event.clientY;
+    this.setHeight(Math.max(this.size.min,Math.min(this.size.max,requested)));
+  }
+  finish(event,cancel=false) {
+    if(!this.drag || event.pointerId!==this.drag.id)return;
+    const drag=this.drag;this.drag=null;
+    this.main.classList.remove('is-resizing-interfaces');
+    if(cancel)this.setHeight(drag.preferred);
+    else this.setHeight(this.size.height,{persist:true});
+    try{this.handle.releasePointerCapture(drag.id);}catch{}
+  }
+  key(event) {
+    if(this.disposed || this.drag || event.ctrlKey || event.metaKey || event.altKey || !this.reflow() || !this.size.max)return;
+    const step=event.shiftKey?GRAPH_INTERFACE_PANE.largeStep:GRAPH_INTERFACE_PANE.step;
+    let value;
+    if(event.key==='ArrowUp')value=this.size.height+step;
+    else if(event.key==='ArrowDown')value=this.size.height-step;
+    else if(event.key==='End')value=this.size.max;
+    else if(event.key==='Home')value=GRAPH_INTERFACE_PANE.defaultHeight;
+    else return;
+    event.preventDefault();event.stopPropagation();
+    if(event.key==='Home') {
+      this.setHeight(value);
+      try{this.storage?.removeItem(GRAPH_INTERFACE_PANE.storageKey);}catch{}
+    } else this.setHeight(Math.max(this.size.min,Math.min(this.size.max,value)),{persist:true});
+  }
+  dispose() {
+    if(this.drag)this.finish({pointerId:this.drag.id},true);
+    this.disposed=true;this.observer.disconnect();
+    for(const [type,listener] of this.listeners)this.handle.removeEventListener(type,listener);
+    this.listeners=[];
+  }
+}
 export function graphStructureSignature(graph) {
   const sorted=values=>values?.slice().sort((a,b)=>String(a.id??a).localeCompare(String(b.id??b)));
   const entity=n=>{
@@ -448,14 +545,17 @@ export class GraphExplorer {
     this.svg.append(this.viewport);
     this.host.append(this.svg);
     this.bind();
+    const paneMain=$('graph-main'),pane=$('graph-interface-pane'),resizeHandle=$('graph-interface-resizer');
+    if(paneMain && pane && resizeHandle)this.interfaceResizer=new GraphInterfaceResizer({
+      main:paneMain,canvas:this.host,pane,handle:resizeHandle,
+    });
     this.restartPolling();
     // Observation leases are independent of how often the display is refreshed.
     this.watchTimer=setInterval(()=>{
       if(!this.disposed && this.visible && this.connected && !document.hidden) void this.syncLiveWatch();
     },2000);
-    this.resizeObserver = new ResizeObserver(() => {
-      if (!this.didFit && this.data) this.fit();
-    });
+    this.canvasSize={width:this.host.clientWidth,height:this.host.clientHeight};
+    this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
     this.resizeObserver.observe(this.host);
   }
   setConnected(value) {
@@ -469,7 +569,7 @@ export class GraphExplorer {
   setVisible(value) {
     if (this.disposed) return;
     this.visible = value;
-    if (value) requestAnimationFrame(() => this.fit());
+    if (value) requestAnimationFrame(() => {this.interfaceResizer?.reflow();this.fit();});
     else { this.flowActivity.clear(); this.stopFlow(); }
     this.updateWatchActivity();
   }
@@ -621,6 +721,7 @@ export class GraphExplorer {
     document.removeEventListener('visibilitychange',this.visibilityChanged);
     this.reduceMotion.removeEventListener('change',this.motionChanged);
     this.resizeObserver.disconnect();
+    this.interfaceResizer?.dispose();
   }
   async refresh({scheduled=false}={}) {
     if (this.disposed || this.pending || !this.connected) return;
@@ -1106,12 +1207,25 @@ export class GraphExplorer {
     this.renderLiveStatus();
     this.animateFlow();
   }
+  resizeCanvas() {
+    const width=this.host.clientWidth,height=this.host.clientHeight;
+    if(!width || !height)return;
+    const previous=this.canvasSize;this.canvasSize={width,height};
+    if(!this.didFit && this.data) {this.fit();return;}
+    if(this.didFit && previous?.width>0 && previous?.height>0 &&
+      (previous.width!==width || previous.height!==height)) {
+      this.transform={...this.transform,x:this.transform.x+(width-previous.width)/2,
+        y:this.transform.y+(height-previous.height)/2};
+      this.applyTransform();
+    }
+  }
   fit() {
     if (!this.bounds || !this.host.clientWidth || !this.host.clientHeight)
       return;
     const w = this.host.clientWidth,
       h = this.host.clientHeight,
       k = Math.min(w / this.bounds.width, h / this.bounds.height) * 0.96;
+    this.canvasSize={width:w,height:h};
     this.transform = {
       k,
       x: (w - this.bounds.width * k) / 2,

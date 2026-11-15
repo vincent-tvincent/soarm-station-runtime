@@ -121,6 +121,8 @@ contract:
 
 Camera keys identify trained inputs. A profile maps them to configured camera IDs; it does not change the learned viewpoint, calibration or action space. The SO-ARM SmolVLA editor may label roles Global/Wrist/Additional, but the selected checkpoint determines the actual keys. π0.5 and other layouts use checkpoint-defined rows. Required images cannot be made optional by leaving a camera unplugged. Current native masked-camera handling is qualified for explicit SmolVLA and π0.5 empty/masked slots; those slots remain unbound to real cameras and need at least one real view.
 
+Camera-source choices show the physical resource's optional `cameras[].label`, configured beside its `id` and `device` in the hardware profile. Choosing “Workbench overview” can still save `forward` as the binding value. A label refresh changes option text without rewriting the profile draft or the trained tensor key. See [camera resource labels](runtime-reference.md#configuration-and-resource-ids); no profile-local rename or filesystem browser is required.
+
 Make metadata changes before selecting a content revision. Adding or editing a sidecar changes the artifact identity: refresh the catalog, select the new revision and save the profile again.
 
 ## Upload through the GUI

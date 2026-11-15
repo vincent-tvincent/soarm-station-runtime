@@ -29,7 +29,10 @@ source/staleness is visible. Clicking a motor reveals its reported goal and
 fault availability. The SO-101 adapter currently reports no electrical current;
 raw servo load is not labeled as amperes.
 
-Camera layouts preserve native image ratios and never crop:
+Camera layouts preserve native image ratios and never crop. **Equal** is the
+initial layout. Configure each visible camera name with `cameras[].label` beside
+its device binding; captions, accessible names and policy choices follow that
+label while camera IDs and model-input keys stay stable.
 
 - **Equal** maximizes a common image area using row/column packing. Same-ratio
   feeds have identical dimensions; mixed-ratio feeds have equal image area.
@@ -42,6 +45,10 @@ Camera layouts preserve native image ratios and never crop:
   them, or use arrow keys when focused; positions remain bounded on resize.
   A click promotes the feed; a drag does not. Positions are kept per camera
   for the current page session.
+
+The workspace tabs occupy the left side of the main header directly; the former
+brand label is removed. Dropdown chevrons use a right inset equal to their
+centered vertical whitespace, including the compact payload and policy controls.
 
 Camera FPS describes browser receipt, not source capture timing. No frame for
 more than two seconds is labeled explicitly. Cameras and control use separate
@@ -115,6 +122,13 @@ serialized bytes describe only that observer subscription, not guaranteed
 network delivery or wire bandwidth. Message contents are not exported.
 
 ### Continuous graph-wide activity
+
+The horizontal divider above the Topics/Actions/Services pane adjusts its
+height. Drag upward for more list space or downward for more canvas space.
+With the divider focused, Up/Down changes height, Shift makes larger steps,
+Home resets and End maximizes it. The choice is stored locally and clamped to
+the available screen height. Resizing preserves graph zoom, center and selection;
+the list scrolls within its pane.
 
 **Live flow** monitors the graph while its page/tab is visible. It covers topics
 and action status/feedback regardless of which block is selected; selection

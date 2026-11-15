@@ -6,6 +6,21 @@ Tracked profiles live in `config/`; deployment profiles and credentials belong u
 
 An arm declares its backend, named joints, radian position bounds, velocity limits, calibration, base/TCP/model settings and gripper convention. SO-101 is the current hardware adapter. The gripper uses percent separately from ROS joint radians. A camera declares its backend/capture identity, resolution, FPS and optional measured intrinsics. Duplicate physical device paths are rejected. Shared serial buses require a bus-level adapter rather than separate owners opening the same bus.
 
+Set a camera's human-readable `label` in the same hardware-profile entry where its stable ID is bound to a capture device:
+
+```yaml
+cameras:
+  - id: forward
+    label: Workbench overview
+    backend: v4l2
+    device: /dev/v4l/by-id/REPLACE_WITH_VERIFIED_CAMERA_DEVICE
+    width: 640
+    height: 480
+    fps: 30
+```
+
+The label is optional; omitting it displays the ID. An explicit label must be a nonblank string of 1–128 characters. Dashboard camera captions and policy camera choices use this label. Keep `id` stable: ROS topics, camera frame IDs, stream URLs and profile bindings continue to use `forward`, while checkpoint input keys such as `observation.images.camera1` remain unchanged. Display-label changes do not create a second camera or change its calibration/viewpoint. The hardware profile is loaded at startup; refreshing labels in a browser uses the latest resource metadata returned by the dashboard, not an automatic hardware reconfiguration.
+
 Relative file paths resolve against the YAML file's directory. Physical configuration is loaded at startup. Model bundles can be bound to named startup entries in `profiles`, or prepared dynamically through [policy management](policy-management.md). Clients select registered runtime IDs rather than arbitrary checkpoint paths in motion requests. Saved profile IDs and the immutable prepared `runtime_profile_id` are distinct.
 
 The runtime's `.venv` uses distribution Python for ROS. `.runtime-venv` contains the pinned native LeRobot/PyTorch environment. A restricted Unix socket separates their Python ABIs. One worker owns motor and camera I/O, with an independent control thread per arm and one capture/encoding path per camera. See [architecture](architecture.md) for the process model.

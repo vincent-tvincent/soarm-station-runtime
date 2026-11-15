@@ -18,3 +18,25 @@
 #policy-manager .tag{text-transform:uppercase}
 
 #policy-manager .binding strong{text-transform:capitalize}
+
+/* Match the arrow's right inset to its centered vertical whitespace. */
+#policy-manager select {
+  --select-padding-y: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  line-height: 1.25;
+  padding-block: var(--select-padding-y);
+  padding-right: calc(var(--select-arrow-gap) + 22px);
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-size: 12px 8px;
+  background-position: right var(--select-arrow-gap) center;
+}
+@media (forced-colors: active) {
+  select, #policy-manager select {
+    appearance: auto;
+    -webkit-appearance: auto;
+    background-image: none;
+    padding-right: 10px;
+  }
+}

@@ -11,7 +11,6 @@
   <body>
     <div id="app" data-view="operations">
       <header class="masthead">
-        <a class="brand" href="#operations">SO-ARM / STATION</a>
         <nav aria-label="Workspace">
           <button class="nav-item active" data-page="operations">
             Operations</button
@@ -65,13 +64,13 @@
                 role="group"
                 aria-label="Camera layout"
               >
-                <button data-layout="equal">Equal</button
-                ><button data-layout="primary" class="active">Primary</button
+                <button data-layout="equal" class="active">Equal</button
+                ><button data-layout="primary">Primary</button
                 ><button data-layout="floating">Floating</button>
               </div>
               <button id="camera-fullscreen" class="text-button">Expand</button>
             </div>
-            <div id="camera-stage" class="camera-stage layout-primary">
+            <div id="camera-stage" class="camera-stage layout-equal">
               <div class="empty-state">
                 Camera views will appear after connecting.
               </div>
@@ -343,7 +342,7 @@
           ><span id="graph-meta">Read only</span>
         </div>
         <div class="graph-workspace">
-          <section class="graph-main">
+          <section id="graph-main" class="graph-main">
             <div class="canvas-toolbar">
               <span id="graph-focus">Focus: none</span>
               <div>
@@ -369,6 +368,14 @@
               ><span title="Dots keep moving while fresh message counters advance; their speed is illustrative."><i class="flow-key warm"></i>Publish flow</span
               ><span title="Observed topic activity along subscription routes; receipt at each subscriber is not measured."><i class="flow-key cool"></i>Subscribe flow</span>
             </div>
+            <div id="graph-interface-resizer" class="graph-interface-resizer"
+              role="separator" tabindex="0" aria-orientation="horizontal"
+              aria-controls="graph-canvas graph-interface-pane"
+              aria-label="Resize interface list" aria-describedby="graph-interface-resize-help"
+              title="Drag to resize · Up/Down to adjust · Home to reset">
+              <span id="graph-interface-resize-help" class="sr-only">Drag up to enlarge the list, or use Up and Down. Hold Shift for larger steps. Home resets the height.</span>
+            </div>
+            <div id="graph-interface-pane" class="graph-interface-pane">
             <div
               class="interface-tabs"
               role="tablist"
@@ -396,6 +403,7 @@
               ><span id="interface-count"></span>
             </div>
             <div id="interface-list" class="interface-list"></div>
+            </div>
           </section>
           <aside id="graph-inspector" class="graph-inspector">
             <div class="empty-state">

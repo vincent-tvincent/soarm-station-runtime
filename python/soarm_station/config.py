@@ -38,6 +38,11 @@ def load(path):
     devices = [str(Path(str(a['device'])).resolve()) for a in c['cameras'] if a.get('backend') != 'mock']
     if len(devices) != len(set(devices)):
         raise ValueError('Camera devices must have exactly one capture owner')
+    for camera in c['cameras']:
+        if 'label' in camera:
+            label=camera['label']
+            if not isinstance(label,str) or not 1<=len(label)<=128 or not label.strip():
+                raise ValueError('Camera labels require 1..128 characters and must not be blank')
     for a in c['arms']:
         if a['backend'] not in ('mock','so101'):
             raise ValueError('Unsupported arm backend: ' + a['backend'])

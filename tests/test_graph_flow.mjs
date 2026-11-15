@@ -655,7 +655,10 @@ function schedulerBrowser(t){
   const element=()=>({children:[],attrs:{},clientWidth:1000,clientHeight:700,
     append(...children){this.children.push(...children);},setAttribute(key,value){this.attrs[key]=value;},
     replaceChildren(...children){this.children=children;},querySelector(){return null;},remove(){}});
-  const document={hidden:false,getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);},
+  const document={hidden:false,getElementById:id=>{
+    // This fixture exercises timers without the independently tested layout pane.
+    if(['graph-main','graph-interface-pane','graph-interface-resizer'].includes(id))return null;
+    if(!elements.has(id))elements.set(id,element());return elements.get(id);},
     createElementNS:()=>element(),addEventListener(){},removeEventListener(){}};
   for(const [name,value]of Object.entries({document,window:{matchMedia:()=>({matches:false,addEventListener(){},removeEventListener(){}})},
     localStorage:{getItem:key=>stored.get(key)??null,setItem:(key,value)=>stored.set(key,value)},
