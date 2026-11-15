@@ -259,21 +259,31 @@ function renderState(state) {
   text("environment", typeof env === "string" ? env : env.label || "");
   const arms = Array.from(
     new Set([
-      ...Object.keys(state.arms || {}),
       ...(Array.isArray(resources.arms)
         ? resources.arms.map((a) => a.id)
         : Object.keys(resources.arms || {})),
+      ...Object.keys(state.arms || {}),
     ]),
   );
+  const activeArm =
+    client.currentOperation?.armId || (manual?.leaderRun ? manual.arm : "");
+  // Keep Stop attached to the current operation if resource metadata changes.
+  if (activeArm && !arms.includes(activeArm)) arms.push(activeArm);
   const current = $("arm-select").value;
   if (JSON.stringify(arms) !== $("arm-select").dataset.ids) {
     $("arm-select").replaceChildren(
-      new Option("Select an arm", ""),
-      ...arms.map((id) => new Option(id, id)),
+      ...(arms.length
+        ? arms.map((id) => new Option(id, id))
+        : [new Option("No arms available", "")]),
     );
     $("arm-select").dataset.ids = JSON.stringify(arms);
-    $("arm-select").value = arms.includes(current) ? current : "";
-    if (!arms.includes(selectedArm)) selectedArm = "";
+  }
+  const next = activeArm || (arms.includes(current) ? current : (arms[0] || ""));
+  $("arm-select").value = next;
+  if (selectedArm !== next) {
+    selectedArm = next;
+    selectedMotor = "";
+    loadExample();
   }
   const a = armState();
   text("torque-badge", "Torque " + (a.measured_torque || "—").toLowerCase());
