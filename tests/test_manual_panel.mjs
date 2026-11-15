@@ -39,6 +39,24 @@ test('default arm capabilities load when the initial connection becomes ready',a
   assert.deepEqual(calls.filter(x=>x[0]==='describe'),[['describe','a']]);
 });
 
+test('monitoring degradation does not discard an owned open control socket',()=>{
+  const {panel,client}=fixture();
+  client.connected=true;panel.ownsStream=true;panel.keys.add('KeyK');
+  client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',transport:'websocket',socketOpen:true,ready:true};
+  const generation=panel.intentGeneration;
+  panel.update({snapshot:panel.snapshot,resources:panel.resources,arm:'a',connected:false});
+  assert.equal(panel.connected,true);assert.equal(panel.ownsStream,true);
+  assert.equal(panel.intentGeneration,generation);assert(panel.keys.has('KeyK'));
+});
+
+for(const reason of ['client-disconnected','socket-closed'])test(`actual ${reason} still retires manual intent`,()=>{
+  const {panel,client}=fixture();
+  client.connected=reason!=='client-disconnected';panel.ownsStream=true;panel.keys.add('KeyK');
+  client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',transport:'websocket',socketOpen:reason!=='socket-closed',ready:true};
+  panel.update({snapshot:panel.snapshot,resources:panel.resources,arm:'a',connected:false});
+  assert.equal(panel.connected,false);assert.equal(panel.ownsStream,false);assert.equal(panel.keys.size,0);
+});
+
  test('Stop while permission is pending prevents late Start and revokes late permission',async()=>{
   const{panel,client,calls,states}=fixture(),gate=deferred();
   client.enable=async arm=>{calls.push(['enable',arm]);await gate.promise;states[arm].permission=true;};

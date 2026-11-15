@@ -126,7 +126,12 @@ export class StationClient {
     );
   }
   _connection(state, reason = "") {
-    this._emit("onConnection", { state, reason });
+    this._emit("onConnection", {
+      state,
+      reason,
+      connected: this.connected,
+      controlSocketOpen: this._active?.transport === "websocket" && this._active.ws?.readyState === 1,
+    });
   }
   _publicOperation(op) {
     return {
@@ -141,6 +146,7 @@ export class StationClient {
         this.env.now() < op.grant.localDeadline &&
         !op.ending,
       transport: op.transport,
+      socketOpen: op.transport === "websocket" && op.ws?.readyState === 1,
       lastAcceptedRevision: op.acceptedRevision,
       lastAcceptedInputId: op.acceptedInputId || "",
       pendingInputId: op.pending?.inputId || null,
@@ -1176,6 +1182,7 @@ export class StationClient {
         operator_session_id: op.principal,
         operation_type: "DIRECT",
         mode: "STREAM",
+        input_semantics: "persistent_target",
       };
       if (options.duration_s)
         goal.duration_s = finite(options.duration_s, "Operation duration");

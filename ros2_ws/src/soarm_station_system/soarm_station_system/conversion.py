@@ -17,6 +17,9 @@ def trajectory_points(m):
 def request_from_goal(g):
     if g.context.schema_version!=1:raise ValueError('Unsupported schema')
     s=g.input.inline_sequence;k=g.operation.operation_type;mode=g.input.mode
+    persistent=g.input.persistent_target
+    if persistent and (k!='DIRECT' or mode!='STREAM'):
+        raise ValueError('Persistent targets require DIRECT STREAM')
     selected={'MODEL':'model_steps','DIRECT':'direct_steps','TRAJECTORY':'joint_trajectory'}[k]
     if mode=='STREAM':
         if s.model_steps or s.direct_steps or s.cartesian_steps or s.joint_trajectory.points:raise ValueError('STREAM contains inline payload')
@@ -34,6 +37,7 @@ def request_from_goal(g):
     if c.velocity_scaling not in (0.,1.):raise ValueError('Velocity scaling requires a registered motion profile')
     result={'principal':g.context.operator_session_id,'runtime_boot_id':g.context.expected_runtime_boot_id,
         'controller_session':g.context.expected_controller_session,'operation_type':k,'mode':mode,
+        'persistent_target':persistent,
         'input_timeout_s':(c.max_input_age_ms or 250)/1000,'duration_s':c.max_operation_duration_ms/1000 if c.max_operation_duration_ms else None,'profile_id':g.operation.policy_profile_id,
         'payload_kind':g.input.stream_payload_kind if mode=='STREAM' else s.payload_kind,
         'constraints':{'required_clearance_m':c.required_clearance_m,'cartesian_path':c.path_mode=='CARTESIAN_PATH'}}
@@ -69,13 +73,17 @@ def frame_to_dict(m):
     return {'frame_kind':m.frame_kind,'runtime_boot_id':m.runtime_boot_id,'controller_session':m.controller_session,
             'operation_id':m.operation_id,'operation_epoch':m.operation_epoch,'principal':m.producer_instance_id,
             'window_id':m.window_id,'sequence':m.sequence,'semantic_revision':m.semantic_revision,'input_id':m.input_id,'body':body}
-def goal_from_dict(d,principal):
+def goal_from_dict(d,principal,*,persistent_target=False):
+    if 'persistent_target' in d:raise ValueError('persistent_target is managed by the control WebSocket')
+    if type(persistent_target)!=bool:raise ValueError('persistent_target must be boolean')
+    if persistent_target and (d['operation_type']!='DIRECT' or d['mode']!='STREAM'):
+        raise ValueError('Persistent targets require DIRECT STREAM')
     g=ExecuteOperation.Goal();c=g.context;c.schema_version=1;c.request_id=d.get('request_id','');c.arm_id=d['arm_id']
     c.expected_runtime_boot_id=d['runtime_boot_id'];c.expected_controller_session=d['controller_session'];c.operator_session_id=principal
     g.operation.operation_type=d['operation_type'];g.operation.policy_profile_id=d.get('profile_id','')
     duration=d.get('duration_s')
     g.operation.requested_constraints.max_operation_duration_ms=0 if duration is None else int(duration*1000)
-    g.input.mode=d['mode'];g.input.producer_role='R06'
+    g.input.mode=d['mode'];g.input.producer_role='R06';g.input.persistent_target=persistent_target
     kind={'DIRECT':'DIRECT_JOINT_TARGET','TRAJECTORY':'JOINT_TRAJECTORY','MODEL':'MODEL_TASK'}[d['operation_type']]
     requested=d.get('payload_kind',kind)
     cartesian=bool(d.get('cartesian')) or requested=='CARTESIAN_TARGET'

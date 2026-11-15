@@ -1,9 +1,11 @@
 import argparse
+import logging
 import os
 import signal
 import socketserver
 import threading
 from pathlib import Path
+from dataclasses import dataclass,field
 from .config import load
 from .control import ArmController,uid
 from .camera import Camera
@@ -11,6 +13,58 @@ from .ipc import receive,send
 from .hardware import DeviceLock
 from .policy_runtime import PolicyRuntime
 from .policy_common import PolicyError
+
+
+@dataclass(frozen=True)
+class ControlOwnerBinding:
+    """One connection owns one admitted operation, never its future replacement."""
+    arm: object=field(repr=False)
+    controller_session: str
+    principal: str
+    operation_id: str
+
+    def close(self):
+        return self.arm.hold_owned(self.controller_session,self.principal,self.operation_id,
+            reason='CONTROL_OWNER_DISCONNECTED')
+
+
+class RuntimeRequestHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        binding=None
+        try:
+            # A bound owner connection deliberately has no idle deadline. Its
+            # lifetime, not periodic messages, owns the persistent operation.
+            while True:
+                try:
+                    request=receive(self.request)
+                    try:
+                        if request.get('op')=='bind_control_owner':
+                            candidate=self.server.runtime.bind_control_owner(request)
+                            if binding is not None and binding!=candidate:
+                                raise ValueError('This connection is already bound to another control operation')
+                            binding=candidate  # Install before acknowledgement, including failed sends.
+                            data={'accepted':True,'arm_id':binding.arm.id,
+                                'controller_session':binding.controller_session,'operation_id':binding.operation_id}
+                        else:data=self.server.runtime.call(request)
+                        response={'ok':True,'data':data}
+                    except PolicyError as exc:
+                        response={'ok':False,'error':exc.message,'code':exc.code,'status':exc.status,'details':exc.details}
+                    except Exception as exc:response={'ok':False,'error':str(exc)}
+                    send(self.request,response)
+                except (OSError,EOFError,ValueError):return
+        finally:
+            if binding is not None:
+                try:binding.close()
+                except Exception:
+                    logging.getLogger(__name__).exception('Control owner cleanup failed for arm %s',binding.arm.id)
+
+
+class RuntimeIPCServer(socketserver.ThreadingUnixStreamServer):
+    daemon_threads=True
+
+    def __init__(self,path,runtime):
+        self.runtime=runtime
+        super().__init__(path,RuntimeRequestHandler)
 
 class Runtime:
     def __init__(self,c):
@@ -43,6 +97,21 @@ class Runtime:
         self.recovery_stop.set();self.recovery.join(timeout=3)
         for x in self.arms.values(): x.close()
         for x in self.cameras.values(): x.close()
+    def bind_control_owner(self,request):
+        for key in ('arm_id','controller_session','principal','operation_id'):
+            if not isinstance(request.get(key),str) or not request[key]:
+                raise ValueError(f'Control owner binding requires {key}')
+        arm=self.arms.get(request['arm_id'])
+        if arm is None:raise ValueError('Unknown arm resource')
+        with arm.lock:
+            op=arm.op
+            if (not arm.permission or arm.hold_pending or arm.session!=request['controller_session']
+                    or arm.principal!=request['principal'] or not op
+                    or op.get('operation_id')!=request['operation_id']):
+                raise ValueError('Control operation ownership changed or is unavailable')
+            if op.get('persistent_target') is not True or op.get('operation_type')!='DIRECT' or op.get('mode')!='STREAM':
+                raise ValueError('Control owner binding requires a persistent DIRECT STREAM operation')
+            return ControlOwnerBinding(arm,arm.session,arm.principal,op['operation_id'])
     def call(self,r):
         op=r['op']
         if op=='policy_capabilities':return {'runtime_boot_id':self.boot,'local_prepare':True,'remote_inspect':True}
@@ -74,18 +143,7 @@ def main():
     c=load(args.config);path=Path(c['socket']);path.parent.mkdir(parents=True,exist_ok=True)
     process_lock=DeviceLock(c['lock_dir'],str(path));path.unlink(missing_ok=True)
     runtime=Runtime(c)
-    class Handler(socketserver.BaseRequestHandler):
-        def handle(self):
-            while True:
-                try:
-                    r=receive(self.request)
-                    try: response={'ok':True,'data':runtime.call(r)}
-                    except PolicyError as exc: response={'ok':False,'error':exc.message,'code':exc.code,'status':exc.status,'details':exc.details}
-                    except Exception as exc: response={'ok':False,'error':str(exc)}
-                    send(self.request,response)
-                except (OSError,EOFError,ValueError): return
-    class Server(socketserver.ThreadingUnixStreamServer): daemon_threads=True
-    server=Server(str(path),Handler);os.chmod(path,0o600)
+    server=RuntimeIPCServer(str(path),runtime);os.chmod(path,0o600)
     runtime.start()
     def stop(*_): threading.Thread(target=server.shutdown,daemon=True).start()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)

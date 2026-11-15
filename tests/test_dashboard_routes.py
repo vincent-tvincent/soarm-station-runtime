@@ -131,3 +131,143 @@ def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
             assert calls==[]
         assert calls==['leader','policy']
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize('semantics,persistent,cancel_failure',[
+    (None,False,False),('live_sample',False,False),('persistent_target',True,False),('persistent_target',True,True)])
+def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(semantics,persistent,cancel_failure,monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient,TestServer
+    from soarm_station_interfaces.msg import OperationFeedback
+    import soarm_station_system.dashboard_node as module
+    submitted=[];canceled=[];lifetime=[]
+    class NativeClient:
+        def __init__(self,path):assert path=='test-native-socket'
+        def call(self,operation,**binding):
+            assert operation=='bind_control_owner'
+            assert binding=={'arm_id':'arm1','controller_session':'controller','principal':'browser-owner','operation_id':'owned-action'}
+            lifetime.append('bound')
+            return {'accepted':True,**binding}
+        def close(self):lifetime.append('closed')
+    monkeypatch.setattr(module,'Client',NativeClient)
+    owner=types.SimpleNamespace(states={'arm1':{}},joints={},goals={},stopping=False,
+        config={'socket':'test-native-socket'},command=types.SimpleNamespace(publish=lambda message:lifetime.append('command')))
+    def cancel():
+        canceled.append('owned-action')
+        if cancel_failure:raise RuntimeError('ROS cancellation unavailable')
+    async def submit(body,principal,feedback=None,*,persistent_target=False):
+        submitted.append((dict(body),principal,persistent_target))
+        future=asyncio.get_running_loop().create_future()
+        owner.goals['gateway-request']={'future':future}
+        status=OperationFeedback(arm_id='arm1',runtime_boot_id='boot',controller_session='controller',
+            operation_id='owned-action',operation_epoch=1,phase='READY',stream_ready=True,
+            window_id='window',window_valid_for_ms=250)
+        feedback(types.SimpleNamespace(feedback=types.SimpleNamespace(status=status)))
+        return 'gateway-request',types.SimpleNamespace(cancel_goal_async=cancel)
+    owner.submit=submit
+    owner.control=types.MethodType(DashboardNode.control,owner)
+    async def exercise():
+        app=web.Application();app.router.add_get('/ws/control',owner.control)
+        async with TestClient(TestServer(app)) as client:
+            async with client.ws_connect('/ws/control',protocols=['soarm_station']) as ws:
+                goal={'arm_id':'arm1','operator_session_id':'browser-owner',
+                    'operation_type':'DIRECT','mode':'STREAM','runtime_boot_id':'boot','controller_session':'controller'}
+                if semantics is not None:goal['input_semantics']=semantics
+                await ws.send_json(goal)
+                message=await ws.receive_json(timeout=1)
+                assert message['type']=='grant'
+                assert submitted[0][1:] == ('browser-owner',persistent)
+                assert lifetime==(['bound'] if persistent else [])
+                await ws.send_json({'arm_id':'arm1','runtime_boot_id':'boot','controller_session':'controller',
+                    'operation_id':'owned-action','operation_epoch':1,'window_id':'window','sequence':1,
+                    'input_id':'current','frame_kind':'COMMAND','payload_kind':'DIRECT_JOINT_TARGET',
+                    'body':{'positions':{'joint':0.},'gripper':50.,'gripper_unit':'percent'}})
+                for _ in range(20):
+                    if 'command' in lifetime:break
+                    await asyncio.sleep(.005)
+                assert 'command' in lifetime
+                if persistent:assert lifetime.index('bound')<lifetime.index('command')
+            for _ in range(20):
+                if canceled:break
+                await asyncio.sleep(.005)
+            assert canceled==['owned-action']
+            assert ('closed' in lifetime)==persistent
+    asyncio.run(exercise())
+
+
+def test_control_socket_rejects_unknown_intent_before_submitting_an_action():
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient,TestServer
+    async def submit(*args,**kwargs):raise AssertionError('Invalid semantics submitted an action')
+    owner=types.SimpleNamespace(states={'arm1':{}},joints={},goals={},stopping=False,submit=submit)
+    owner.control=types.MethodType(DashboardNode.control,owner)
+    async def exercise():
+        app=web.Application();app.router.add_get('/ws/control',owner.control)
+        async with TestClient(TestServer(app)) as client:
+            async with client.ws_connect('/ws/control',protocols=['soarm_station']) as ws:
+                await ws.send_json({'arm_id':'arm1','operator_session_id':'browser-owner',
+                    'operation_type':'DIRECT','mode':'STREAM','input_semantics':'unknown'})
+                result=await ws.receive_json(timeout=1)
+                assert result['type']=='error' and result['reason']=='Unknown DIRECT input semantics'
+    asyncio.run(exercise())
+
+
+def test_late_persistent_admission_is_canceled_after_gateway_wait_fails(monkeypatch):
+    import soarm_station_system.dashboard_node as module
+    canceled=[]
+    async def exercise():
+        future=asyncio.get_running_loop().create_future()
+        owner=types.SimpleNamespace(operation=types.SimpleNamespace(send_goal_async=lambda *a,**kw:future))
+        async def interrupted_wait(pending,timeout=5):raise TimeoutError('response delayed')
+        monkeypatch.setattr(module,'resolved',interrupted_wait)
+        body={'arm_id':'arm1','runtime_boot_id':'boot','controller_session':'controller',
+            'operation_type':'DIRECT','mode':'STREAM'}
+        with pytest.raises(TimeoutError):
+            await DashboardNode.submit(owner,body,'owner',persistent_target=True)
+        future.set_result(types.SimpleNamespace(accepted=True,cancel_goal_async=lambda:canceled.append('late-owned-goal')))
+        await asyncio.sleep(0)
+        assert canceled==['late-owned-goal']
+    asyncio.run(exercise())
+
+
+def test_canceled_native_owner_bind_closes_even_a_late_worker_connection(monkeypatch):
+    import soarm_station_system.dashboard_node as module
+    started=threading.Event();release=threading.Event();events=[]
+    binding={'arm_id':'arm1','controller_session':'controller','principal':'owner','operation_id':'owned'}
+    class NativeClient:
+        def __init__(self,path):pass
+        def call(self,operation,**arguments):
+            assert operation=='bind_control_owner' and arguments==binding
+            started.set();assert release.wait(2)
+            events.append('bound-late');return {'accepted':True,**arguments}
+        def close(self):events.append('closed')
+    monkeypatch.setattr(module,'Client',NativeClient)
+    async def exercise():
+        task=asyncio.create_task(module.bind_control_owner('socket',binding))
+        assert await asyncio.to_thread(started.wait,1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):await task
+        assert events==['closed']
+        release.set()
+        for _ in range(100):
+            if events.count('closed')>=2:break
+            await asyncio.sleep(.005)
+        assert events[-2:]==['bound-late','closed']
+    try:asyncio.run(exercise())
+    finally:release.set()
+
+
+def test_native_owner_binding_rejection_closes_the_lifetime_client(monkeypatch):
+    import soarm_station_system.dashboard_node as module
+    closed=[]
+    class NativeClient:
+        def __init__(self,path):pass
+        def call(self,*args,**kwargs):raise ValueError('operation no longer owned')
+        def close(self):closed.append(True)
+    monkeypatch.setattr(module,'Client',NativeClient)
+    async def exercise():
+        with pytest.raises(ValueError,match='operation no longer owned'):
+            await module.bind_control_owner('socket',{'arm_id':'arm1','controller_session':'controller',
+                'principal':'owner','operation_id':'owned'})
+        assert closed
+    asyncio.run(exercise())

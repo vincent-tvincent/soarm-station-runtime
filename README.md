@@ -121,7 +121,7 @@ Paths below are relative to the gateway. `{arm_id}`, `{camera_id}`, `{host_id}` 
 | POST | `/api/operate` | Start `DIRECT`, `TRAJECTORY` or `MODEL` in `INLINE`/`STREAM` mode; returns `request_id`. |
 | GET | `/api/operations/{request_id}` | `done`, `feedback` and eventual `result`; not a durable job-history API. |
 | POST | `/api/stream` | Forward a current-window `COMMAND`, `HEARTBEAT` or `END` frame for an admitted HTTP stream. |
-| WSS | `/ws/control` | **DIRECT + STREAM only**: opening goal, grant/state feedback and continuous named joint targets. |
+| WSS | `/ws/control` | **DIRECT + STREAM only**: opening goal, grant/state feedback and named joint targets. `input_semantics` selects persistent manual intent or the default live samples; see [stream semantics](docs/web-api.md#direct-control-websocket). |
 | POST | `/api/hold` | `{arm_id}`; arm-wide hold, ends the current operation and revokes permission while retaining support torque. |
 | POST | `/api/workflows` | `{arm_id, operator_session_id, definition_id}`; run an already configured workflow definition. Does not upload arbitrary task code. |
 | GET | `/api/manual/{arm_id}/describe` | Kinematic capability, frames, key map, speed levels and available named poses. |

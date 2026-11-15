@@ -155,8 +155,14 @@ export class ManualPanel {
   update({ snapshot, resources, arm, connected }) {
     const wasConnected = this.connected;
     const armChanged = this.arm !== arm;
+    const operation = this.client.currentOperation;
+    const ownSocketOpen = this.client.connected === true && this.ownsStream &&
+      operation?.armId === arm && operation.type === "DIRECT" && operation.mode === "STREAM" &&
+      operation.transport === "websocket" && operation.socketOpen === true;
     this.snapshot = snapshot;
-    this.connected = connected;
+    // A delayed monitoring request must not retire a healthy manual producer.
+    // Explicit client disconnect or the operation's socket-close event still does.
+    this.connected = Boolean(connected || ownSocketOpen);
     this.resources = resources;
     if (armChanged) {
       this.cancelIntent();
@@ -172,10 +178,10 @@ export class ManualPanel {
     }
     // Initial status can select the default arm before connect() announces its
     // connected state. Fetch capabilities when that connection becomes ready.
-    if (arm && connected && (armChanged || !wasConnected))
+    if (arm && this.connected && (armChanged || !wasConnected))
       this.safe(() => this.loadDescription());
     if (!this.target && this.measured()) this.resetTargets();
-    if (!connected) {
+    if (!this.connected) {
       this.cancelIntent();
       this.ownsStream = false;
       this.leaderRun = null;

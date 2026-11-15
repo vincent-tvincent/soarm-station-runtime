@@ -38,6 +38,30 @@ async def resolved(f,timeout=5):
         if time.monotonic()>deadline:raise TimeoutError('ROS response timed out')
         await asyncio.sleep(.005)
     return f.result()
+
+async def bind_control_owner(socket_path,binding):
+    """Keep an operation-scoped native connection alive for the WebSocket.
+
+    Closing this connection (including process death) is an event-based hold.
+    A canceled coroutine must also close a bind that finishes later in a worker.
+    """
+    client=Client(socket_path)
+    pending=asyncio.create_task(asyncio.to_thread(client.call,'bind_control_owner',**binding))
+    try:
+        response=await asyncio.shield(pending)
+        if response.get('accepted') is not True or any(response.get(key)!=binding[key]
+                for key in ('arm_id','controller_session','operation_id')):
+            raise ValueError('Native control owner binding was not confirmed')
+        return client
+    except BaseException:
+        client.close()
+        def close_late(future):
+            try:future.result()
+            except (Exception,asyncio.CancelledError):pass
+            finally:client.close()
+        pending.add_done_callback(close_late)
+        raise
+
 class DashboardNode(BaseNode):
     def __init__(self):
         super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
@@ -164,12 +188,23 @@ class DashboardNode(BaseNode):
         return web.json_response(asdict(await resolved(self.permission_client.call_async(q))))
     async def hold(self,r):
         b=await r.json();return web.json_response(asdict(await resolved(self.hold_client.call_async(Hold.Request(arm_id=b['arm_id'])))))
-    async def submit(self,b,principal,feedback=None):
-        g=goal_from_dict(b,principal);latest={}
+    async def submit(self,b,principal,feedback=None,*,persistent_target=False):
+        g=goal_from_dict(b,principal,persistent_target=persistent_target);latest={}
         def receive_feedback(m):
             latest.clear();latest.update(asdict(m.feedback.status))
             if feedback:feedback(m)
-        h=await resolved(self.operation.send_goal_async(g,feedback_callback=receive_feedback))
+        pending_goal=self.operation.send_goal_async(g,feedback_callback=receive_feedback)
+        try:h=await resolved(pending_goal)
+        except BaseException:
+            if persistent_target:
+                # A persistent target cannot rely on an idle timer to clean up
+                # an accepted goal whose gateway response was lost/canceled.
+                def retire_late(future):
+                    try:late=future.result()
+                    except (Exception,asyncio.CancelledError):return
+                    if late is not None and late.accepted:late.cancel_goal_async()
+                pending_goal.add_done_callback(retire_late)
+            raise
         if not h.accepted:raise ValueError('Operation rejected')
         request_id=uuid.uuid4().hex;self.goals[request_id]={'handle':h,'future':h.get_result_async(),'feedback':latest}
         if len(self.goals)>128:
@@ -196,18 +231,28 @@ class DashboardNode(BaseNode):
         return await stream_camera_frames(r,lambda:self.images.get(n),lambda:self.stopping)
     async def control(self,r):
         ws=web.WebSocketResponse(protocols=['soarm_station'],max_msg_size=262144,heartbeat=10,receive_timeout=2);await ws.prepare(r)
-        arm='';h=None;feedback={};principal=uuid.uuid4().hex
+        arm='';h=None;feedback={};principal=uuid.uuid4().hex;control_owner=None
         try:
             b=await ws.receive_json(timeout=5);arm=b['arm_id']
             if b['operation_type']!='DIRECT' or b['mode']!='STREAM':raise ValueError('Remote control uses DIRECT STREAM')
+            semantics=b.get('input_semantics','live_sample')
+            if semantics not in ('live_sample','persistent_target'):
+                raise ValueError('Unknown DIRECT input semantics')
             state=self.states[arm]
             # Opening a socket is not consent to arm: permission must already be granted to this requested operator ID.
             principal=b['operator_session_id']
             def on_feedback(m):feedback.clear();feedback.update(asdict(m.feedback.status))
-            i,h=await self.submit(b,principal,on_feedback);result=self.goals[i]['future'];last_feedback=0.;last_state=0.
+            # Browser target intent opts in explicitly. Native leader/operator
+            # clients also use this route, and retain live_sample by default.
+            # Socket close/error cancels this exact action for either contract.
+            i,h=await self.submit(b,principal,on_feedback,persistent_target=semantics=='persistent_target');result=self.goals[i]['future'];last_feedback=0.;last_state=0.
             while not ws.closed and not self.stopping and not result.done():
                 t=time.monotonic()
-                if feedback and t-last_feedback>=.05:
+                if semantics=='persistent_target' and control_owner is None and feedback.get('operation_id'):
+                    control_owner=await bind_control_owner(self.config['socket'],{
+                        'arm_id':arm,'controller_session':b['controller_session'],
+                        'principal':principal,'operation_id':feedback['operation_id']})
+                if feedback and (semantics!='persistent_target' or control_owner is not None) and t-last_feedback>=.05:
                     await ws.send_json({'type':'grant','grant':dict(feedback)});last_feedback=t
                 if t-last_state>=.01:
                     await ws.send_json({'type':'state','state':self.states.get(arm),'joints':self.joints.get(arm)});last_state=t
@@ -217,6 +262,8 @@ class DashboardNode(BaseNode):
                     import json
                     d=json.loads(m.data)
                     if d.get('arm_id')!=arm:raise ValueError('Arm mismatch')
+                    if semantics=='persistent_target' and control_owner is None:
+                        raise ValueError('Persistent control ownership is not ready')
                     self.command.publish(stream_from_dict(d,principal))
                 elif m.type in (web.WSMsgType.CLOSE,web.WSMsgType.CLOSED,web.WSMsgType.ERROR):break
             if result.done() and not ws.closed:
@@ -224,10 +271,15 @@ class DashboardNode(BaseNode):
         except Exception as exc:
             if not ws.closed:await ws.send_json({'type':'error','reason':str(exc)[:512]})
         finally:
-            if h:h.cancel_goal_async()
-            # Action cancellation is bound to that operation in the native owner.
-            # A late socket close must not issue an unscoped hold on its replacement.
-            await ws.close()
+            try:
+                if control_owner is not None:control_owner.close()
+            finally:
+                try:
+                    if h:h.cancel_goal_async()
+                finally:
+                    # Both cleanup paths remain operation-scoped. Even an action
+                    # cancellation error must close the native lifetime and WS.
+                    await ws.close()
         return ws
     def destroy_node(self):
         self.graph_observer.close()

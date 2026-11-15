@@ -193,6 +193,25 @@ INLINE supports 1–16 bounded model steps. For a policy with no language condit
 
 After permission, open `wss://HOST:8443/ws/control`. Its first JSON message is an operation envelope with `operation_type: "DIRECT"`, `mode: "STREAM"`, explicit arm/operator/boot/controller IDs and optional `duration_s`; do not put a point sequence into this opening message.
 
+The opening message also accepts `input_semantics`:
+
+| Value | Target lifetime |
+| --- | --- |
+| `persistent_target` | Browser/manual target intent remains accepted until replaced, stopped or canceled. Pauses in input or heartbeats do not expire the operation. The dashboard's joint and keyboard controls use this mode. |
+| `live_sample` (default) | A continuous live source, such as a remote leader, must keep supplying fresh samples. Existing source/target freshness checks apply. |
+
+This choice applies to DIRECT WebSocket operations only. An explicitly requested
+operation duration still applies. Both modes retain permission checks, current
+command windows, aligned pickup, rejection of old/out-of-order frames, and
+operation-scoped cancellation on socket closure. A connection restart never
+resumes a previous operation.
+
+Before forwarding persistent commands, the gateway binds a dedicated local IPC
+connection to that exact native operation. Connection closure, including a
+gateway process exit, releases that operation by identity. This uses socket
+lifetime rather than a heartbeat or inactivity deadline. A delayed status poll
+does not disconnect an otherwise healthy manual-control socket.
+
 Server text messages are:
 
 - `{"type":"grant","grant":{...OperationFeedback...}}`: readiness, identity, current window and acceptance acknowledgments.
@@ -223,7 +242,7 @@ Replace the illustrative one-joint dictionary with the entire discovered body-jo
 
 The host supplies approximately 250-ms windows. Track their usable lifetime against your own local elapsed time, accounting for response delay; never compare monotonic clocks between hosts or re-stamp a cached sensor sample as fresh. The current native operator requests 50–120 Hz input, while the device dispatch loop remains approximately 100 Hz. Keep latest targets rather than queuing stale poses across latency/reconnect.
 
-`HEARTBEAT` and `END` frames carry the same current identities/window/sequence with `payload_kind: "NONE"` and no command body. Heartbeats maintain source liveness; they do not extend the lifetime of a stale DIRECT target. END or control-socket loss ends that operation and revokes its permission. Reconnection requires an explicit new operation and fresh pickup; it never resumes old commands.
+`HEARTBEAT` and `END` frames carry the same current identities/window/sequence with `payload_kind: "NONE"` and no command body. For `live_sample`, heartbeats maintain source liveness but do not extend a stale target's lifetime. For `persistent_target`, target intent does not need periodic renewal. END or control-socket loss ends that operation and revokes its permission. Reconnection requires an explicit new operation and fresh pickup; it never resumes old commands.
 
 ### MODEL and TRAJECTORY over HTTP STREAM
 

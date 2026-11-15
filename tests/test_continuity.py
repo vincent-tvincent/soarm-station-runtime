@@ -44,6 +44,52 @@ def test_healthy_stream_runs_beyond_120_seconds(setup):
         tick(arm,clock,.1)
     assert arm.op is not None and arm.permission and arm.op['deadline'] is None
 
+def test_browser_persistent_target_survives_idle_then_accepts_fresh_intent(setup):
+    arm,clock=setup;begin(arm,persistent_target=True)
+    assert arm.op['persistent_target'] and not arm.op['requires_liveness']
+    desired={'positions':{n:.02 for n in arm.q},'gripper':50.}
+    old=frame(arm,desired,identifier='initial-target');arm.input(old)
+    for _ in range(50):tick(arm,clock,.1)
+    assert arm.op and arm.permission and arm.op['deadline'] is None
+    assert arm.target[0]==desired['positions']
+    assert arm.commanded_q==pytest.approx(desired['positions'])
+    with pytest.raises(ValueError,match='Expired or unknown input window'):
+        arm.input({**old,'sequence':arm.last_sequence+1,'input_id':'queued-old-window'})
+    replacement={'positions':{n:.03 for n in arm.q},'gripper':50.}
+    arm.input(frame(arm,replacement,identifier='fresh-target'))
+    tick(arm,clock)
+    assert arm.op and arm.last_input=='fresh-target' and arm.permission
+
+def test_persistent_target_still_honors_explicit_stop_and_never_rearms(setup):
+    arm,clock=setup;begin(arm,persistent_target=True)
+    arm.input(frame(arm,{'positions':dict(arm.q),'gripper':50.},identifier='pickup'))
+    retired=frame(arm,{'positions':dict(arm.q),'gripper':50.},identifier='late')
+    arm._hold('OPERATOR_HOLD');arm._finish_hold()
+    with pytest.raises(ValueError,match='No active operation'):arm.input(retired)
+    with pytest.raises(ValueError,match='Permission required'):begin(arm,enable=False,persistent_target=True)
+    assert not arm.permission and arm.op is None
+
+@pytest.mark.parametrize('reason',['feedback','duration'])
+def test_persistent_target_preserves_feedback_faults_and_explicit_duration(setup,reason):
+    arm,clock=setup;begin(arm,persistent_target=True,**({'duration_s':.1} if reason=='duration' else {}))
+    arm.input(frame(arm,{'positions':dict(arm.q),'gripper':50.},identifier='pickup'))
+    clock.advance(.2)
+    if reason=='duration':arm.sample_time=clock()
+    arm._tick(clock(),.01)
+    assert arm.op is None and not arm.permission
+    assert arm.error==('FEEDBACK_EXPIRED' if reason=='feedback' else 'OPERATION_OR_LIVENESS_EXPIRED')
+
+@pytest.mark.parametrize('kwargs',[
+    {'persistent_target':'true'}, {'persistent_target':True,'operation_type':'MODEL'},
+    {'persistent_target':True,'operation_type':'TRAJECTORY'}, {'persistent_target':True,'mode':'INLINE'},
+])
+def test_persistent_target_is_only_a_typed_direct_stream_contract(setup,kwargs):
+    arm,_=setup;arm.set_permission(True,'owner',arm.session)
+    request={'principal':'owner','runtime_boot_id':'boot','controller_session':arm.session,
+        'operation_type':'DIRECT','mode':'STREAM',**kwargs}
+    with pytest.raises(ValueError,match='persistent_target|Persistent targets'):arm.begin(request)
+    assert arm.op is None
+
 def test_explicit_duration_and_optional_profile_ceiling_are_honored(setup):
     arm,clock=setup;begin(arm,duration_s=2.)
     for _ in range(22):

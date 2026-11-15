@@ -14,6 +14,24 @@ def test_omitted_stream_duration_is_zero_on_wire_and_unlimited_in_request():
     goal=goal_from_dict(envelope(),'owner')
     assert goal.operation.requested_constraints.max_operation_duration_ms==0
     assert request_from_goal(goal)['duration_s'] is None
+    assert request_from_goal(goal)['persistent_target'] is False
+
+def test_gateway_browser_target_semantics_survive_ros_roundtrip():
+    goal=goal_from_dict(envelope(),'owner',persistent_target=True)
+    assert goal.input.persistent_target is True
+    request=request_from_goal(goal)
+    assert request['persistent_target'] is True and request['operation_type']=='DIRECT' and request['mode']=='STREAM'
+
+def test_http_json_cannot_select_gateway_managed_target_semantics():
+    with pytest.raises(ValueError,match='managed by the control WebSocket'):
+        goal_from_dict(envelope()|{'persistent_target':True},'owner')
+
+@pytest.mark.parametrize('kind,mode',[('MODEL','STREAM'),('TRAJECTORY','STREAM'),('DIRECT','INLINE')])
+def test_persistent_target_rejects_other_operation_contracts(kind,mode):
+    with pytest.raises(ValueError,match='Persistent targets require DIRECT STREAM'):
+        goal_from_dict(envelope(kind,mode),'owner',persistent_target=True)
+    goal=goal_from_dict(envelope(),'owner');goal.operation.operation_type=kind;goal.input.mode=mode;goal.input.persistent_target=True
+    with pytest.raises(ValueError,match='Persistent targets require DIRECT STREAM'):request_from_goal(goal)
 
 def test_explicit_long_duration_survives_conversion():
     goal=goal_from_dict(envelope()|{'duration_s':180.},'owner')

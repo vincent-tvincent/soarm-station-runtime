@@ -74,19 +74,25 @@ async function safely(fn) {
   }
 }
 function connection(info) {
-  connected = (typeof info === "string" ? info : info.state) === "connected";
+  const phase = typeof info === "string" ? info : info.state;
+  // Status-poll health is independent of the established connection/control WS.
+  connected = typeof info?.connected === "boolean"
+    ? info.connected
+    : phase === "connected" || (phase === "degraded" && client.connected);
   text(
     "connection",
-    connected ? "Connected" : info.reason || info.state || "Disconnected",
+    connected
+      ? phase === "degraded" ? "Connected · status delayed" : "Connected"
+      : info.reason || phase || "Disconnected",
   );
   // A transient motor/status poll error must not retire read-only graph watches.
   // The graph endpoint checks its own freshness; explicit disconnect still pauses it.
-  graph?.setConnected(connected || info.state === "degraded");
+  graph?.setConnected(connected || phase === "degraded");
   policies?.setConnected(connected);
   $("disconnect").hidden = false;
-  $("disconnect").disabled = info.state === "connecting";
+  $("disconnect").disabled = phase === "connecting";
   $("disconnect").textContent = connected ? "Disconnect" : "Reconnect";
-  if (info.state === "disconnected") {
+  if (phase === "disconnected") {
     cameraIds = [];
     cameraFrames.clear();
     arrangeCameras();

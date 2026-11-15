@@ -433,6 +433,7 @@ test("DIRECT STREAM uses measured pickup, then latest user intent; no queued bur
   assert.ok(!ws.url.includes(TOKEN));
   assert.equal(ws.sent.length, 1);
   assert.equal(ws.sent[0].duration_s, undefined);
+  assert.equal(ws.sent[0].input_semantics, "persistent_target");
   await f.clock.advance(30);
   assert.equal(ws.sent.length, 1);
   ws.message({ type: "grant", grant: f.grant() });
@@ -474,6 +475,59 @@ test("DIRECT STREAM uses measured pickup, then latest user intent; no queued bur
   assert.equal(f.client.currentOperation, null);
   assert.equal(f.calls.filter((x) => x.path === "/api/permission").length, 0);
   await f.client.disconnect();
+});
+
+test("browser manual intent remains connected across an idle grant gap without replaying expired frames", async () => {
+  const f = fixture();
+  await f.client.connect(TOKEN);
+  const pending = f.client.startManual("arm1");
+  const ws = f.sockets[0];
+  ws.open();
+  await pending;
+  assert.equal(ws.sent[0].input_semantics, "persistent_target");
+  ws.message({ type: "grant", grant: f.grant() });
+  await f.clock.advance(10);
+  const pickup = ws.sent.at(-1);
+  ws.message({ type: "grant", grant: f.grant(null, {
+    phase: "ACTIVE", last_accepted_input_id: pickup.input_id, last_sequence: pickup.sequence,
+  }) });
+  f.client.setManualTarget({ positions: positions(), gripper: 42 });
+  await f.clock.advance(500);
+  const stoppedSendingAt = ws.sent.length;
+  await f.clock.advance(1000);
+  assert.equal(ws.sent.length, stoppedSendingAt, "an expired grant must not authorize more frames");
+  assert.equal(f.client.currentOperation?.transport, "websocket");
+  assert.equal(ws.readyState, 1, "an idle persistent target does not close its control session");
+  ws.message({ type: "grant", grant: f.grant(null, { phase: "ACTIVE" }) });
+  await f.clock.advance(10);
+  const fresh = ws.sent.at(-1);
+  assert.deepEqual(fresh.body.positions, positions());
+  assert.notEqual(fresh.window_id, pickup.window_id);
+  assert.ok(fresh.sequence > pickup.sequence);
+  assert.equal(f.calls.filter(x => x.path === "/api/permission").length, 0);
+  ws.close();
+  await f.clock.advance(1000);
+  assert.equal(f.client.currentOperation, null);
+  assert.equal(f.sockets.length, 1, "closed sockets must not reconnect or rearm");
+});
+
+test("status poll degradation reports established control connectivity without closing its socket", async () => {
+  const f = fixture();
+  await f.client.connect(TOKEN);
+  const pending=f.client.startManual("arm1"),ws=f.sockets[0];
+  ws.open();await pending;
+  f.setRoute(call=>call.path==="/api/status"?f.response("status request delayed",503):undefined);
+  await f.clock.advance(110);
+  assert.deepEqual(f.connections.at(-1),{
+    state:"degraded",reason:"status request delayed",connected:true,controlSocketOpen:true,
+  });
+  assert.equal(f.client.currentOperation.socketOpen,true);
+  assert.equal(ws.readyState,1);
+  ws.close();
+  assert.equal(f.client.currentOperation,null);
+  await f.client.disconnect();
+  assert.equal(f.connections.at(-1).connected,false);
+  assert.equal(f.connections.at(-1).controlSocketOpen,false);
 });
 
 test("sparse retry keeps canonical input/revision, uses fresh transport identity, and stops after rejection", async () => {

@@ -193,6 +193,10 @@ class ArmController:
             if request.get('runtime_boot_id')!=self.boot or request.get('controller_session')!=self.session:
                 raise ValueError('Runtime/session mismatch')
             kind=request['operation_type'];mode=request['mode']
+            persistent=request.get('persistent_target',False)
+            if type(persistent)!=bool:raise ValueError('persistent_target must be boolean')
+            if persistent and (kind!='DIRECT' or mode!='STREAM'):
+                raise ValueError('Persistent targets require DIRECT STREAM')
             if kind=='MODEL' and self.policy_preparation:raise ValueError('Native policy preparation is in progress')
             if kind not in ('DIRECT','TRAJECTORY','MODEL') or mode not in ('INLINE','STREAM'):raise ValueError('Unsupported operation')
             constraints=request.get('constraints',{})
@@ -249,7 +253,8 @@ class ArmController:
             t=now()
             self.op={**copy.deepcopy(request),'operation_id':uid(),'operation_epoch':self.epoch,'instruction':instruction,
                      'start':t,'deadline':None if duration is None else t+duration,'last_live':t,'last_direct':0.,'picked_up':False,
-                     'requires_liveness':mode=='STREAM' or request.get('require_liveness',False),
+                     'persistent_target':persistent,
+                     'requires_liveness':(mode=='STREAM' and not persistent) or request.get('require_liveness',False),
                      'requires_gripper_settle':any('gripper' in point for point in request.get('points',[]))}
             if steps:self.op.update(model_steps=steps,model_step=0,step_started=t)
             if cartesian:
@@ -329,7 +334,7 @@ class ArmController:
         if not self.permission or (op['deadline'] is not None and t>op['deadline']) or (op['requires_liveness'] and t-op['last_live']>.6):
             self._hold('OPERATION_OR_LIVENESS_EXPIRED');return
         if t-self.sample_time>.15: self._hold('FEEDBACK_EXPIRED');return
-        if op['mode']=='STREAM' and op['operation_type']=='DIRECT' and op['last_direct'] and t-op['last_direct']>op.get('input_timeout_s',.25):
+        if op['mode']=='STREAM' and op['operation_type']=='DIRECT' and not op.get('persistent_target',False) and op['last_direct'] and t-op['last_direct']>op.get('input_timeout_s',.25):
             self._hold('DIRECT_INPUT_EXPIRED');return
         if self.plan_job is not None:
             if not self.plan_job.done():return
