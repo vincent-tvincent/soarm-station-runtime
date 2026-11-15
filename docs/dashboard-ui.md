@@ -21,7 +21,7 @@ available. See [manual controls](manual-dashboard.md) and the
 
 The first configured arm is selected automatically when the page loads. You can
 choose another arm; normal status updates preserve that choice. Selecting an arm
-loads its monitoring views without enabling motion. The right panel switches between **Status**, **Manual**
+loads its monitoring views without enabling motion. The right panel switches between **Status**, **Control**
 and **Payload**, leaving the camera region wide. Status lists each motor's
 position, torque, temperature and voltage. A current column appears only when
 at least one current reading is supplied. Null values stay unavailable, and

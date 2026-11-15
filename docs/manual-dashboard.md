@@ -1,6 +1,6 @@
-# Manual control dashboard — November 13, 2026
+# Control dashboard
 
-Manual now selects Joint targets, IK keyboard jog or Leader arm from one dropdown.
+The Control tab selects Joint targets, IK keyboard jog or Leader arm from one dropdown.
 The shared lower panel renders the configured URDF as a projected skeleton on
 white: black measured joints/links, gray dashed target, red specifically reported
 motor fault/stall. Drag orbits; wheel zooms; Reset restores the view. The schematic
