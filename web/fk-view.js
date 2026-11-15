@@ -1,10 +1,37 @@
 // A projected view of configured kinematics, following the original controller's SVG viewer.
 const NS = "http://www.w3.org/2000/svg";
+const DIFFERENCE_COLOR = "#b45b54";
 const node = (tag, attrs = {}) => {
   const n = document.createElementNS(NS, tag);
   for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, value);
   return n;
 };
+export function jointPositionDifferences(measured, target) {
+  if (
+    typeof measured?.frame_id !== "string" || !measured.frame_id ||
+    measured.frame_id !== target?.frame_id ||
+    [measured, target].some(g => g.units?.position && g.units.position !== "m")
+  ) return [];
+  const named = geometry => {
+    const joints = new Map();
+    for (const joint of Array.isArray(geometry.joints) ? geometry.joints : []) {
+      if (typeof joint?.name !== "string" || !joint.name) continue;
+      // Duplicate names are ambiguous, even when one duplicate has bad geometry.
+      joints.set(joint.name, joints.has(joint.name) ? null : joint);
+    }
+    return joints;
+  };
+  const finitePoint = point => Array.isArray(point) && point.length === 3 && point.every(Number.isFinite);
+  const actual = named(measured), desired = named(target), differences = [];
+  for (const [name, joint] of actual) {
+    const other = desired.get(name);
+    if (!finitePoint(joint?.position_m) || !finitePoint(other?.position_m)) continue;
+    const distance_mm = Math.hypot(...joint.position_m.map((value, axis) => other.position_m[axis] - value)) * 1000;
+    if (!Number.isFinite(distance_mm) || distance_mm === 0) continue;
+    differences.push({name, measured: [...joint.position_m], target: [...other.position_m], distance_mm});
+  }
+  return differences;
+}
 export class JointIssueColors {
   constructor() {
     this.states = new Map();
@@ -46,7 +73,7 @@ export class FKView {
     this.yaw = -0.68;
     this.pitch = 0.42;
     this.zoom = 1;
-    element.innerHTML = `<div class="panel-subheading"><h3>Arm pose</h3><button type="button" class="text-button" data-reset>Reset view</button></div><div class="fk-stage" tabindex="0" aria-label="Arm pose. Drag to orbit, scroll to zoom, double-click to reset."><svg viewBox="0 0 420 300" role="img" aria-label="Measured robot joint positions"></svg><span class="fk-empty">Waiting for measured pose</span></div><div class="fk-legend"><span>— Measured</span><span class="muted">┄ Target</span><span class="fk-alert-key">● Fault / stall</span></div><div class="fk-readout"></div><p class="detail-note fk-status">Drag to orbit · scroll to zoom</p>`;
+    element.innerHTML = `<div class="panel-subheading"><h3>Arm pose</h3><button type="button" class="text-button" data-reset>Reset view</button></div><div class="fk-stage" tabindex="0" aria-label="Arm pose. Drag to orbit, scroll to zoom, double-click to reset."><svg viewBox="0 0 420 300" role="img" aria-label="Measured robot joint positions"></svg><span class="fk-empty">Waiting for measured pose</span></div><div class="fk-legend"><span>— Measured</span><span class="muted">┄ Target</span><span class="fk-alert-key">● Fault / stall</span><span style="display:inline-flex;align-items:center;gap:4px"><svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true"><line x1="0" y1="5" x2="18" y2="5" stroke="${DIFFERENCE_COLOR}" stroke-width="1.1" stroke-dasharray="3 4"/></svg>Position difference</span></div><div class="fk-readout"></div><p class="detail-note fk-status">Drag to orbit · scroll to zoom</p>`;
     this.svg = element.querySelector("svg");
     this.stage = element.querySelector(".fk-stage");
     const reset = () => {
@@ -177,6 +204,26 @@ export class FKView {
       this.svg.append(t);
     }
   }
+  drawPositionDifferences() {
+    for (const difference of jointPositionDifferences(this.geometry, this.target)) {
+      const a = this.project(difference.measured), b = this.project(difference.target);
+      const connector = node("line", {
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y,
+        stroke: DIFFERENCE_COLOR,
+        "stroke-width": 1.1,
+        "stroke-dasharray": "3 4",
+        "stroke-opacity": 0.8,
+        "vector-effect": "non-scaling-stroke",
+        class: "fk-position-difference",
+        "data-joint": difference.name,
+        "data-distance-mm": difference.distance_mm,
+      });
+      const title = node("title");
+      title.textContent = `${difference.name} · Position difference ${difference.distance_mm.toPrecision(3)} mm (3D)`;
+      connector.append(title);
+      this.svg.append(connector);
+    }
+  }
   draw() {
     this.svg.replaceChildren();
     const baseAxes = this.frameAxes(
@@ -234,6 +281,8 @@ export class FKView {
       });
     }
     this.drawAxes(baseAxes, "base");
+    // Difference lines sit behind the existing arm strokes and joint markers.
+    this.drawPositionDifferences();
     const drawGeometry = (g, target) => {
       if (!g) return;
       const color = target ? "#a5a5a0" : "#191919";
