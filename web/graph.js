@@ -428,7 +428,7 @@ export class GraphExplorer {
     if(this.disposed)return;
     clearInterval(this.timer);
     this.timer=setInterval(()=>{
-      if(!this.disposed && this.visible && this.connected && !document.hidden) void this.refresh();
+      if(!this.disposed && this.visible && this.connected && !document.hidden) void this.refresh({scheduled:true});
     },this.updateIntervalMs);
   }
   setUpdateInterval(value) {
@@ -572,8 +572,11 @@ export class GraphExplorer {
     this.reduceMotion.removeEventListener('change',this.motionChanged);
     this.resizeObserver.disconnect();
   }
-  async refresh() {
+  async refresh({scheduled=false}={}) {
     if (this.disposed || this.pending || !this.connected) return;
+    // An explicit refresh/resume establishes a new cadence instead of being
+    // followed immediately by a nearly-due old timer tick.
+    if(!scheduled)this.restartPolling?.();
     this.pending = true;
     try {
       const data = normalizeGraph(await this.request("/api/v1/ros/graph"));

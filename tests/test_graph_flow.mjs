@@ -619,14 +619,16 @@ test('counter-only refresh preserves graph/inspector controls while topology or 
   const owner=Object.create(GraphExplorer.prototype),svgToken={},buttonToken={};
   Object.assign(owner,{disposed:false,pending:false,connected:true,visible:true,data:initial,focus:'topic',initialized:true,
     liveWatch:{enabled:true},flowActivity:new TopicFlowActivity(),renderedSignature:graphStructureSignature(initial),renderedViewKey:key,
-    fullRenders:0,inspectorRenders:0,measurements:0,svgToken,buttonToken,
+    fullRenders:0,inspectorRenders:0,measurements:0,cadenceResets:0,svgToken,buttonToken,
     request:async()=>next,viewKey:()=>key,syncLiveWatch:async()=>{},
     updateMeasurements(){this.measurements++;},
     render(){this.fullRenders++;this.renderedSignature=graphStructureSignature(this.data);this.renderedViewKey=key;this.svgToken={};},
     inspector(){this.inspectorRenders++;this.buttonToken={};},
-    stopFlow(){},message(){},
+    stopFlow(){},message(){},restartPolling(){this.cadenceResets++;},
   });
   await owner.refresh();assert.equal(owner.measurements,1);assert.equal(owner.fullRenders,0);assert.equal(owner.inspectorRenders,0);
+  assert.equal(owner.cadenceResets,1);
+  next=graph(12);await owner.refresh({scheduled:true});assert.equal(owner.cadenceResets,1);
   assert.equal(owner.svgToken,svgToken);assert.equal(owner.buttonToken,buttonToken);
   next=graph(12);next.topics[0].name='/renamed';await owner.refresh();
   assert.equal(owner.fullRenders,1);assert.equal(owner.inspectorRenders,1);
