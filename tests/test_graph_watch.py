@@ -9,6 +9,7 @@ import pytest
 
 from soarm_station.graph_observer import GraphObserver, TrafficSampler
 from soarm_station.graph_watch import GraphWatch, STATUS_TYPE, action_activity
+from soarm_station.graph_transport import project_transport_activity
 from test_graph_observer import Node, Clock, Actions
 
 
@@ -179,7 +180,16 @@ def test_burst_budget_throttles_then_resumes_same_counter_identity_without_hot_r
     assert result['messages'] == 4 and result['sample_id'] == sample and result['state'] == 'watching'
 
 
-def test_known_high_bandwidth_types_never_auto_subscribe_and_unknown_oversized_payload_stops():
+class SizedPayload:
+    """A raw receipt whose body must never be inspected or copied for counting."""
+    def __init__(self,size): self.size=size
+    def __len__(self): return self.size
+    def __bytes__(self): raise AssertionError('Payload copy is forbidden')
+    def __iter__(self): raise AssertionError('Payload traversal is forbidden')
+    def __getitem__(self,_): raise AssertionError('Payload inspection is forbidden')
+
+
+def test_image_cloud_audio_and_large_custom_receipts_are_counted_without_reading_payloads():
     node, clock, watcher = setup()
     topics = [('/raw', 'sensor_msgs/msg/Image'), ('/jpeg', 'sensor_msgs/msg/CompressedImage'),
               ('/cloud', 'sensor_msgs/msg/PointCloud2'), ('/audio', 'audio_msgs/msg/Audio'),
@@ -187,15 +197,15 @@ def test_known_high_bandwidth_types_never_auto_subscribe_and_unknown_oversized_p
     discover(watcher, *topics)
     acquire(watcher)
     watcher.reconcile()
-    assert set(node.callbacks) == {'/custom'}
-    node.callbacks['/custom'](b'x' * 65537, None)
+    assert set(node.callbacks) == {name for name,_ in topics}
+    for name,_ in topics:
+        node.callbacks[name](SizedPayload(10 * 1024 * 1024), None)
     watcher.reconcile()
-    assert data(watcher, '/custom')['state'] == 'blocked'
+    assert data(watcher, '/custom')['state'] == 'watching'
     assert data(watcher, '/custom')['messages'] == 1
-    clock.value += 6
-    watcher.reconcile()
-    assert len(node.subscriptions) == 1
-    assert all(data(watcher, name)['state'] == 'blocked' for name, _ in topics)
+    assert data(watcher, '/custom')['bytes'] == 10 * 1024 * 1024
+    assert len(node.subscriptions) == len(topics)
+    assert all(data(watcher, name)['state'] == 'watching' for name, _ in topics)
 
 
 def test_passive_camera_and_ordinary_topic_receipts_need_no_extra_subscription_or_serialization():
@@ -325,19 +335,17 @@ def test_watch_cap_keeps_action_metadata_first_and_never_creates_more_than_64_su
     assert watcher.snapshot()[0]['coverage']['limited'] == 8
 
 
-def test_lease_renewal_does_not_reset_rolling_budget_and_bytes_can_throttle_independently():
-    for config, payload in [({'max_messages_per_window': 2}, b'x'),
-                            ({'max_bytes_per_window': 2}, b'x')]:
-        node, clock, watcher = setup(config)
-        discover(watcher, ('/value', 'std_msgs/msg/String'))
-        lease = acquire(watcher)
-        watcher.reconcile()
-        node.callbacks['/value'](payload, None)
-        node.callbacks['/value'](payload, None)
-        watcher.request({'operation': 'renew', 'lease_id': lease['lease_id']})
-        node.callbacks['/value'](payload, None)
-        assert data(watcher, '/value')['state'] == 'throttled'
-        assert data(watcher, '/value')['messages'] == 3
+def test_lease_renewal_does_not_reset_rolling_message_budget():
+    node, clock, watcher = setup({'max_messages_per_window': 2})
+    discover(watcher, ('/value', 'std_msgs/msg/String'))
+    lease = acquire(watcher)
+    watcher.reconcile()
+    node.callbacks['/value'](b'x', None)
+    node.callbacks['/value'](b'x', None)
+    watcher.request({'operation': 'renew', 'lease_id': lease['lease_id']})
+    node.callbacks['/value'](b'x', None)
+    assert data(watcher, '/value')['state'] == 'throttled'
+    assert data(watcher, '/value')['messages'] == 3
 
 
 def test_action_feedback_type_uses_generated_action_impl(monkeypatch):
@@ -424,27 +432,76 @@ def test_invalid_nested_publisher_gid_stays_unattributed(gid):
     assert result['unknown_publisher_messages'] == 1
 
 
-def test_global_byte_budget_limits_aggregate_raw_topics_and_recovers_after_the_rolling_window():
-    node, clock, watcher = setup()
-    discover(watcher, *[(f'/value/{index}', 'std_msgs/msg/String') for index in range(3)])
+def test_continuous_raw_watch_measures_large_byte_volume_without_size_or_byte_cutoffs():
+    node, clock, watcher = setup({'max_bytes_per_window': 2})  # Accepted legacy setting has no byte cutoff.
+    discover(watcher, *[(f'/value/{index}', 'sensor_msgs/msg/Image') for index in range(3)])
     acquire(watcher)
     watcher.reconcile()
-    payload = b'x' * 65536
-    for index in range(2):
-        for _ in range(128):
+    payload = SizedPayload(2 * 1024 * 1024)
+    for index in range(3):
+        for _ in range(100):
             node.callbacks[f'/value/{index}'](payload, None)
         assert data(watcher, f'/value/{index}')['state'] == 'watching'
-    node.callbacks['/value/2'](payload, None)
-    result = data(watcher, '/value/2')
-    assert result['state'] == 'throttled' and 'Global' in result['reason']
     status = watcher.snapshot()[0]
-    assert status['global_max_bytes_per_window'] == 16 * 1024 * 1024
-    assert status['global_window_bytes'] == 257 * 65536
+    assert status['max_bytes_per_window'] is None and status['global_max_bytes_per_window'] is None
+    assert status['max_message_bytes'] is None and status['byte_limits_enforced'] is False
+    assert status['global_window_bytes'] == 300 * len(payload)
     clock.value += 6
     assert watcher.snapshot()[0]['global_window_bytes'] == 0
     watcher.reconcile()
     node.callbacks['/value/2'](b'resumed', None)
     assert data(watcher, '/value/2')['state'] == 'watching'
+
+
+def test_large_goal_status_is_counted_even_when_optional_summary_decode_is_skipped():
+    node, clock, watcher = setup(status_decoder=lambda _: pytest.fail('Large status must not be decoded'))
+    discover(watcher, ('/task/_action/status', STATUS_TYPE))
+    acquire(watcher);watcher.reconcile()
+    node.callbacks['/task/_action/status'](SizedPayload(100000), None)
+    result=data(watcher,'/task/_action/status')
+    assert result['state']=='watching' and result['messages']==1 and result['bytes']==100000
+    assert 'status_summary' not in result and 'still counted' in result['status_decode_error']
+
+
+def test_all_35_topic_records_cover_logical_sources_and_exact_gid_transport_aliases_without_recursion():
+    topics=[];passive={};raw=[];aliases=[]
+    def add(name,kind,gid):
+        topics.append({'name':name,'types':[kind],'publishers':[{'gid':gid,'type':kind}]})
+    for index,camera in enumerate(('forward','overview','wrist'),1):
+        for kind,tail in (('sensor_msgs/msg/Image','image_raw'),('sensor_msgs/msg/CompressedImage','image_raw/compressed')):
+            base=f'/camera/{camera}/{tail}';alias=base+'/_buf_cpu';gid=f'{index:02x}'+('01' if tail=='image_raw' else '02')
+            add(base,kind,'ff'+gid);add(alias,kind,gid);aliases.append(alias)
+            if tail=='image_raw':raw.append((base,gid))
+            else:passive[base]={'sample_id':'passive-'+camera,'messages':2,'last_message_age_ms':0,'rate_hz':20,
+                'unattributed_messages':0,'publisher_counts':[{'publisher_gid':gid,'messages':2,'last_message_age_ms':0}]}
+    for index in range(23):add(f'/state/{index}','std_msgs/msg/Float32',f'ee{index+1:02x}')
+    node,clock,watcher=setup(provider=lambda:passive)
+    watcher.discover(topics);acquire(watcher);watcher.reconcile()
+    assert len(topics)==35 and len(node.subscriptions)==26  # 3 raw + 23 ordinary; 3 compressed are passive.
+    assert all('/_buf_' not in name for name in node.callbacks)
+    for base,gid in raw:node.callbacks[base](SizedPayload(1024*1024),{'publisher_gid':{'data':bytes.fromhex(gid)}})
+    status,values=watcher.snapshot()
+    assert status['coverage']=={'watching':29,'unavailable':6}
+    assert all(values[name]['messages'] is None for name in aliases)
+    projected=project_transport_activity(topics,values)
+    assert len(projected)==35 and all(value['state']=='watching' for value in projected.values())
+    assert all(projected[name]['source']=='transport_gid_projection' for name in aliases)
+    nested=aliases[0]+'/_buf_cpu';add(nested,'sensor_msgs/msg/Image','abcd')
+    watcher.discover(topics);watcher.reconcile()
+    assert len(node.subscriptions)==26 and nested not in node.callbacks
+    assert data(watcher,nested)['state']=='unavailable'
+
+
+@pytest.mark.parametrize('base_kind',[None,'std_msgs/msg/String'])
+def test_unmatched_buffer_alias_never_creates_an_adaptive_subscription(base_kind):
+    node,clock,watcher=setup()
+    topics=[('/camera/image/_buf_cpu','sensor_msgs/msg/Image')]
+    if base_kind:topics.append(('/camera/image',base_kind))
+    discover(watcher,*topics);acquire(watcher);watcher.reconcile()
+    assert '/camera/image/_buf_cpu' not in node.callbacks
+    result=data(watcher,'/camera/image/_buf_cpu')
+    assert result['state']=='unavailable' and result['messages'] is None
+    assert 'no matching logical base' in result['reason']
 
 
 def test_global_message_budget_applies_across_topics_while_passive_counts_do_not_consume_it():

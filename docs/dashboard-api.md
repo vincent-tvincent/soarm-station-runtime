@@ -129,15 +129,22 @@ their observations. GoalStatusArray may provide bounded counts by status, never
 goal payloads or IDs. Feedback content is not decoded/exported. Goal requests,
 results and receipt by individual clients are explicitly unobserved.
 
-Additional raw observations are capped at 64 topics. Each source defaults to a
-rolling five-second 10,000-message / 8-MiB budget, with global raw limits of
-50,000 messages / 16 MiB and a 64-KiB individual-message limit. Histories retain
-20 half-second buckets. Existing passive receipts do not consume extra raw
-subscription budgets. Unsupported or high-bandwidth sources without passive
-data remain unknown/blocked; a viewer must not synthesize their activity.
+Additional observations are capped at 64 topics. Continuous monitoring admits
+raw images, point clouds and audio when ROS type support is available. Each
+source defaults to a rolling five-second 10,000-message budget, with a global
+50,000-message limit. Message size and byte volume do not exclude a source.
+Counters use received length, time and publisher identity without an additional
+payload copy or serialization; middleware reception can still allocate data.
+Histories retain 20 half-second buckets. Existing passive receipts are reused.
+Auxiliary buffer channels use exact-GID projection from their logical source
+instead of creating recursive adaptive subscriptions on internal channels.
+Missing type support or unobservable sources remain explicitly unavailable.
 
 Configure `graph_observer.watch` with `enabled`, `max_topics`, `max_clients`,
-`lease_s`, `max_messages_per_window` and `max_bytes_per_window`. Fixed global
+`lease_s` and `max_messages_per_window`. The legacy `max_bytes_per_window`
+configuration is accepted for compatibility but no longer limits continuous
+counting. Watch metadata reports byte ceilings as null and
+`byte_limits_enforced: false`. Fixed global
 ceilings are advertised in the snapshot. These bounds limit observer work;
 they are not guarantees of transport delivery or zero publisher-side cost.
 

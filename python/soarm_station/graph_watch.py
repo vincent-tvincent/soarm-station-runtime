@@ -10,14 +10,9 @@ import time
 import uuid
 from collections import OrderedDict, deque
 from collections.abc import Mapping
+from .graph_transport import TRANSPORT_TOPIC
 
 
-BLOCKED_TYPES = {
-    'sensor_msgs/msg/Image', 'sensor_msgs/msg/CompressedImage',
-    'sensor_msgs/msg/PointCloud', 'sensor_msgs/msg/PointCloud2',
-    'nav_msgs/msg/OccupancyGrid', 'std_msgs/msg/ByteMultiArray',
-    'std_msgs/msg/UInt8MultiArray',
-}
 STATUS_TYPE = 'action_msgs/msg/GoalStatusArray'
 STATUS_NAMES = ('unknown', 'accepted', 'executing', 'canceling', 'succeeded', 'canceled', 'aborted')
 
@@ -68,13 +63,15 @@ class GraphWatch:
         self.max_topics = min(64, max(1, int(c.get('max_topics', 64))))
         self.max_clients = min(8, max(1, int(c.get('max_clients', 8))))
         self.lease_s = min(30., max(3., float(c.get('lease_s', 12))))
-        # These are rolling observation budgets, not a whole-session cutoff.
+        # Receipt-rate budgets bound callback work. Byte volume is measured,
+        # never a reason to exclude or interrupt a continuous image stream.
         self.window_s = 5.
         self.max_messages = min(50000, max(1, int(c.get('max_messages_per_window', 10000))))
-        self.max_bytes = min(32 * 1024 * 1024, max(1, int(c.get('max_bytes_per_window', 8 * 1024 * 1024))))
-        self.max_message_bytes = 65536
+        self.max_bytes = None  # Legacy configuration is accepted but not enforced.
+        self.max_message_bytes = None
+        self.max_status_decode_bytes = 65536
         self.global_max_messages = 50000
-        self.global_max_bytes = 16 * 1024 * 1024
+        self.global_max_bytes = None
         self.global_window = {'window': deque(), 'window_messages': 0, 'window_bytes': 0}
         self.lock, self.reconcile_lock = threading.RLock(), threading.Lock()
         self.leases, self.topics, self.records, self.subscriptions = {}, {}, {}, {}
@@ -251,16 +248,17 @@ class GraphWatch:
                 publisher['last'] = now
             else:
                 record['unknown_publisher_messages'] += 1
-            if size > self.max_message_bytes:
-                record['state'], record['reason'] = 'blocked', 'Message exceeds 64 KiB observation budget'
-            elif (self.global_window['window_messages'] > self.global_max_messages
-                  or self.global_window['window_bytes'] > self.global_max_bytes):
-                record['state'], record['reason'] = 'throttled', 'Global rolling raw-watch message/byte observation budget reached'
+            if self.global_window['window_messages'] > self.global_max_messages:
+                record['state'], record['reason'] = 'throttled', 'Global rolling raw-watch message observation budget reached'
                 record['retry_at'] = now + self.window_s + .5
-            elif record['window_messages'] > self.max_messages or record['window_bytes'] > self.max_bytes:
-                record['state'], record['reason'] = 'throttled', 'Rolling message/byte observation budget reached'
+            elif record['window_messages'] > self.max_messages:
+                record['state'], record['reason'] = 'throttled', 'Rolling message observation budget reached'
                 record['retry_at'] = now + self.window_s + .5
-            decode = record['types'] == (STATUS_TYPE,) and name.endswith('/_action/status') and size <= self.max_message_bytes
+            is_status = record['types'] == (STATUS_TYPE,) and name.endswith('/_action/status')
+            decode = is_status and size <= self.max_status_decode_bytes
+            if is_status and not decode:
+                record.pop('status_summary', None)
+                record['status_decode_error'] = 'Status summary decode size exceeded; receipt still counted'
         if decode:
             self._decode_status(name, record, data)
 
@@ -312,7 +310,8 @@ class GraphWatch:
                 for name, handle in self.subscriptions.items():
                     record = self.records[name]
                     if (name not in topics or name in passive or record['types'] != topics[name]
-                            or record['session'] != self.session or record['state'] != 'watching'):
+                            or record['session'] != self.session or record['state'] != 'watching'
+                            or TRANSPORT_TOPIC.fullmatch(name)):
                         if record['state'] == 'watching':
                             record['state'], record['reason'] = 'inactive', 'Watch coverage changed or leases expired'
                         remove.append((name, handle))
@@ -332,13 +331,23 @@ class GraphWatch:
                     if record is None or record['session'] != self.session or record['types'] != types:
                         record = self._new_record(name, types)
                         self.records[name] = record
-                    elif record['state'] == 'blocked' or self.clock() < record['retry_at']:
+                    elif self.clock() < record['retry_at']:
                         continue
                     reason = None
-                    if len(types) != 1:
+                    transport = TRANSPORT_TOPIC.fullmatch(name)
+                    if transport:
+                        # Subscribing an adaptive buffer alias as an Image can
+                        # create another /_buf_cpu beneath it. Observe only the
+                        # logical base and project exact publisher GID counters.
+                        base = transport['base']
+                        if types and set(topics.get(base, ())) == set(types):
+                            record['transport_source_topic'] = base
+                            reason = ('unavailable', 'Transport activity awaits exact publisher GID attribution from logical base topic')
+                        else:
+                            record.pop('transport_source_topic', None)
+                            reason = ('unavailable', 'Transport alias has no matching logical base topic and type')
+                    elif len(types) != 1:
                         reason = ('unavailable', 'A single discoverable message type is required')
-                    elif types[0] in BLOCKED_TYPES or types[0].startswith(('audio_msgs/', 'audio_common_msgs/')):
-                        reason = ('blocked', 'High-bandwidth type requires an existing passive activity source')
                     elif len(self.subscriptions) >= self.max_topics:
                         reason = ('limited', 'Live topic subscription limit reached')
                     if reason:
@@ -375,7 +384,10 @@ class GraphWatch:
 
     def _snapshot_record(self, name, record, now):
         if not record['subscribed']:
-            return empty_activity(record['state'], record['reason'])
+            result = empty_activity(record['state'], record['reason'])
+            if record.get('transport_source_topic'):
+                result['transport_source_topic'] = record['transport_source_topic']
+            return result
         self._prune_window(record, now)
         elapsed = min(self.window_s, max(0., now - record['start']))
         result = empty_activity(record['state'], record['reason'])
@@ -430,6 +442,8 @@ class GraphWatch:
                       'global_max_bytes_per_window': self.global_max_bytes,
                       'global_window_messages': self.global_window['window_messages'],
                       'global_window_bytes': self.global_window['window_bytes'],
+                      'byte_limits_enforced': False,
+                      'transport_alias_strategy': 'logical_topic_exact_publisher_gid',
                       'payload_export': False}
             return status, values
 
