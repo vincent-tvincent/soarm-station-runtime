@@ -29,6 +29,7 @@ class ManualRoutes:
             positions, gripper = body['positions'], body['gripper']
             if operation == 'fk':
                 measured = await asyncio.to_thread(model.fk, positions, gripper)
+                measured['jacobian'] = await asyncio.to_thread(model.jacobian_diagnostics, positions)
                 target = body.get('target')
                 overlay = await asyncio.to_thread(model.fk, target['positions'], target['gripper']) if target else None
                 return web.json_response({'measured': measured, 'target': overlay})

@@ -2159,20 +2159,24 @@ kbd {
 }
 
 /* Gamepad entry shares the Control panel's rectangular grid and restrained palette. */
-.gamepad-device-line { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:-6px 0 14px; color:var(--muted); font-size:11px; }
+.gamepad-device-line { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:-6px 0 8px; color:var(--muted); font-size:11px; }
 .gamepad-trigger-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.gamepad-trigger-grid > section { border-top:1px solid var(--line); padding-top:10px; min-width:0; }
-.gamepad-value { display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin:2px 0 10px; }
+.gamepad-trigger-grid > section { min-width:0; }
+.gamepad-trigger-select { width:100%; display:flex; align-items:center; justify-content:space-between; padding:7px; font-size:11px; margin-bottom:8px; }
+.gamepad-trigger-select[aria-pressed="true"] { background:#191919; color:#fff; border-color:#191919; }
+.gamepad-value { display:flex; align-items:baseline; justify-content:space-between; gap:6px; margin:2px 0 6px; }
 .gamepad-value strong { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
 .gamepad-value span { color:var(--muted); font-size:10px; text-align:right; }
-.gamepad-meter { position:relative; height:7px; background:#e8e8e4; margin-bottom:9px; }
+.gamepad-meter { position:relative; height:7px; background:#e8e8e4; margin-bottom:5px; }
 .gamepad-meter i { display:block; height:100%; width:0; background:#191919; }
 .gamepad-meter b { position:absolute; top:-4px; bottom:-4px; width:2px; margin-left:-1px; background:var(--accent,#d9231b); }
-.gamepad-trigger-grid .detail-note { min-height:2.6em; margin:8px 0; font-size:10px; }
-.gamepad-trigger-grid .manual-toggle { padding:7px; font-size:11px; margin:0; }
-.gamepad-speeds { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:100%; margin-top:13px; }
+.gamepad-grip-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:11px; }
+.gamepad-grip-summary .manual-toggle { width:auto; padding:6px 9px; font-size:11px; margin:0; }
+#gamepad-grip-note { margin:5px 0 10px; font-size:10px; }
+.gamepad-speed-profile .small-heading { margin-bottom:6px; }
+.gamepad-speeds { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:100%; }
 .gamepad-speeds button { padding:6px 0; font-size:11px; min-width:0; }
-.gamepad-motion-readout { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0 12px; border-top:1px solid var(--line); padding-top:10px; }
+.gamepad-motion-readout { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:10px 0 8px; border-top:1px solid var(--line); padding-top:8px; }
 .gamepad-motion-readout span { display:flex; flex-direction:column; gap:4px; font-size:10px; color:var(--muted); }
 .gamepad-motion-readout b { color:#191919; font-size:11px; font-weight:500; }
 .gamepad-bindings { margin:10px 0; }
@@ -2186,3 +2190,8 @@ kbd {
   }
 }
 @media(max-width:400px){.gamepad-trigger-grid{gap:10px}.gamepad-value{flex-wrap:wrap}.gamepad-motion-readout{gap:6px}}
+.ik-mobility { display:flex; align-items:center; justify-content:space-between; gap:12px; border-top:2px solid var(--mobility-color,#666); border-bottom:1px solid var(--line); padding:9px 0; margin-bottom:12px; }
+.ik-mobility .small-heading { margin:0 0 3px; }
+.ik-mobility .detail-note { font-size:10px; }
+.ik-mobility-values { display:flex; flex-direction:column; gap:3px; text-align:right; font-size:11px; color:var(--mobility-color,#666); font-variant-numeric:tabular-nums; }
+.ik-mobility-values strong { font-size:19px; }
