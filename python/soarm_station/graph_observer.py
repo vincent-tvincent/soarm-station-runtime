@@ -16,6 +16,7 @@ import time
 import uuid
 from collections import Counter,OrderedDict
 from .graph_watch import GraphWatch, action_activity, empty_activity
+from .graph_transport import project_transport_activity
 
 
 def node_name(name,namespace):
@@ -289,6 +290,12 @@ class GraphObserver:
         result.update(activity_clock_id=self.activity_clock_id,
             activity_clock_type='observer_monotonic',
             activity_captured_at_ns=str(int(self.clock()*1_000_000_000)))
+        activity=project_transport_activity(result['topics'],activity)
+        projected=sum(value.get('source')=='transport_gid_projection' for value in activity.values())
+        result['watch']['projected_topics']=projected
+        if projected:
+            result['watch']['direct_coverage']=dict(result['watch'].get('coverage',{}))
+            result['watch']['coverage']=dict(Counter(activity.get(topic['name'],{}).get('state','unavailable') for topic in result['topics']))
         with self.lock:loop_errors=list(self.loop_errors.values())
         if loop_errors:
             result['errors'].extend(loop_errors)

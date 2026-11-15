@@ -45,6 +45,11 @@ const infrastructure = (name) =>
   /(^|\/)(parameter_events|rosout)$|\/_action\/|\/(describe_parameters|get_parameter_types|get_parameters|list_parameters|set_parameters|set_parameters_atomically|get_type_description)$/.test(
     name,
   );
+const internalInterface = n => n.transport_topic || infrastructure(n.name);
+const displayName = n => n.display_name || n.name;
+const activitySource = t => ({dashboard_subscription:'Existing dashboard subscription',
+  transport_gid_projection:'Existing receipt · transport publisher GID',
+  ros_subscription:'Graph observer'}[t.source] || (t.source?'Graph observer':'Not observed'));
 const rate = (t) =>
   t && t.rate_hz !== null && t.rate_hz !== undefined
     ? `${Number(t.rate_hz).toFixed(1)} Hz`
@@ -180,6 +185,23 @@ export function cubicPoint(points,t) {
   const u=1-t,weights=[u*u*u,3*u*u*t,3*u*t*t,t*t*t];
   return [0,1].map(axis=>points.reduce((sum,p,i)=>sum+p[axis]*weights[i],0));
 }
+// Expand through one interface, never recursively through a peer node's work.
+// This keeps a selected subscriber's upstream publisher and its line consistent.
+export function selectionPaths(graph,focus,visibleEdges=graph.edges) {
+  const direct=visibleEdges.filter(e=>focus && (e.from===focus||e.to===focus));
+  const highlighted=new Set(direct.map(e=>e.id));
+  if(graph.entities.get(focus)?.kind==='node') {
+    const opposite={publish:'subscribe',subscribe:'publish',action_client:'action_server',
+      action_server:'action_client',service_client:'service_server',service_server:'service_client'};
+    for(const e of direct) {
+      const interfaceId=e.from===focus?e.to:e.from;
+      for(const peer of visibleEdges) if(peer.kind===opposite[e.kind] &&
+          (peer.from===interfaceId||peer.to===interfaceId))highlighted.add(peer.id);
+    }
+  }
+  return {highlighted,publisherNodes:new Set(visibleEdges.filter(e=>
+    e.kind==='publish' && highlighted.has(e.id)).map(e=>e.from))};
+}
 export function flowEdges(graph,visibleEdges,activity,now,{focus=null,focusedOnly=false}={}) {
   const publishers=new Map();
   for(const e of graph.edges) if(e.kind==='publish') {
@@ -197,7 +219,8 @@ export function flowEdges(graph,visibleEdges,activity,now,{focus=null,focusedOnl
       return {sourceKey:topic.id,hollow:true,attribution:'single_discovered_publisher'};
     return null;
   }
-  const result=visibleEdges.filter(e=>!focusedOnly || (focus && (e.from===focus||e.to===focus))).flatMap(e=>{
+  const selected=focusedOnly?selectionPaths(graph,focus,visibleEdges).highlighted:null;
+  const result=visibleEdges.filter(e=>!focusedOnly || selected.has(e.id)).flatMap(e=>{
     if(e.kind==='publish'||e.kind==='subscribe') {
       const topicId=e.kind==='publish'?e.to:e.from,topic=graph.entities.get(topicId);
       if(topic?.kind!=='topic') return [];
@@ -276,8 +299,16 @@ function pieces(value, max = 27) {
 export function normalizeGraph(data) {
   if (data?.schema_version !== 1) throw Error("Unsupported ROS graph schema.");
   const nodes = (data.nodes || []).map((n) => ({ ...n,
+    ...(n.discovery_state==='unresolved_endpoint_owner'?{reported_name:n.name??null}:{}),
     name:n.name || (n.discovery_state==='unresolved_endpoint_owner'?'Unresolved owner':n.fully_qualified_name||n.id),kind: "node" }));
   const topics = (data.topics || []).map((n) => ({ ...n, kind: "topic" }));
+  const topicByName=new Map(topics.map(t=>[t.name,t]));
+  for(const topic of topics) {
+    const baseName=topic.name.replace(/\/_buf_[a-zA-Z0-9_]+$/, '');
+    const base=baseName!==topic.name?topicByName.get(baseName):null;
+    topic.transport_topic=Boolean(base && topic.types?.length && base.types?.length &&
+      JSON.stringify([...topic.types].sort())===JSON.stringify([...base.types].sort()));
+  }
   const services = (data.services || []).map((n) => ({
     ...n,
     kind: "service",
@@ -289,6 +320,14 @@ export function normalizeGraph(data) {
   const edges = (data.edges || []).filter(
     (e) => entities.has(e.from) && entities.has(e.to),
   );
+  for(const node of nodes) if(node.discovery_state==='unresolved_endpoint_owner') {
+    const bindings=edges.filter(e=>e.from===node.id||e.to===node.id);
+    node.transport_endpoint=bindings.length>0 && bindings.every(e=>
+      entities.get(e.from===node.id?e.to:e.from)?.transport_topic);
+    const pub=bindings.some(e=>e.kind==='publish'),sub=bindings.some(e=>e.kind==='subscribe');
+    const role=pub&&!sub?'publisher':sub&&!pub?'subscriber':'endpoint';
+    node.display_name=`${node.transport_endpoint?'Transport':'Unresolved'} ${role}`;
+  }
   return { ...data, nodes, topics, services, actions, edges, entities };
 }
 export function selectGraphView(
@@ -300,9 +339,15 @@ export function selectGraphView(
   const showInfra = showInfrastructure;
   let allowed = new Set(
     [...d.entities.values()]
-      .filter((n) => showInfra || n.kind === "node" || !infrastructure(n.name))
+      .filter((n) => showInfra || n.kind === "node" || !internalInterface(n))
       .map((n) => n.id),
   );
+  // These placeholders describe endpoints, not independently discovered nodes.
+  // Keep them only when an interface remains visible; named idle nodes stay.
+  if(!showInfra)for(const n of d.nodes)if(n.discovery_state==='unresolved_endpoint_owner') {
+    const bindings=d.edges.filter(e=>e.from===n.id||e.to===n.id);
+    if(bindings.length && bindings.every(e=>!allowed.has(e.from===n.id?e.to:e.from)))allowed.delete(n.id);
+  }
   if (scope === "focus" && focus) {
     const neighbours = new Set([focus]);
     for (const edge of d.edges)
@@ -329,6 +374,7 @@ export function selectGraphView(
         .filter(
           (n) =>
             (n.fully_qualified_name || n.name).toLowerCase().includes(search) ||
+            displayName(n).toLowerCase().includes(search) ||
             (n.types || []).some((t) => t.toLowerCase().includes(search)),
         )
         .map((n) => n.id),
@@ -475,7 +521,7 @@ export class GraphExplorer {
       'Last update':interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval',
       'Serialized bytes':t.bytes==null?'Not measured':Number(t.bytes).toLocaleString(),
       'Last received':finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed',
-      'Source':t.source?(t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer'):'Not observed',
+      'Source':activitySource(t),
       'Status messages':t.status_messages==null?'—':String(t.status_messages),
       'Feedback messages':t.feedback_messages==null?'—':String(t.feedback_messages),
       'Last reported goals':counts?(Object.entries(counts).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')||'None'):'Not observed',
@@ -586,7 +632,7 @@ export class GraphExplorer {
       else this.flowActivity.clear();
       if (this.focus && !data.entities.has(this.focus)) { this.focus = null; }
       if (!this.focus && !this.initialized) {
-        const topics = data.topics.filter((t) => !infrastructure(t.name));
+        const topics = data.topics.filter((t) => !internalInterface(t));
         const score = (t) =>
           (t.publishers?.length === 1 ? 12 : 0) +
           (t.subscriptions?.length || 0) -
@@ -625,8 +671,16 @@ export class GraphExplorer {
       this.render();
     };
     $("show-infrastructure").onchange = () => {
+      if(this.data && !$("show-infrastructure").checked) {
+        const visible=new Set(selectGraphView(this.data).entities.map(n=>n.id));
+        if(!visible.has(this.focus))this.focus=null;
+        if(this.scope==='focus' && !visible.has(this.isolatedId)) {
+          this.scope='all';this.isolatedId=null;this.savedOverview=null;$("graph-exit").hidden=true;
+        }
+      }
       this.didFit = false;
       this.render();
+      this.inspector();
     };
     $("graph-clear").onclick = () => {
       this.focus = null;
@@ -755,9 +809,11 @@ export class GraphExplorer {
     const focus = this.selected();
     $("graph-focus").textContent =
       (this.scope === "focus" ? "Focused view · " : "Selected: ") +
-      (focus?.name || "none");
+      (focus ? displayName(focus) : "none");
+    const unresolved=d.nodes.filter(n=>n.discovery_state==='unresolved_endpoint_owner');
+    const hiddenTransport=unresolved.filter(n=>n.transport_endpoint && !$("show-infrastructure").checked).length;
     $("graph-counts").textContent =
-      `${d.nodes.filter((n) => n.discovery_state !== "unresolved_endpoint_owner").length} nodes${d.nodes.some((n) => n.discovery_state === "unresolved_endpoint_owner") ? ` · ${d.nodes.filter((n) => n.discovery_state === "unresolved_endpoint_owner").length} unresolved owners` : ""} · ${d.topics.length} topics · ${d.actions.length} actions · ${d.services.length} services · ${entities.length} objects shown`;
+      `${d.nodes.length-unresolved.length} nodes${unresolved.length-hiddenTransport?` · ${unresolved.length-hiddenTransport} unresolved endpoints`:''}${hiddenTransport?` · ${hiddenTransport} transport endpoints hidden`:''} · ${d.topics.length} topics · ${d.actions.length} actions · ${d.services.length} services · ${entities.length} objects shown`;
     $("graph-meta").textContent =
       (Object.values(d.coverage || {}).includes("partial")
         ? "Partial discovery"
@@ -815,30 +871,7 @@ export class GraphExplorer {
     this.viewport.replaceChildren();
     const defs = svg("defs");
     this.viewport.append(defs);
-    const related = new Set([this.focus]);
-    for (const e of d.edges)
-      if (e.from === this.focus || e.to === this.focus) {
-        related.add(e.from);
-        related.add(e.to);
-      }
-    const publisherNodes = new Set();
-    if (focus?.kind === "topic")
-      for (const e of d.edges)
-        if (e.to === this.focus && e.kind === "publish")
-          publisherNodes.add(e.from);
-        else {
-        }
-    if (focus?.kind === "node")
-      for (const e of d.edges)
-        if (e.to === this.focus && e.kind === "subscribe") {
-          for (const pub of d.edges)
-            if (pub.to === e.from && pub.kind === "publish")
-              publisherNodes.add(pub.from);
-        }
-    const connectedEdges = edges.filter(
-      (e) => e.from === this.focus || e.to === this.focus,
-    );
-    const highlighted = new Set(connectedEdges.map((e) => e.id));
+    const {publisherNodes,highlighted}=selectionPaths(d,this.focus,edges);
     const perObject = new Map();
     for (const e of edges)
       for (const id of [e.from, e.to]) {
@@ -939,7 +972,7 @@ export class GraphExplorer {
         class: "graph-object",
         tabindex: 0,
         role: "button",
-        "aria-label": n.kind + " " + n.name,
+        "aria-label": n.kind + " " + displayName(n),
         "aria-pressed": selected,
         "data-object-id": n.id,
         transform: `translate(${p.x},${p.y})`,
@@ -973,7 +1006,7 @@ export class GraphExplorer {
           }),
         );
       const lines = pieces(
-        n.kind === "node" ? n.name : compactName(n.name),
+        n.kind === "node" ? displayName(n) : compactName(n.name),
         28,
       );
       lines
@@ -1104,7 +1137,7 @@ export class GraphExplorer {
       infra = $("show-infrastructure").checked;
     const rows = all.filter(
       (n) =>
-        (infra || !infrastructure(n.name)) &&
+        (infra || !internalInterface(n)) &&
         (!search ||
           n.name.toLowerCase().includes(search) ||
           (n.types || []).some((t) => t.toLowerCase().includes(search))),
@@ -1167,7 +1200,7 @@ export class GraphExplorer {
           ? "UNRESOLVED OWNER"
           : n.kind.toUpperCase(),
       ),
-      html("h2", "", n.kind === "node" ? n.name : localName(n.name)),
+      html("h2", "", n.kind === "node" ? displayName(n) : localName(n.name)),
       html("code", "", n.fully_qualified_name || n.name),
     );
     host.append(heading);
@@ -1191,6 +1224,12 @@ export class GraphExplorer {
         html("div", "inspector-type", n.types.join("\n")),
       );
     if (n.kind === "node") {
+      if(n.discovery_state==='unresolved_endpoint_owner') {
+        row(interfaceSection,'Reported name',n.reported_name??'Not reported');
+        interfaceSection.append(html('p','inspector-note',n.transport_endpoint
+          ? 'Internal transport endpoint. ROS discovery does not report its owning node; this is not an additional identified application node.'
+          : 'ROS discovery does not report the owning node for this endpoint. Its relationships are preserved without assigning an owner.'));
+      }
       row(interfaceSection, "Namespace", n.namespace ?? "Unknown");
       row(
         interfaceSection,
@@ -1220,7 +1259,7 @@ export class GraphExplorer {
         button = html(
           "button",
           "",
-          other?.fully_qualified_name || other?.name || otherId,
+          other?.display_name || other?.fully_qualified_name || other?.name || otherId,
         );
       button.onclick = () => this.select(otherId);
       body.append(button);
@@ -1263,7 +1302,7 @@ export class GraphExplorer {
       row(traffic,'Last update',interval?`${interval.messages} messages / ${(interval.durationMs/1000).toFixed(2)} s`:'Awaiting interval');
       if(n.kind==='topic') row(traffic,'Serialized bytes',t.bytes==null?'Not measured':Number(t.bytes).toLocaleString());
       row(traffic,'Last received',finiteAge(t.last_message_age_ms)?`${(t.last_message_age_ms/1000).toFixed(2)} s ago`:'No receipt observed');
-      if(n.kind==='topic')row(traffic,'Source',t.source?(t.source==='dashboard_subscription'?'Existing dashboard subscription':'Graph observer'):'Not observed');
+      if(n.kind==='topic')row(traffic,'Source',activitySource(t));
       const reason=html('p','inspector-note',t.reason||'');reason.setAttribute('data-activity-reason','');reason.hidden=!t.reason;traffic.append(reason);
       if(n.kind==='action') {
         row(traffic,'Status messages',t.status_messages==null?'—':String(t.status_messages));
@@ -1311,9 +1350,9 @@ export class GraphExplorer {
         html(
           "p",
           "inspector-note",
-          this.data.errors
-            .map((e) => e.message || e.reason || String(e))
-            .join("; "),
+          [...this.data.errors.reduce((counts,e)=>{
+            const message=e.message||e.reason||String(e);counts.set(message,(counts.get(message)||0)+1);return counts;
+          },new Map())].map(([message,count])=>`${count>1?`${count} occurrences: `:''}${message}`).join('; '),
         ),
       );
   }

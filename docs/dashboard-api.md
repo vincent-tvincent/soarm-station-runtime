@@ -96,6 +96,25 @@ reported separately. States are `watching`, `inactive`, `blocked`, `unavailable`
 proof of a dead publisher. Passive existing subscriptions can supply data,
 including compressed images, without duplicate subscriptions or serialization.
 
+For an auxiliary `/_buf_<transport>` topic with a same-type base topic, existing
+logical receipts may be attributed using an exact, globally unique publisher
+GID. These records use `source: transport_gid_projection` and include
+`projection.source_topic`, `source_sample_id`, `publisher_gids` and
+`complete_source_coverage`. They count logical deliveries observed locally,
+not transport packets or confirmed delivery to each subscriber. Bytes remain
+unknown; rates/history are reused only when the matching GIDs cover every
+source message. Direct observations take precedence. `watch.projected_topics`
+counts these records; `direct_coverage` preserves pre-projection coverage.
+
+The default graph view hides auxiliary buffer interfaces and their unresolved
+endpoint placeholders under **Infrastructure**. Ordinary unresolved endpoints
+remain visible; discovery JSON retains every original name, GID and edge.
+Transport endpoints use descriptive display labels without guessing an owner.
+Selecting a node highlights its complete path through each adjacent interface:
+upstream publications for its subscriptions, downstream subscriptions for its
+publications, and opposing action/service bindings. Live markers follow these
+same highlighted paths only when advancing observations support them.
+
 Counter snapshots also include `activity_clock_id` (stable observer-instance
 UUID), `activity_clock_type: "observer_monotonic"` and
 `activity_captured_at_ns` (decimal string). The capture is recorded immediately

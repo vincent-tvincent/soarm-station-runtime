@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FLOW_LIMITS, GRAPH_UPDATE_INTERVALS, normalizeUpdateInterval, graphStructureSignature, TopicFlowActivity, cubicPoint, flowEdges, normalizeGraph, GraphLiveWatch, GraphExplorer, activityLabel,
+  FLOW_LIMITS, GRAPH_UPDATE_INTERVALS, normalizeUpdateInterval, graphStructureSignature, TopicFlowActivity, cubicPoint, flowEdges, normalizeGraph, selectionPaths, GraphLiveWatch, GraphExplorer, activityLabel,
 } from '../web/graph.js';
 
 const node=id=>({id,name:id,namespace:'/',fully_qualified_name:`/${id}`,instance_count:1});
@@ -240,12 +240,13 @@ test('focused-only action dots retain response edges without animating its under
   assert.equal(selected.every(e=>e.reverse===true),true);
   assert.equal(owner.active('status-topic',100),true);assert.equal(owner.active('topic',100),true);
 });
-test('focused-only mode hides all dots without selection and keeps only highlighted routes for a node',()=>{
+test('focused-only mode hides all dots without selection and follows opposite-peer highlighted routes for a node',()=>{
   const owner=new TopicFlowActivity();owner.observe(mixedActiveGraph(10),0);const current=mixedActiveGraph(11);owner.observe(current,100);
   assert.deepEqual(flowEdges(current,current.edges,owner,100,{focusedOnly:true}),[]);
   const selected=flowEdges(current,current.edges,owner,100,{focus:'server',focusedOnly:true});
-  assert.deepEqual(selected.map(e=>e.id).sort(),['action-server','feedback-pub','status-pub']);
-  assert.equal(selected.every(e=>e.from==='server'||e.to==='server'),true);
+  assert.deepEqual(selected.map(e=>e.id).sort(),['action-client','action-server','feedback-pub','status-pub']);
+  const context=selectionPaths(current,'server',current.edges).highlighted;
+  assert.equal(selected.every(e=>context.has(e.id)),true);
   assert.equal(selected.some(e=>e.kind.startsWith('service')),false);
 });
 function largeGraph(messages){
@@ -492,13 +493,27 @@ test('partial action source intervals sum only available real counters',()=>{
   assert.equal(owner.interval('status-topic::publisher:cc01'),null);
 });
 
-test('a sole logical publisher with transport-adapted GID keeps an explicitly inferred route',()=>{
+test('transport-projected watching activity keeps a sole logical publisher route explicitly inferred',()=>{
   const owner=new TopicFlowActivity();
-  const make=count=>graph(count,{counter:{publisher_counts:[{publisher_gid:'transport-gid',messages:count,last_message_age_ms:0}],unknown_publisher_messages:0}});
+  const make=count=>graph(count,{counter:{source:'transport_gid_projection',publisher_counts:[{publisher_gid:'transport-gid',messages:count,last_message_age_ms:0}],unknown_publisher_messages:0}});
   owner.observe(make(10),0);const current=make(12);owner.observe(current,2000);
   const pub=flowEdges(current,current.edges,owner,2000,{focus:'topic',focusedOnly:true}).find(e=>e.kind==='publish');
   assert.equal(pub.hollow,true);assert.equal(pub.sourceKey,'topic');
   assert.equal(pub.attribution,'single_discovered_publisher');assert.equal(owner.interval(pub.sourceKey).messages,2);
+  assert.equal(current.topics[0].activity.source,'transport_gid_projection');assert.equal(owner.active('topic',2000),true);
+});
+
+test('focused flow and highlighted selection paths share subscriber/upstream and publisher/downstream context',()=>{
+  const make=count=>{
+    const g=graph(count*2,{counter:{publisher_counts:[{publisher_gid:'aa01',messages:count,last_message_age_ms:0},{publisher_gid:'aa02',messages:count,last_message_age_ms:0}]}});
+    g.nodes.push(node('second-subscriber'));g.topics[0].publishers.push({id:'publisher:aa02',gid:'aa02',node_id:'other-publisher'});
+    g.edges.push({id:'co-pub',kind:'publish',from:'other-publisher',to:'topic',endpoint_id:'publisher:aa02'},
+      {id:'other-sub',kind:'subscribe',from:'topic',to:'second-subscriber',endpoint_id:'subscription:bb02'});
+    return normalizeGraph(g);
+  };
+  const owner=new TopicFlowActivity();owner.observe(make(10),0);const current=make(11);owner.observe(current,2000);
+  assert.deepEqual(flowEdges(current,current.edges,owner,2000,{focus:'subscriber',focusedOnly:true}).map(e=>e.id).sort(),['co-pub','pub','sub']);
+  assert.deepEqual(flowEdges(current,current.edges,owner,2000,{focus:'publisher',focusedOnly:true}).map(e=>e.id).sort(),['other-sub','pub','sub']);
 });
 
 test('a different action server cannot inherit the sole publisher of another server',()=>{
