@@ -153,10 +153,12 @@ export class ManualPanel {
     }
   }
   update({ snapshot, resources, arm, connected }) {
+    const wasConnected = this.connected;
+    const armChanged = this.arm !== arm;
     this.snapshot = snapshot;
     this.connected = connected;
     this.resources = resources;
-    if (this.arm !== arm) {
+    if (armChanged) {
       this.cancelIntent();
       this.arm = arm;
       this.target = null;
@@ -167,8 +169,11 @@ export class ManualPanel {
       this.ownsStream = false;
       this.config = (resources.arms || []).find((a) => a.id === arm) || {};
       this.resetTargets();
-      if (arm && connected) this.safe(() => this.loadDescription());
     }
+    // Initial status can select the default arm before connect() announces its
+    // connected state. Fetch capabilities when that connection becomes ready.
+    if (arm && connected && (armChanged || !wasConnected))
+      this.safe(() => this.loadDescription());
     if (!this.target && this.measured()) this.resetTargets();
     if (!connected) {
       this.cancelIntent();

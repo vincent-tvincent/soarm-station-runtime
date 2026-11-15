@@ -27,6 +27,18 @@ function fixture(){
   return{panel,client,calls,states};
 }
 
+test('default arm capabilities load when the initial connection becomes ready',async()=>{
+  const {panel,calls}=fixture();
+  panel.arm='';
+  panel.loadDescription=async()=>calls.push(['describe',panel.arm]);
+  const update=connected=>panel.update({snapshot:panel.snapshot,resources:panel.resources,arm:'a',connected});
+  update(false);
+  assert.equal(calls.filter(x=>x[0]==='describe').length,0);
+  update(true);
+  update(true);
+  assert.deepEqual(calls.filter(x=>x[0]==='describe'),[['describe','a']]);
+});
+
  test('Stop while permission is pending prevents late Start and revokes late permission',async()=>{
   const{panel,client,calls,states}=fixture(),gate=deferred();
   client.enable=async arm=>{calls.push(['enable',arm]);await gate.promise;states[arm].permission=true;};
