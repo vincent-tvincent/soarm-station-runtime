@@ -119,6 +119,12 @@ network delivery or wire bandwidth. Message contents are not exported.
 **Live flow** monitors the graph while its page/tab is visible. It covers topics
 and action status/feedback regardless of which block is selected; selection
 still controls the original warm publication / cool subscription highlights.
+Moving spheres appear only on those highlighted connections of the current
+selection. Unfocused interfaces keep their live rates and plots without spheres.
+The number above each sphere is the observed message-count increase since the
+previous graph update. Publisher labels use attributed counts where available;
+hollow subscriber labels show the topic count, not verified subscriber delivery.
+Action server labels combine its observed status/feedback contributions.
 Every topic and action block retains its activity history plot. Unknown,
 blocked, idle and observed-active states are distinct.
 

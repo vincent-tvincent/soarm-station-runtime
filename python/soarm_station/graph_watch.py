@@ -30,9 +30,19 @@ def _number(value, integer=False):
 
 def _gid(value):
     try:
+        # Lyrical nests the bytes inside PublisherGID's TypedDict. Older
+        # distributions/adapters may supply the byte sequence directly.
+        if isinstance(value, Mapping):
+            value = value.get('data')
+        if isinstance(value, Mapping):
+            return None
         if isinstance(value, str):
+            if not value or len(value) > 128:
+                return None
             result = bytes.fromhex(value)
         else:
+            if value is None or not 0 < len(value) <= 64:
+                return None
             result = bytes(value)
         return result.hex() if result and len(result) <= 64 and any(result) else None
     except (ValueError, TypeError, OverflowError):

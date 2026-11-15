@@ -56,6 +56,7 @@ const palette = {
 // Motion is continuous while fresh counters advance; it never represents individual packets.
 export const FLOW_LIMITS = Object.freeze({maxEdges:128,maxFps:30,cycleMs:1400,evidenceMs:3500,staleMs:4500});
 const publisherKey = (id,gid) => `${id}::publisher:${gid}`;
+const actionServerKey = (id,nodeId) => `${id}::server:${nodeId}`;
 const unknownKey = id => `${id}::unknown`;
 const liveMetric = n => n?.activity || n?.traffic || {};
 const observed = t => ['watching','sampling'].includes(t?.state);
@@ -93,6 +94,23 @@ export class TopicFlowActivity {
         messages:counts.length&&counts.every(n=>Number.isSafeInteger(n)&&n>=0)?counts.reduce((a,b)=>a+b,0):null,
         last_message_age_ms:ages.length?Math.min(...ages):null,
         sample_id:parts.length?JSON.stringify(parts.map(x=>x.sample_id)):null});
+      for(const server of action.servers||[]) {
+        const attributed=[];
+        for(const name of [a.status_topic,a.feedback_topic]) {
+          const topic=(graph.topics||[]).find(t=>t.name===name),t=liveMetric(topic);
+          if(!observed(t)||typeof t.sample_id!=='string'||!t.sample_id)continue;
+          const gids=new Set((topic.publishers||[]).filter(p=>p.node_id===server).map(p=>p.gid).filter(Boolean));
+          for(const p of t.publisher_counts||[])if(gids.has(p.publisher_gid))attributed.push({...p,epoch:`${t.sample_id}:${p.publisher_gid}`});
+        }
+        attributed.sort((a,b)=>a.epoch.localeCompare(b.epoch));
+        const ages=attributed.map(p=>p.last_message_age_ms).filter(finiteAge);
+        if(attributed.length)sources.set(actionServerKey(action.id,server),{
+          state:['watching','partial'].includes(a.state)?'watching':a.state,
+          sample_id:JSON.stringify(attributed.map(p=>p.epoch)),
+          messages:attributed.every(p=>Number.isSafeInteger(p.messages)&&p.messages>=0)?attributed.reduce((n,p)=>n+p.messages,0):null,
+          last_message_age_ms:ages.length?Math.min(...ages):null,
+        });
+      }
     }
     let advanced=false;
     for(const [id,t] of sources) {
@@ -101,7 +119,9 @@ export class TopicFlowActivity {
           !Number.isSafeInteger(t.messages) || t.messages<0) {this.samples.delete(id);continue;}
       const same=old?.sampleId===t.sample_id;
       const recent=finiteAge(t.last_message_age_ms) && t.last_message_age_ms<FLOW_LIMITS.evidenceMs;
-      const current={sampleId:t.sample_id,messages:t.messages,start:old?.start,until:old?.until||0};
+      const delta=same && t.messages>=old.messages?t.messages-old.messages:null;
+      const current={sampleId:t.sample_id,messages:t.messages,start:old?.start,until:old?.until||0,
+        observedAt:now,delta,intervalMs:delta===null?null:Math.max(0,now-old.observedAt)};
       if(!same || !fresh || !recent || t.messages<old.messages || t.messages===0) current.until=0;
       else if(t.messages>old.messages) {
         if(!this.active(id,now)) current.start=now;
@@ -115,12 +135,13 @@ export class TopicFlowActivity {
   }
   active(id,now) {const s=this.samples.get(id);return Boolean(s && now>=s.start && now<s.until);}
   progress(id,now) {return this.active(id,now)?((now-this.samples.get(id).start)%FLOW_LIMITS.cycleMs)/FLOW_LIMITS.cycleMs:null;}
+  interval(id) {const s=this.samples.get(id);return s&&Number.isSafeInteger(s.delta)?{messages:s.delta,durationMs:s.intervalMs}:null;}
 }
 export function cubicPoint(points,t) {
   const u=1-t,weights=[u*u*u,3*u*u*t,3*u*t*t,t*t*t];
   return [0,1].map(axis=>points.reduce((sum,p,i)=>sum+p[axis]*weights[i],0));
 }
-export function flowEdges(graph,visibleEdges,activity,now,{focus=null}={}) {
+export function flowEdges(graph,visibleEdges,activity,now,{focus=null,focusedOnly=false}={}) {
   const publishers=new Map();
   for(const e of graph.edges) if(e.kind==='publish') {
     if(!publishers.has(e.to)) publishers.set(e.to,new Set());
@@ -137,7 +158,7 @@ export function flowEdges(graph,visibleEdges,activity,now,{focus=null}={}) {
       return {sourceKey:aggregateKey,hollow:true,attribution:'single_discovered_publisher'};
     return null;
   }
-  const result=visibleEdges.flatMap(e=>{
+  const result=visibleEdges.filter(e=>!focusedOnly || (focus && (e.from===focus||e.to===focus))).flatMap(e=>{
     if(e.kind==='publish'||e.kind==='subscribe') {
       const topicId=e.kind==='publish'?e.to:e.from,topic=graph.entities.get(topicId);
       if(topic?.kind!=='topic') return [];
@@ -149,6 +170,8 @@ export function flowEdges(graph,visibleEdges,activity,now,{focus=null}={}) {
       const id=e.kind==='action_server'?e.from:e.to,action=graph.entities.get(id),a=action?.activity;
       if(!a||!activity.active(id,now)) return [];
       if(e.kind==='action_client') return [{...e,topicId:id,sourceKey:id,reverse:true,hollow:true,attribution:'action_response_route'}];
+      const serverKey=actionServerKey(id,e.to);
+      if(activity.active(serverKey,now))return [{...e,topicId:id,sourceKey:serverKey,reverse:true,hollow:false,attribution:'action_server_gids'}];
       const topics=[a.feedback_topic,a.status_topic].map(name=>(graph.topics||[]).find(t=>t.name===name)).filter(Boolean);
       for(const topic of topics) {const source=publication(topic,e.to);if(source)return[{...e,topicId:id,reverse:true,...source}];}
       if((action.servers||[]).length===1) return [{...e,topicId:id,sourceKey:id,reverse:true,hollow:true,attribution:'single_discovered_server'}];
@@ -756,13 +779,19 @@ export class GraphExplorer {
     }
     const flowLayer=svg('g',{'aria-hidden':'true',class:'graph-flow-layer','pointer-events':'none'});
     this.viewport.append(flowLayer);
-    if (this.liveWatch.enabled && !this.reduceMotion.matches) for (const edge of flowEdges(d,edges,this.flowActivity,performance.now(),{focus:this.focus})) {
+    if (this.liveWatch.enabled && !this.reduceMotion.matches) for (const edge of flowEdges(d,edges,this.flowActivity,performance.now(),{focus:this.focus,focusedOnly:true})) {
       const route=flowPaths.get(edge.id); if (!route) continue;
-      const dot=svg('circle',{r:3.1,fill:edge.hollow?'#fff':route.color,stroke:route.color,
-        'stroke-width':1.4,'vector-effect':'non-scaling-stroke',opacity:0,
-        'data-flow-edge':edge.id,'data-flow-kind':edge.kind});
-      flowLayer.append(dot);
-      this.flowDots.push({...edge,element:dot,points:route.points});
+      const dot=svg('g',{opacity:0,'data-flow-edge':edge.id,'data-flow-kind':edge.kind});
+      const circle=svg('circle',{r:3.1,fill:edge.hollow?'#fff':route.color,stroke:route.color,
+        'stroke-width':1.4,'vector-effect':'non-scaling-stroke'});
+      const interval=this.flowActivity.interval(edge.sourceKey);
+      const count=svg('text',{'text-anchor':'middle',fill:route.color,'font-size':11,
+        'font-weight':600,stroke:'#fff','stroke-width':3,'paint-order':'stroke',class:'graph-flow-count'});
+      count.textContent=interval===null?'':String(interval.messages);
+      const title=svg('title');
+      title.textContent=interval===null?'Observed activity':`${interval.messages} observed messages in the previous ${(interval.durationMs/1000).toFixed(2)} s update interval${edge.hollow?'; endpoint receipt is unverified':''}.`;
+      dot.append(circle,count,title);flowLayer.append(dot);
+      this.flowDots.push({...edge,element:dot,circle,count,points:route.points});
     }
     for (const n of entities) {
       const p = positions.get(n.id),
@@ -959,7 +988,13 @@ export class GraphExplorer {
   applyTransform() {
     const { x, y, k } = this.transform;
     this.viewport.setAttribute("transform", `translate(${x},${y}) scale(${k})`);
-    for (const dot of this.flowDots) dot.element.setAttribute('r',Math.min(9,3.1/k));
+    for (const dot of this.flowDots) {
+      const scale=Math.max(.25,k);
+      dot.circle.setAttribute('r',Math.min(9,3.1/k));
+      dot.count.setAttribute('font-size',String(11/scale));
+      dot.count.setAttribute('y',String(-8/scale));
+      dot.count.setAttribute('stroke-width',String(3/scale));
+    }
   }
   list() {
     if (!this.data) return;

@@ -15,6 +15,10 @@ def publisher_gid(info):
     # Lyrical's MessageInfo is a TypedDict passed directly by the executor.
     value=info.get('publisher_gid') if isinstance(info,Mapping) else getattr(info,'publisher_gid',None)
     try:
+        # PublisherGID itself is a TypedDict in Lyrical: only its data field
+        # identifies the endpoint; the middleware identifier is not GID data.
+        if isinstance(value,Mapping):value=value.get('data')
+        if isinstance(value,Mapping):return None
         if isinstance(value,str):
             if not value or len(value)>128:return None
             value=bytes.fromhex(value)
@@ -22,7 +26,7 @@ def publisher_gid(info):
             if value is None or not 0<len(value)<=64:return None
             value=bytes(value)
     except (TypeError,ValueError,OverflowError):return None
-    return value.hex() if value and any(value) else None
+    return value.hex() if value and len(value)<=64 and any(value) else None
 
 
 class SubscriptionActivity:

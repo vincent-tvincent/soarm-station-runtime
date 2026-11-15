@@ -194,7 +194,7 @@ test('action status/feedback animate reverse server responses without inventing 
   const chosen=flowEdges(current,current.edges.filter(e=>e.kind.startsWith('action')||e.kind.startsWith('service')),owner,100,{focus:'action'});
   assert.ok(chosen.some(e=>e.id==='action-server'));assert.ok(chosen.some(e=>e.id==='action-client'));
   for(const e of chosen){assert.equal(e.topicId,'action');assert.equal(e.reverse,true);assert.ok(e.kind.startsWith('action'));}
-  for(const e of chosen.filter(e=>e.id==='action-server')){assert.equal(e.hollow,false);assert.ok(['status-topic::publisher:cc01','feedback-topic::publisher:cc02'].includes(e.sourceKey));}
+  for(const e of chosen.filter(e=>e.id==='action-server')){assert.equal(e.hollow,false);assert.equal(e.sourceKey,'action::server:server');}
   for(const e of chosen.filter(e=>e.id==='action-client')){assert.equal(e.hollow,true);assert.equal(e.sourceKey,'action');}
   assert.equal(current.actions[0].activity.requests.state,'unavailable');
 });
@@ -216,6 +216,37 @@ test('action aggregate requires an actual source epoch instead of a placeholder 
   owner.observe(actionGraph(1,1,options),0);const current=actionGraph(2,2,options);owner.observe(current,100);
   assert.equal(owner.active('action',100),false);
   assert.deepEqual(flowEdges(current,current.edges.filter(e=>e.kind.startsWith('action')),owner,100,{}),[]);
+});
+function mixedActiveGraph(count){
+  const ordinary=graph(count),responses=actionGraph(count,count);
+  return normalizeGraph({schema_version:1,state:'ready',age_ms:0,
+    nodes:[...ordinary.nodes,...responses.nodes],topics:[...ordinary.topics,...responses.topics],
+    services:responses.services,actions:responses.actions,
+    edges:[...ordinary.edges.filter(e=>e.kind==='publish'||e.kind==='subscribe'),...responses.edges]});
+}
+test('focused-only topic dots exclude other active topics/actions while leaving their evidence intact',()=>{
+  const owner=new TopicFlowActivity();owner.observe(mixedActiveGraph(10),0);const current=mixedActiveGraph(11);owner.observe(current,100);
+  assert.equal(owner.active('action',100),true);assert.equal(owner.active('feedback-topic',100),true);
+  assert.ok(flowEdges(current,current.edges,owner,100,{}).length>2);
+  const selected=flowEdges(current,current.edges,owner,100,{focus:'topic',focusedOnly:true});
+  assert.deepEqual(selected.map(e=>e.id).sort(),['pub','sub']);
+  assert.equal(owner.active('action',100),true);assert.equal(owner.active('feedback-topic',100),true);
+  assert.equal(current.edges.length,8);
+});
+test('focused-only action dots retain response edges without animating its underlying topic edges',()=>{
+  const owner=new TopicFlowActivity();owner.observe(mixedActiveGraph(10),0);const current=mixedActiveGraph(11);owner.observe(current,100);
+  const selected=flowEdges(current,current.edges,owner,100,{focus:'action',focusedOnly:true});
+  assert.deepEqual(selected.map(e=>e.id).sort(),['action-client','action-server']);
+  assert.equal(selected.every(e=>e.reverse===true),true);
+  assert.equal(owner.active('status-topic',100),true);assert.equal(owner.active('topic',100),true);
+});
+test('focused-only mode hides all dots without selection and keeps only highlighted routes for a node',()=>{
+  const owner=new TopicFlowActivity();owner.observe(mixedActiveGraph(10),0);const current=mixedActiveGraph(11);owner.observe(current,100);
+  assert.deepEqual(flowEdges(current,current.edges,owner,100,{focusedOnly:true}),[]);
+  const selected=flowEdges(current,current.edges,owner,100,{focus:'server',focusedOnly:true});
+  assert.deepEqual(selected.map(e=>e.id).sort(),['action-server','feedback-pub','status-pub']);
+  assert.equal(selected.every(e=>e.from==='server'||e.to==='server'),true);
+  assert.equal(selected.some(e=>e.kind.startsWith('service')),false);
 });
 function largeGraph(messages){
   const topics=Array.from({length:160},(_,i)=>({id:`topic${i}`,name:`/topic${i}`,types:['std_msgs/msg/Float32'],
@@ -375,4 +406,88 @@ test('activity badges keep unmeasured states explicit and distinguish feedback f
   assert.equal(activityLabel({kind:'action',activity:{state:'partial',feedback:{messages:3,last_message_age_ms:20}}}),'Feedback active');
   const historical=activityLabel({kind:'action',activity:{state:'watching',last_message_age_ms:9000,feedback:{last_message_age_ms:null},status:{status_summary:{counts:{executing:2}}}}});
   assert.match(historical,/last reported active/);
+});
+
+test('intervals report count deltas and actual snapshot duration for aggregate and matched GID sources',()=>{
+  const owner=new TopicFlowActivity();assert.equal(owner.interval('topic'),null);
+  owner.observe(graph(100),1000);assert.equal(owner.interval('topic'),null);assert.equal(owner.interval('topic::publisher:aa01'),null);
+  owner.observe(graph(130),3500);
+  assert.deepEqual(owner.interval('topic'),{messages:30,durationMs:2500});
+  assert.deepEqual(owner.interval('topic::publisher:aa01'),{messages:30,durationMs:2500});
+  owner.observe(graph(150,{counter:{publisher_counts:[{publisher_gid:'aa01',messages:135,last_message_age_ms:0}],unknown_publisher_messages:15}}),5500);
+  assert.deepEqual(owner.interval('topic'),{messages:20,durationMs:2000});
+  assert.deepEqual(owner.interval('topic::publisher:aa01'),{messages:5,durationMs:2000});
+  assert.deepEqual(owner.interval('topic::unknown'),{messages:15,durationMs:2000});
+});
+
+test('zero-count intervals replace previous labels without renewing activity',()=>{
+  const owner=new TopicFlowActivity();owner.observe(graph(10),0);owner.observe(graph(15),2000);
+  assert.deepEqual(owner.interval('topic'),{messages:5,durationMs:2000});
+  owner.observe(graph(15),3000);assert.deepEqual(owner.interval('topic'),{messages:0,durationMs:1000});
+  owner.observe(graph(15),5000);assert.deepEqual(owner.interval('topic'),{messages:0,durationMs:2000});
+  assert.deepEqual(owner.interval('topic::publisher:aa01'),{messages:0,durationMs:2000});
+  assert.equal(owner.active('topic',5501),false);assert.equal(owner.active('topic::publisher:aa01',5501),false);
+});
+
+test('counter reset, new epoch and absent epoch leave interval unknown rather than showing a historic count',()=>{
+  const owner=new TopicFlowActivity();owner.observe(graph(100),1000);owner.observe(graph(110),2000);
+  assert.equal(owner.interval('topic').messages,10);
+  owner.observe(graph(3),3000);assert.equal(owner.interval('topic'),null);assert.equal(owner.interval('topic::publisher:aa01'),null);
+  owner.observe(graph(5),4000);assert.deepEqual(owner.interval('topic'),{messages:2,durationMs:1000});
+  owner.observe(graph(900,{counter:{sample_id:'new-epoch'}}),5000);
+  assert.equal(owner.interval('topic'),null);assert.equal(owner.interval('topic::publisher:aa01'),null);
+  owner.observe(graph(902,{counter:{sample_id:'new-epoch'}}),6000);
+  assert.deepEqual(owner.interval('topic'),{messages:2,durationMs:1000});
+  owner.observe(graph(905,{counter:{sample_id:null}}),7000);
+  assert.equal(owner.interval('topic'),null);assert.equal(owner.interval('topic::publisher:aa01'),null);
+  owner.clear();assert.equal(owner.interval('topic'),null);
+});
+
+test('action response labels sum status and feedback on both server source and client aggregate',()=>{
+  const owner=new TopicFlowActivity();owner.observe(actionGraph(20,5),1000);
+  assert.equal(owner.interval('action'),null);assert.equal(owner.interval('action::server:server'),null);
+  const current=actionGraph(25,12);owner.observe(current,3000);
+  assert.deepEqual(owner.interval('action'),{messages:12,durationMs:2000});
+  assert.deepEqual(owner.interval('action::server:server'),{messages:12,durationMs:2000});
+  assert.deepEqual(owner.interval('status-topic::publisher:cc01'),{messages:5,durationMs:2000});
+  assert.deepEqual(owner.interval('feedback-topic::publisher:cc02'),{messages:7,durationMs:2000});
+  const edges=flowEdges(current,current.edges,owner,3000,{focus:'action',focusedOnly:true});
+  const server=edges.find(e=>e.id==='action-server'),client=edges.find(e=>e.id==='action-client');
+  assert.equal(server.sourceKey,'action::server:server');assert.equal(server.hollow,false);
+  assert.equal(client.sourceKey,'action');assert.equal(client.hollow,true);
+  assert.deepEqual(owner.interval(server.sourceKey),owner.interval(client.sourceKey));
+});
+
+function multiServerActionGraph(statusA,statusB,feedbackA,feedbackB){
+  const g=actionGraph(statusA+statusB,feedbackA+feedbackB,{
+    statusExtra:{publisher_counts:[{publisher_gid:'cc01',messages:statusA,last_message_age_ms:0},{publisher_gid:'dd01',messages:statusB,last_message_age_ms:0}]},
+    feedbackExtra:{publisher_counts:[{publisher_gid:'cc02',messages:feedbackA,last_message_age_ms:0},{publisher_gid:'dd02',messages:feedbackB,last_message_age_ms:0}]},
+  });
+  g.nodes.push(node('second-server'));
+  g.topics[0].publishers.push({id:'publisher:dd01',gid:'dd01',node_id:'second-server'});
+  g.topics[1].publishers.push({id:'publisher:dd02',gid:'dd02',node_id:'second-server'});
+  g.actions[0].servers.push('second-server');
+  g.edges.push({id:'status-pub-second',kind:'publish',from:'second-server',to:'status-topic',endpoint_id:'publisher:dd01'},
+    {id:'feedback-pub-second',kind:'publish',from:'second-server',to:'feedback-topic',endpoint_id:'publisher:dd02'},
+    {id:'action-server-second',kind:'action_server',from:'action',to:'second-server'});
+  return normalizeGraph(g);
+}
+
+test('each action-server interval contains only its own matched status/feedback publisher deltas',()=>{
+  const owner=new TopicFlowActivity();owner.observe(multiServerActionGraph(10,40,5,15),1000);
+  const current=multiServerActionGraph(13,44,9,20);owner.observe(current,3000);
+  assert.deepEqual(owner.interval('action::server:server'),{messages:7,durationMs:2000});
+  assert.deepEqual(owner.interval('action::server:second-server'),{messages:9,durationMs:2000});
+  assert.deepEqual(owner.interval('action'),{messages:16,durationMs:2000});
+  const edges=flowEdges(current,current.edges,owner,3000,{focus:'action',focusedOnly:true});
+  assert.equal(edges.find(e=>e.id==='action-server').sourceKey,'action::server:server');
+  assert.equal(edges.find(e=>e.id==='action-server-second').sourceKey,'action::server:second-server');
+});
+
+test('partial action source intervals sum only available real counters',()=>{
+  const options={state:'partial',statusExtra:{state:'unavailable',messages:null,publisher_counts:[],last_message_age_ms:null}};
+  const owner=new TopicFlowActivity();owner.observe(actionGraph(0,10,options),1000);owner.observe(actionGraph(0,13,options),3000);
+  assert.deepEqual(owner.interval('action'),{messages:3,durationMs:2000});
+  assert.deepEqual(owner.interval('action::server:server'),{messages:3,durationMs:2000});
+  assert.equal(owner.interval('status-topic::publisher:cc01'),null);
 });

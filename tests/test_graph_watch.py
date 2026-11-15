@@ -401,12 +401,26 @@ def test_callback_requires_message_info_and_attributes_real_mapping_metadata_to_
     with pytest.raises(TypeError):
         inspect.signature(callback).bind(object())
     inspect.signature(callback).bind(object(), object())
-    callback(b'a', {'publisher_gid': b'\x01\x02', 'source_timestamp': 123})
-    callback(b'b', {'publisher_gid': b'\x03\x04'})
+    callback(b'a', {'publisher_gid': {'implementation_identifier': 'rmw_cyclonedds_cpp', 'data': b'\x01\x02'}, 'source_timestamp': 123})
+    callback(b'b', {'publisher_gid': {'implementation_identifier': 'rmw_cyclonedds_cpp', 'data': [3, 4]}})
     callback(b'c', {'publisher_gid': b'\x01\x02'})
     callback(b'd', {})
     result = data(watcher, '/value')
     assert {item['publisher_gid']: item['messages'] for item in result['publisher_counts']} == {'0102': 2, '0304': 1}
+    assert result['unknown_publisher_messages'] == 1
+
+
+@pytest.mark.parametrize('gid', [{}, {'implementation_identifier': 'rmw_cyclonedds_cpp'},
+                                {'data': None}, {'data': {}}, {'data': {1: 2}},
+                                {'data': bytes(24)}, {'data': 1000000000}, {'data': list(range(65))}])
+def test_invalid_nested_publisher_gid_stays_unattributed(gid):
+    node, clock, watcher = setup()
+    discover(watcher, ('/value', 'std_msgs/msg/String'))
+    acquire(watcher)
+    watcher.reconcile()
+    node.callbacks['/value'](b'real-receipt', {'publisher_gid': gid})
+    result = data(watcher, '/value')
+    assert result['messages'] == 1 and result['publisher_counts'] == []
     assert result['unknown_publisher_messages'] == 1
 
 

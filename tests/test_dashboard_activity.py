@@ -88,7 +88,9 @@ def test_passive_history_is_bounded_and_old_activity_ages_to_observed_zero():
     assert activity._topics['/state']['buckets']=={}
 
 
-@pytest.mark.parametrize('value',[None,[],[256],[-1],bytes(24),'not-a-gid',list(range(65))])
+@pytest.mark.parametrize('value',[None,[],[256],[-1],bytes(24),'not-a-gid',list(range(65)),
+    {},{'implementation_identifier':'rmw_cyclonedds_cpp'},{'data':None},{'data':{}},
+    {'data':{1:2}},{'data':bytes(24)},{'data':1000000000},{'data':list(range(65))}])
 def test_invalid_or_absent_gid_is_unattributed(value):
     assert publisher_gid(types.SimpleNamespace(publisher_gid=value)) is None
 
@@ -97,6 +99,8 @@ def test_gid_normalization_matches_endpoint_hex():
     assert publisher_gid(types.SimpleNamespace(publisher_gid=[1,2,255]))=='0102ff'
     assert publisher_gid(types.SimpleNamespace(publisher_gid='0102FF'))=='0102ff'
     assert publisher_gid({'publisher_gid':bytes([1,2,255])})=='0102ff'
+    assert publisher_gid({'publisher_gid':{'implementation_identifier':'rmw_cyclonedds_cpp','data':bytes([1,2,255])}})=='0102ff'
+    assert publisher_gid({'publisher_gid':{'implementation_identifier':'rmw_fastrtps_cpp','data':[1,2,255]}})=='0102ff'
 
 
 def test_real_typed_dict_message_info_reaches_passive_publisher_counters():
@@ -108,7 +112,7 @@ def test_real_typed_dict_message_info_reaches_passive_publisher_counters():
     metadata={'source_timestamp':1_700_000_000_000_000_000,
         'received_timestamp':1_700_000_000_050_000_000,
         'publication_sequence_number':8,'reception_sequence_number':7,
-        'publisher_gid':gid}
+        'publisher_gid':{'implementation_identifier':'rmw_cyclonedds_cpp','data':gid}}
     message=object();clock.value=1.;callbacks[0](message,metadata)
     clock.value=1.5;observed=activity.snapshot()['/camera/image/compressed']
     assert handled==[message] and handled[0] is message
