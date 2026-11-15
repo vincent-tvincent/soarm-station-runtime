@@ -46,11 +46,11 @@ cannot stop a replacement operation.
 
 ## Telemetry collector
 
-With no collector configured, the metric shows **Local history** and SQLite disk
-usage on the Pi. Routine samples default to every 10 seconds, with 30-day
+Storage and queue counters are omitted from the dashboard. Routine samples
+default to every 10 seconds, with 30-day
 retention and a 512-MiB budget. It is a disk-backed history, not a RAM queue.
-When a collector is configured, the metric instead shows durable local records
-awaiting external acknowledgment. The course guide page 1 requires
+The status API retains local storage and configured-collector acknowledgment
+metadata. The course guide page 1 requires
 wireless upload plus live/history dashboard and unattended 72-hour recovery;
 page 4 section 5.4 calls for expected/received messages and explanations of gaps.
 The exact large counter is a UI choice, not a rubric item.

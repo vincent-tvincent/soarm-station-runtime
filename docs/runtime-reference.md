@@ -96,9 +96,28 @@ Weights remain resident across task resets. Inference exposes ACTION/WAIT/HOLD/F
 
 Telemetry commits to SQLite on the robot host before publication. Routine history defaults to one sample per arm every **10 seconds**, **30 days** of retention and a **512 MiB** storage budget. These are `monitoring.period_s`, `retention_days` and `storage_limit_mb`. Live control/feedback and immediate drift/availability incidents use their existing independent rates; camera frames are not stored in this history. Sampling cadence changes are recorded as events, and historical gaps are never filled with current observations.
 
-With an empty `collector.url`, history stays local and the dashboard shows its disk usage as **Local history**, rather than an upload queue. Age-based maintenance removes only expired history; opening the journal does not prune existing measurements. Event retention and quota checks also apply (`monitoring.event_limit` defaults to 10,000), and quota accounting includes SQLite's database, WAL and shared-memory files. Reaching the budget reports a logging error rather than silently discarding recent measurements. SQLite can reuse space freed by retention; file size need not shrink immediately.
+With an empty `collector.url`, history stays local. Storage and upload counters are available through the status API and are omitted from the operator dashboard. Age-based maintenance removes only expired history; opening the journal does not prune existing measurements. Event retention and quota checks also apply (`monitoring.event_limit` defaults to 10,000), and quota accounting includes SQLite's database, WAL and shared-memory files. Reaching the budget reports a logging error rather than silently discarding recent measurements. SQLite can reuse space freed by retention; file size need not shrink immediately.
 
 To add remote delivery, deploy `scripts/run-collector` on a collector host and configure `collector.url`, CA trust and its dedicated token in the robot profile. The outbox retains exact `(device_id, runtime_boot_id, sequence)` keys until durable acknowledgment. With remote delivery configured, unacknowledged records are retained even beyond the age window; quota exhaustion is explicit. Acknowledgments are not fabricated for local-only history, and browser access alone does not establish remote collector receipt.
+
+### Telemetry storage location
+
+The runtime profile's top-level `database` is the single setting for the SQLite
+file. Absolute paths are used directly; relative paths resolve against that
+YAML file's directory. Set `monitoring.storage_mount` for a separately mounted
+data volume, for example `/mnt/ssd`. Telemetry requires the database to be inside
+that mount and verifies that it is mounted before creating directories or
+opening SQLite. An absent data drive cannot silently create replacement history
+on the underlying system disk. This check belongs to telemetry; configuration
+loading for arm and camera processes does not require the data volume.
+
+For an existing journal, stop its writer before switching paths, use SQLite's
+backup API to include committed WAL content, and verify integrity plus records,
+events and schedule metadata at the destination. Update `database` and the
+optional `storage_mount`, then restart the telemetry and dashboard processes.
+Retain a verified rollback copy until the new file is receiving records; do not
+copy only a live `.sqlite3` file and omit its WAL. Changing the configuration by
+itself creates/opens the selected file; it does not migrate the old history.
 
 `recording.enabled` starts optional MCAP evidence recording. The allowlist includes measured state, images/CameraInfo, TF and events, excluding commands/action internals. ROS bags are separate from LeRobot training datasets. Replay uses an isolated graph without physical devices.
 

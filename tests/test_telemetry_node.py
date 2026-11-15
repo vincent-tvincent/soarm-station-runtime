@@ -50,6 +50,19 @@ def test_startup_maintains_before_metadata_and_passes_bounded_local_defaults(mon
         node.stop.set();node.uploader.join(timeout=1);node.journal.close()
 
 
+def test_missing_required_mount_prevents_journal_construction(tmp_path,monkeypatch):
+    import soarm_station_system.telemetry_node as module
+    mount=tmp_path/'ssd'
+    config={'database':str(mount/'history/telemetry.sqlite3'),'arms':[],
+        'monitoring':{'storage_mount':str(mount)}}
+    monkeypatch.setattr(module.BaseNode,'__init__',lambda self,name:setattr(self,'config',config))
+    monkeypatch.setattr('soarm_station.config.os.path.ismount',lambda path:False)
+    def open_journal(*args,**kwargs):pytest.fail('Journal must not open or create fallback directories')
+    monkeypatch.setattr(module,'Journal',open_journal)
+    with pytest.raises(OSError,match='storage mount is not mounted'):TelemetryNode()
+    assert not mount.exists()
+
+
 def test_legacy_one_second_history_transitions_with_exact_gap_event_and_no_fake_rows(tmp_path):
     from rosidl_runtime_py.set_message import set_message_fields
     from rclpy.serialization import serialize_message

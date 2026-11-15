@@ -2,9 +2,25 @@
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
 import yaml
+
+def validate_telemetry_storage(config):
+    """Check a required data mount only for the component that opens the journal.
+
+    Configuration loading remains usable by control/camera nodes when optional
+    telemetry storage is absent. This check performs no filesystem writes.
+    """
+    configured=config.get('monitoring',{}).get('storage_mount')
+    if configured is None:return
+    mount=Path(configured).expanduser().resolve()
+    database=Path(config['database']).expanduser().resolve()
+    if database==mount or not database.is_relative_to(mount):
+        raise ValueError('Telemetry database must be under monitoring.storage_mount')
+    if not os.path.ismount(mount):
+        raise OSError(f'Required telemetry storage mount is not mounted: {mount}')
 
 def load(path):
     path = Path(path).expanduser().resolve()
@@ -78,6 +94,11 @@ def load(path):
             raise ValueError(f'Monitoring {name} must be finite and positive')
     if type(monitoring.get('event_limit',10000))!=int or monitoring.get('event_limit',10000)<1:
         raise ValueError('Monitoring event_limit must be a positive integer')
+    storage_mount=monitoring.get('storage_mount')
+    if storage_mount is not None:
+        if not isinstance(storage_mount,str) or not storage_mount.strip():
+            raise ValueError('Monitoring storage_mount must be a nonempty path or null')
+        monitoring['storage_mount']=str((path.parent/Path(storage_mount).expanduser()).resolve())
     graph=c.get('graph_observer',{})
     if not isinstance(graph,dict):raise ValueError('graph_observer must be a mapping')
     refresh=graph.get('refresh_s',2.)

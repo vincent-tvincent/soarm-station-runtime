@@ -77,8 +77,8 @@ The dashboard status response also enriches `upload` with `delivery_mode`
 `sample_period_s`, `retention_days` and `storage_limit_mb`. Local-only mode has
 `queued: 0`, since no destination is configured; `remote_committed` retains its
 actual acknowledgment count. File paths and collector credentials are omitted.
-The dashboard displays local disk usage in local mode and actual pending
-uploads in remote mode. This metadata does not change the ROS UploadStatus type.
+Storage and queue counters are omitted from the operator dashboard; this
+metadata remains available to API consumers and does not change the ROS UploadStatus type.
 
 ## Continuous live watch
 

@@ -10,6 +10,7 @@ from sensor_msgs.msg import JointState
 from soarm_station_interfaces.msg import TelemetrySample,UploadStatus,Event,OperationStatus
 from soarm_station_interfaces.srv import QueryHistory,RecordEvent
 from soarm_station.journal import Journal
+from soarm_station.config import validate_telemetry_storage
 from .common import BaseNode,STATE,SENSOR,run,stamp_ns,topic
 
 def configure_monitoring_schedule(journal,period_ns,wall_ns,run_id,boot_id):
@@ -50,6 +51,8 @@ class TelemetryNode(BaseNode):
     def __init__(self):
         super().__init__('telemetry_node');self.cache={};self.states={};self.health={};self.error='';self.storage_error='';self.maintenance_error='';self.stop=threading.Event()
         monitoring=self.config.get('monitoring',{});self.collector_enabled=bool(self.config.get('collector',{}).get('url'))
+        # An absent nofail-mounted SSD must not create a replacement DB on SD.
+        validate_telemetry_storage(self.config)
         self.journal=Journal(self.config['database'],monitoring.get('storage_limit_mb',512),
             retention_days=monitoring.get('retention_days',30),preserve_unacked=self.collector_enabled,
             event_limit=monitoring.get('event_limit',10000))

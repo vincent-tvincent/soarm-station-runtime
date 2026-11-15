@@ -54,6 +54,22 @@ ros2 launch soarm_station_system system.launch.py config:="$PWD/local/robot.yaml
 
 The copied profile initially uses mock devices. Hardware deployment requires adapter settings, stable device paths, calibration, joint limits and any model or measured transform assets. Each arm and camera has an explicit unique ID. Resource counts come from configuration; no default physical arm is selected. Relative paths resolve against the YAML file's directory.
 
+Set the telemetry file location with the profile's top-level `database` field.
+For example, to use an SSD mounted at `/mnt/ssd`:
+
+```yaml
+database: /mnt/ssd/soarm-station/telemetry.sqlite3
+monitoring:
+  storage_mount: /mnt/ssd
+  period_s: 10
+  retention_days: 30
+  storage_limit_mb: 512
+```
+
+`storage_mount` is optional; when set, telemetry verifies the mount before
+creating or opening the database. Changing the path does not move existing
+history automatically. See [storage configuration and migration](docs/runtime-reference.md#telemetry-storage-location).
+
 For remote dashboard access, initialize the certificate with the hostname used by clients, for example `.venv/bin/python scripts/init-local --name robot.example.net`, before first launch. Initialization preserves existing credentials. Tokens, private keys, calibration, datasets and generated environments are excluded from Git.
 
 The runtime uses authenticated DDS on domain 71 with localhost discovery. Remote operators normally use HTTPS/WebSocket. See the [runtime reference](docs/runtime-reference.md) for resource configuration, control contracts, model deployment and telemetry.
