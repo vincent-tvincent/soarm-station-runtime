@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command
-from soarm_station.leader_gateway import LeaderHostRegistry
+from soarm_station.leader_gateway import LeaderHostRegistry,native_start_state
 
 
 @pytest.fixture
@@ -114,6 +114,92 @@ def test_start_requires_explicit_permission_and_resource_mapping(host_config):
         assert not any('permission' in message.get('type','') for message in registry.hosts['test-host']['ws'].sent)
         assert registry.snapshot()['hosts'][0]['latest_pose'] is None
     asyncio.run(check())
+
+
+def test_start_uses_current_permission_even_before_ros_cache_publication(host_config):
+    async def check():
+        registry,cached,held,body=registry_fixture(host_config)
+        current=copy.deepcopy(cached)
+        cached['arms']['follower'].update(permission=False,feedback_valid=False)
+        reads=[]
+        async def read_current():
+            await asyncio.sleep(0)
+            reads.append('snapshot')
+            return current
+        registry.start_state_provider=read_current
+        reply=json.loads((await registry.start_route(Request(body))).text)
+        assert reply['accepted'] and reads==['snapshot']
+        assert not cached['arms']['follower']['permission']
+        assert len(registry.hosts['test-host']['ws'].sent)==1 and held==[]
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('field,reason',[('permission','permission'),('feedback_valid','feedback')])
+def test_start_rejects_current_denial_even_when_ros_cache_says_ready(host_config,field,reason):
+    async def check():
+        registry,cached,held,body=registry_fixture(host_config)
+        current=copy.deepcopy(cached);current['arms']['follower'][field]=False
+        registry.start_state_provider=lambda:current
+        with pytest.raises(ValueError,match=reason):await registry.start_route(Request(body))
+        assert registry.hosts['test-host']['active'] is None
+        assert registry.hosts['test-host']['ws'].sent==[] and held==[]
+    asyncio.run(check())
+
+
+def test_native_read_does_not_allow_two_competing_starts(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        barrier=asyncio.Event()
+        async def read_current():await barrier.wait();return state
+        registry.start_state_provider=read_current
+        calls=[asyncio.create_task(registry.start_route(Request(body))) for _ in range(2)]
+        await asyncio.sleep(0);barrier.set()
+        replies=await asyncio.gather(*calls,return_exceptions=True)
+        assert sum(isinstance(reply,ValueError) for reply in replies)==1
+        assert sum(not isinstance(reply,Exception) for reply in replies)==1
+        assert len(registry.hosts['test-host']['ws'].sent)==1 and held==[]
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('change',['connection','device'])
+def test_start_rechecks_input_host_after_native_read(host_config,change):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        host=registry.hosts['test-host'];connection=host['ws']
+        async def read_current():
+            await asyncio.sleep(0)
+            if change=='connection':host['ws']=Socket()
+            else:host['devices']=[]
+            return state
+        registry.start_state_provider=read_current
+        with pytest.raises(ValueError):await registry.start_route(Request(body))
+        assert host['active'] is None and connection.sent==[] and held==[]
+    asyncio.run(check())
+
+
+def test_failed_native_read_does_not_fall_back_to_ready_ros_cache(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        async def unavailable():raise OSError('Native worker unavailable')
+        registry.start_state_provider=unavailable
+        with pytest.raises(OSError):await registry.start_route(Request(body))
+        assert registry.hosts['test-host']['active'] is None
+        assert registry.hosts['test-host']['ws'].sent==[] and held==[]
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('age,elapsed,positions,valid',[
+    (5.,2.,{'pan':0.},True),(149.,0.,{'pan':0.},True),
+    (149.,2.,{'pan':0.},False),(150.,0.,{'pan':0.},False),
+    (1.,0.,{},False),(None,0.,{'pan':0.},False),
+    (float('nan'),0.,{'pan':0.},False),(False,0.,{'pan':0.},False),
+])
+def test_native_admission_preserves_feedback_freshness_including_transport_age(age,elapsed,positions,valid):
+    source={'arms':{'arm':{'permission':True,'age_ms':age,'positions':positions,'controller_session':'session'}}}
+    result=native_start_state(source,{'arms':[{'id':'arm'}]},elapsed)
+    assert result['arms']['arm']['feedback_valid'] is valid
+    assert result['arms']['arm']['permission'] is True
+    assert 'feedback_valid' not in source['arms']['arm']
 
 
 def test_stop_and_heartbeat_cannot_take_over_unrelated_sessions(host_config):

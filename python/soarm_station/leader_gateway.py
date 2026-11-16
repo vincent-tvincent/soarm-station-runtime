@@ -11,9 +11,23 @@ import time
 import uuid
 
 
+def native_start_state(snapshot,resources,elapsed_ms=0.):
+    """Use current native admission state, including IPC age, instead of ROS publication lag."""
+    arms={}
+    for name,value in snapshot.get('arms',{}).items():
+        arm=dict(value);age=arm.get('age_ms')
+        valid_age=(type(age) in (int,float) and math.isfinite(age) and age>=0
+                   and type(elapsed_ms) in (int,float) and math.isfinite(elapsed_ms) and elapsed_ms>=0)
+        arm['feedback_valid']=bool(arm.get('positions')) and valid_age and age+elapsed_ms<150
+        arm['feedback_age_ms']=age+elapsed_ms if valid_age else None
+        arms[name]=arm
+    return {'arms':arms,'resources':resources}
+
+
 class LeaderHostRegistry:
-    def __init__(self, state_provider, hold_callback, lease_s=2.5):
+    def __init__(self, state_provider, hold_callback, lease_s=2.5,start_state_provider=None):
         self.state_provider, self.hold_callback, self.lease_s = state_provider, hold_callback, lease_s
+        self.start_state_provider=start_state_provider
         self.hosts={};self.closed=False;self.watch_task=None
 
     def snapshot(self):
@@ -112,10 +126,24 @@ class LeaderHostRegistry:
         if not device or not device['configured']:raise ValueError('Select a connected configured leader device')
         arm_id=body.get('arm_id')
         if not isinstance(arm_id,str) or not 1<=len(arm_id)<=128:raise ValueError('Explicit known follower arm required')
-        state=self.state_provider();arm=state.get('arms',{}).get(arm_id)
+        if self.start_state_provider is None:
+            state=self.state_provider()
+        else:
+            connection=host['ws']
+            state=self.start_state_provider()
+            if inspect.isawaitable(state):state=await state
+            # Native reads yield the HTTP loop. Recheck ownership/inventory before
+            # reserving a run so a competing Start or reconnect cannot be overwritten.
+            if self.closed or self.hosts.get(request.match_info['host_id']) is not host or host.get('ws') is not connection or connection.closed:
+                raise ValueError('Input host changed while checking follower state')
+            if host.get('active'):raise ValueError('Input host is busy or cleanup is pending')
+            device=next((d for d in host['devices'] if d['id']==body.get('device_id')),None)
+            if not device or not device['configured']:raise ValueError('Select a connected configured leader device')
+        arm=state.get('arms',{}).get(arm_id)
         if not arm:raise ValueError('Explicit known follower arm required')
         if any(h.get('active') and h['active']['arm_id']==arm_id for h in self.hosts.values()):raise ValueError('Follower already has an input-host run')
-        if not arm.get('permission') or not arm.get('feedback_valid',False):raise ValueError('Explicit permission and valid follower feedback are required')
+        if not arm.get('permission'):raise ValueError('Follower control permission is not enabled')
+        if not arm.get('feedback_valid',False):raise ValueError('Fresh follower feedback is unavailable')
         if arm.get('operation_id'):raise ValueError('Follower has an active operation')
         for key in ('runtime_boot_id','controller_session'):
             if body.get(key)!=arm.get(key):raise ValueError('Follower boot/controller session mismatch')

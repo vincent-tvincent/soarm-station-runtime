@@ -184,13 +184,24 @@ The only shared-file work is performed by the dashboard integrator:
 from soarm_station.leader_gateway import LeaderHostRegistry
 
 registry = LeaderHostRegistry(
-    state_provider=dashboard.state,
+    state_provider=lambda: {
+        "arms": dict(dashboard.states),
+        "resources": dashboard.public_resources,
+    },
     hold_callback=hold_matching_run,
+    start_state_provider=read_current_native_state,
 )
 registry.register_routes(app)
 ```
 
-`state_provider()` returns the current status including `arms` and
+`start_state_provider()` may be async. Station supplies a fresh native-controller
+snapshot for each Start, with feedback age including the IPC round trip. This
+avoids rejecting a successful permission grant while waiting for the next ROS
+status publication. The endpoint rechecks host/device/run state after that read
+before reserving a leader run. The native operation admission still validates
+permission and ownership when the actual control stream opens.
+
+`state_provider()` supplies the cached ROS view for cleanup, including `arms` and
 `resources.arms[].joints`. `hold_matching_run(arm_id,
 expected_controller_session, operator_session_id, expected_operation_id)` is async or synchronous and
 returns `{"success": bool}`; it must retain the supplied resource/session scope

@@ -25,7 +25,7 @@ from soarm_station.subscription_activity import SubscriptionActivity,observe_sub
 from soarm_station.web_access import dashboard_access_middleware
 from soarm_station.web_streams import stream_camera_frames
 from soarm_station.manual_http import ManualRoutes
-from soarm_station.leader_gateway import LeaderHostRegistry
+from soarm_station.leader_gateway import LeaderHostRegistry,native_start_state
 from soarm_station.policy_manager import PolicyManager
 from soarm_station.policy_http import mount_policy_routes
 from soarm_station.ipc import Client
@@ -149,8 +149,19 @@ class DashboardNode(BaseNode):
                 try:return client.call('hold_owned',arm_id=arm,controller_session=session,principal=principal,operation_id=operation_id)
                 finally:client.close()
             return await asyncio.to_thread(call)
-        # Leader ownership/cleanup needs measured ROS state, not policy-store IPC.
-        self.leader_registry=LeaderHostRegistry(lambda:{'arms':dict(self.states),'resources':self.public_resources},conditional_hold)
+        async def leader_start_state():
+            started=time.monotonic()
+            def read():
+                client=Client(self.config['socket'])
+                try:return client.call('snapshot')
+                finally:client.close()
+            snapshot=await asyncio.to_thread(read)
+            return native_start_state(snapshot,self.public_resources,(time.monotonic()-started)*1000)
+        # Admission uses authoritative native state: the permission service may
+        # reply before the ROS cache sees its next status publication. Cleanup
+        # retains the cached ROS view and never queries the policy store.
+        self.leader_registry=LeaderHostRegistry(lambda:{'arms':dict(self.states),'resources':self.public_resources},
+            conditional_hold,start_state_provider=leader_start_state)
         self.leader_registry.register_routes(app)
         if getattr(self,'policy_manager',None) is not None:
             mount_policy_routes(app,self.policy_manager)

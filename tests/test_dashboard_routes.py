@@ -133,6 +133,47 @@ def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
     asyncio.run(exercise())
 
 
+def test_leader_start_reads_native_permission_off_http_thread_before_ros_cache_updates(monkeypatch):
+    import soarm_station_system.dashboard_node as module
+    calls=[];http_thread=threading.get_ident()
+    class NativeClient:
+        def __init__(self,path):assert path=='test-native-socket'
+        def call(self,operation):
+            assert operation=='snapshot'
+            calls.append(('read',threading.get_ident()))
+            return {'arms':{'arm1':{'runtime_boot_id':'boot','controller_session':'controller',
+                'operation_id':'','permission':True,'positions':{'pan':0.},'age_ms':1.}}}
+        def close(self):calls.append(('close',threading.get_ident()))
+    monkeypatch.setattr(module,'Client',NativeClient)
+    async def unused(request):raise AssertionError('Unrelated route was requested')
+    owner=types.SimpleNamespace(config={'web':{},'arms':[],'socket':'test-native-socket'},
+        public_resources={'arms':[{'id':'arm1','joints':[{'name':'pan'}]}]},
+        states={'arm1':{'permission':False,'feedback_valid':False}})
+    for name in ('index','status','history','permission','hold','stream_input','operate','operation_status',
+                 'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample','graph_watch'):
+        setattr(owner,name,unused)
+    DashboardNode.create_app(owner)
+    class Socket:
+        closed=False
+        def __init__(self):self.sent=[]
+        async def send_json(self,value):self.sent.append(value)
+    socket=Socket()
+    owner.leader_registry.hosts['mac']={'id':'mac','label':'Mac','ws':socket,'active':None,
+        'devices':[{'id':'leader','configured':True,'joint_names':['pan']}],'state':'IDLE'}
+    class Request:
+        match_info={'host_id':'mac'}
+        async def json(self):return {'device_id':'leader','arm_id':'arm1','runtime_boot_id':'boot',
+            'controller_session':'controller','operator_session_id':'operator'}
+    async def check():
+        response=await owner.leader_registry.start_route(Request())
+        assert json.loads(response.text)['accepted']
+    asyncio.run(check())
+    assert len(socket.sent)==1 and socket.sent[0]['type']=='start'
+    assert [name for name,_ in calls]==['read','close']
+    assert all(thread!=http_thread for _,thread in calls)
+    assert owner.states['arm1']['permission'] is False
+
+
 @pytest.mark.parametrize('semantics,persistent,cancel_failure',[
     (None,False,False),('live_sample',False,False),('persistent_target',True,False),('persistent_target',True,True)])
 def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(semantics,persistent,cancel_failure,monkeypatch):
