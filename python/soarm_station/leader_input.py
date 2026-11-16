@@ -7,6 +7,7 @@ existing gateway DIRECT+STREAM protocol. No robot/serial imports occur at import
 import argparse
 import asyncio
 import copy
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -127,6 +128,20 @@ def bounded_leader_target(measured,limits):
     return target
 
 
+async def sample_until_control_ends(sampler,receiver):
+    """Stop a pending device read when its owning control stream ends."""
+    pending=asyncio.create_task(sampler.sample())
+    try:
+        ready,_=await asyncio.wait((pending,receiver),return_when=asyncio.FIRST_COMPLETED)
+        if receiver in ready:
+            await receiver
+            raise RuntimeError('Follower control socket closed')
+        return pending.result()
+    finally:
+        if not pending.done():pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError,Exception):await pending
+
+
 def discover(config, enumerate_ports=serial_inventory):
     """Return real OS devices, marking configured candidates without opening them."""
     result = []
@@ -234,16 +249,16 @@ def _reader_process(connection, profile, port, lock_dir):
 
 
 class ProcessSampler:
-    """One pending read; stalled native reads are terminated on Stop/timeout."""
+    """One pending read; Stop/source closure cancels and releases the reader."""
     def __init__(self, profile, port, lock_dir):
         self.profile, self.port, self.lock_dir = profile, port, lock_dir
         self.process = self.connection = None
 
     async def _receive(self, timeout):
-        deadline = time.monotonic()+timeout
+        deadline = None if timeout is None else time.monotonic()+timeout
         while not self.connection.poll():
             if not self.process.is_alive():raise RuntimeError("Leader reader exited")
-            if time.monotonic() >= deadline:raise TimeoutError("Leader read/connect deadline expired")
+            if deadline is not None and time.monotonic() >= deadline:raise TimeoutError("Leader read/connect deadline expired")
             await asyncio.sleep(.001)
         message = self.connection.recv()
         if message["type"] == "error":raise RuntimeError(message["reason"])
@@ -259,7 +274,7 @@ class ProcessSampler:
     async def sample(self):
         request_id = uuid.uuid4().hex
         self.connection.send({"type":"sample", "request_id":request_id})
-        message = await self._receive(self.profile.get("sample_timeout_s", .1))
+        message = await self._receive(self.profile.get("sample_timeout_s"))
         if message.get("request_id") != request_id:raise RuntimeError("Leader sample identity mismatch")
         return message
 
@@ -357,7 +372,7 @@ class InputHostBridge:
                         # This read starts after the original Pi window was received.
                         if tick-grant_received >= grant.get("window_valid_for_ms",0)/1000:
                             await asyncio.sleep(.002);continue
-                        sample=await sampler.sample()
+                        sample=await sample_until_control_ends(sampler,receiver)
                         if receiver.done():await receiver;raise RuntimeError("Follower control socket closed")
                         # A delayed read can miss this server window. Drop it and
                         # read again under a fresh window instead of ending a run.

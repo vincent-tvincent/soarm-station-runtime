@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command,bounded_leader_target
+from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command,bounded_leader_target,sample_until_control_ends
 from soarm_station.leader_gateway import LeaderHostRegistry,native_start_state
 
 
@@ -371,3 +371,39 @@ def test_leader_targets_clip_existing_follower_limits_without_mutating_observati
     assert measured['positions']['pan']==3. and measured['gripper']==-2.
     with pytest.raises(ValueError):bounded_leader_target(measured,None)
     with pytest.raises(ValueError):bounded_leader_target({**measured,'positions':{'pan':float('nan'),'lift':0.}},limits)
+
+
+def test_control_end_cancels_a_pending_leader_read_and_preserves_actual_reason():
+    async def check():
+        started=asyncio.Event();cancelled=[]
+        class Sampler:
+            async def sample(self):
+                started.set()
+                try:await asyncio.Event().wait()
+                finally:cancelled.append(True)
+        async def source_end():
+            await started.wait();raise RuntimeError('Actual native terminal reason')
+        receiver=asyncio.create_task(source_end())
+        with pytest.raises(RuntimeError,match='Actual native terminal reason'):
+            await sample_until_control_ends(Sampler(),receiver)
+        assert cancelled==[True]
+    asyncio.run(check())
+
+
+def test_stop_cancels_the_reader_without_canceling_unrelated_receiver_ownership():
+    async def check():
+        started=asyncio.Event();cancelled=[]
+        class Sampler:
+            async def sample(self):
+                started.set()
+                try:await asyncio.Event().wait()
+                finally:cancelled.append(True)
+        receiver=asyncio.create_task(asyncio.Event().wait())
+        run=asyncio.create_task(sample_until_control_ends(Sampler(),receiver))
+        await started.wait();run.cancel()
+        with pytest.raises(asyncio.CancelledError):await run
+        assert cancelled==[True] and not receiver.done()
+        receiver.cancel()
+        try:await receiver
+        except asyncio.CancelledError:pass
+    asyncio.run(check())

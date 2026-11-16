@@ -248,6 +248,9 @@ A delayed sample that misses its Pi-issued window is discarded and freshly read
 rather than causing an extra 50-ms bridge abort. Native feedback/source-loss
 handling remains in the controller. Result messages preserve the native terminal
 reason so a late UI status request does not mask it with a heartbeat mismatch.
+The separate default 100-ms sampler IPC deadline is also removed. A pending
+read ends with its control stream or explicit Stop; native driver errors still
+propagate, and the controller still stops advancement on actual source loss.
 
 The **Gripper follow** toggle (UI shortcut **O**) changes only the jaw command
 source. Disabled follow retains the last successfully sent jaw reference while
