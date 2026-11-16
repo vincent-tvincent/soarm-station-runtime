@@ -66,3 +66,26 @@ The initial full mock run exposed the native-EOF/ROS-cache stop-confirmation
 race; the passing run includes its fix and focused regressions. These checks
 do not claim physical leader-following or obstruction recovery was exercised
 by the agent. Deployment is verified separately below.
+
+
+## Final checks and deployment
+
+- 348 JavaScript tests passed. The Linux regression suite plus its corrected
+  native-cleanup fixture covered 168 passing tests and 72 subtests, including
+  real socket-owner EOF cleanup, scoped Hold routes, controller continuity,
+  leader input, motor issues and FK/IK calculations.
+- Runtime source revision `a6d863b` was pushed and deployed from Git. The ROS
+  package built successfully and the user service restarted while held/idle.
+- Native boot changed from `086002afd8244503bdf6cf872c8ef508` to
+  `97dbe68a421d41369dcaef6466cdae07`. Configuration and calibration hashes were
+  unchanged. All six torques remained ON; measured joint, goal and gripper
+  deltas were zero. The new worker issued zero motor goal writes.
+- Feedback measured 99.79 Hz immediately after restart. Read-only HTTP checks
+  confirmed advancing joint timestamps, profile 3, live 5/5 Jacobian rank,
+  six motor issue records, three cameras and exact served-asset/source matches.
+- The existing Mac input bridge restarted with the new code and re-advertised
+  its configured leader while remaining idle. No physical following, Home,
+  Fold or learned policy was executed by the agent.
+
+Refresh the dashboard to load the new controls. In Leader mode use
+**Unlock / follow**, align to the held pose, and use **Freeze** to pause.

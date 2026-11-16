@@ -296,3 +296,5 @@ A joint reference displaced outside its tracking band recovers inward at the
 configured velocity while other joints continue. This software tracking state
 is distinct from a reported servo protection fault. Status shows both per motor,
 including the reported reason and target-versus-measured error.
+
+See [recovery validation and deployment](teleoperation-recovery-2026-11-16.md) for the diagnosed failures, tested transitions and physical verification boundary.
