@@ -154,7 +154,7 @@ class LeaderHostRegistry:
         if not resource:raise ValueError('Follower resource metadata unavailable')
         joints=[j['name'] for j in resource['joints']]
         if set(joints)!=set(device.get('joint_names') or []):raise ValueError('Configured leader mapping does not match follower joints')
-        limits={j['name']:{'min_rad':j['min_rad'],'max_rad':j['max_rad']} for j in resource['joints']}
+        limits={j['name']:{'min_rad':j['min'],'max_rad':j['max']} for j in resource['joints']}
         hz=body.get('hz',100)
         if type(hz) not in (int,float) or not 50<=hz<=100:raise ValueError('Leader input rate must be 50..100 Hz')
         follow=body.get('follow_gripper',True)

@@ -90,7 +90,7 @@ class Socket:
 def registry_fixture(host_config):
     state={'arms':{'follower':{'permission':True,'feedback_valid':True,'runtime_boot_id':'boot',
                              'controller_session':'controller','operation_id':''}},
-           'resources':{'arms':[{'id':'follower','joints':[{'name':'pan','min_rad':-2.,'max_rad':2.},{'name':'lift','min_rad':-2.,'max_rad':2.}]}]}}
+           'resources':{'arms':[{'id':'follower','joints':[{'name':'pan','min':-2.,'max':2.},{'name':'lift','min':-2.,'max':2.}]}]}}
     held=[]
     async def hold(arm,session,operator,operation):held.append((arm,session,operator,operation));return {'success':True}
     registry=LeaderHostRegistry(lambda:state,hold)
@@ -111,6 +111,7 @@ def test_start_requires_explicit_permission_and_resource_mapping(host_config):
         assert result['accepted'] and result['state']=='STARTING' and not held
         command=registry.hosts['test-host']['ws'].sent[0]
         assert command['type']=='start' and command['joint_names']==['pan','lift']
+        assert command['joint_limits']=={name:{'min_rad':-2.,'max_rad':2.} for name in ('pan','lift')}
         assert not any('permission' in message.get('type','') for message in registry.hosts['test-host']['ws'].sent)
         assert registry.snapshot()['hosts'][0]['latest_pose'] is None
     asyncio.run(check())
