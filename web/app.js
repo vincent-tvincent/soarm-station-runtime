@@ -210,7 +210,7 @@ async function setPage(value, { fromHash = false, initial = false } = {}) {
   $("policies").hidden = page !== "policies";
   text("page-title", page === "graph" ? "ROS graph" : page === "policies" ? "Policy management" : "Robot operations");
   text("page-series", page === "graph" ? "OBSERVABILITY" : page === "policies" ? "POLICY MANAGEMENT" : "CONTROL");
-  manual?.setVisible(page === "operations" && activeTab === "manual");
+  manual?.setVisible(page === "operations" && activeTab === "manual", page === "operations");
   graph?.setVisible(page === "graph");
   policies?.setVisible(page === "policies");
   if (page === "graph" && connected) graph.refresh();
@@ -235,6 +235,7 @@ for (const tab of document.querySelectorAll("[data-tab]"))
       $("panel-" + n).hidden = n !== activeTab;
     manual?.setVisible(
       activeTab === "manual" && $("app").dataset.view === "operations",
+      $("app").dataset.view === "operations",
     );
   };
 $("arm-select").onchange = () => {
@@ -1662,6 +1663,7 @@ graph = new GraphExplorer({
 });
 manual = new ManualPanel({
   element: $("panel-manual"),
+  poseElement: $("manual-fk"),
   client,
   onError: showError,
   onNotice: notice,

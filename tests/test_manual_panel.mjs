@@ -271,3 +271,16 @@ test('an old host inventory response cannot erase a newly started run',async()=>
   gate.resolve({hosts:[{id:'host',state:'IDLE',active:null,devices:[]}]});await refresh;
   assert.equal(panel.leaderRun.run_id,'new-run');
 });
+
+
+test('shared FK stays visible while hidden Control cannot accept keyboard or gamepad input',()=>{
+  const {panel,calls}=fixture();panel.mode='gamepad';panel.keys.add('KeyJ');
+  panel.gamepad={setActive:active=>calls.push(['gamepad-active',active])};
+  panel.refreshPose=()=>calls.push(['pose']);
+  panel.setVisible(false,true);
+  assert.equal(panel.visible,false);assert.equal(panel.poseVisible,true);assert.equal(panel.keys.size,0);
+  assert(calls.some(c=>c[0]==='pose'));assert(calls.some(c=>c[0]==='gamepad-active'&&c[1]===false));
+  panel.keyDown({code:'KeyJ'});assert.equal(panel.keys.size,0);
+  const count=calls.length;panel.setVisible(false,false);
+  assert.equal(panel.poseVisible,false);assert(!calls.slice(count).some(c=>c[0]==='pose'));
+});

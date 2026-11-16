@@ -198,3 +198,25 @@ removed entirely. Background diagnostics do not open devices or execute motion.
 Background: [Modern Robotics, Manipulability](https://modernrobotics.northwestern.edu/nu-gm-book-resource/5-4-manipulability/)
 explains singular-value ratios and the different units of linear/angular motion;
 the fixed model-length normalization above is this application's choice.
+
+## Shared FK viewport — November 16, 2026
+
+The Operations page reserves the lower half of its operator-panel content area
+for one shared FK view. Status, Control and Payload occupy an independently
+scrolling upper half. Tab changes preserve the viewer, orbit/zoom and measured
+conditioning; the FK element is never duplicated or recreated by a tab switch.
+
+Pose visibility is separate from Control input focus. Measured pose/leader
+observations continue to refresh on Status and Payload, while keyboard/gamepad
+input remains scoped to the visible Control tab. Leaving Operations suspends
+pose requests. Control rates, stream ownership and motor behavior are unchanged.
+
+Desktop layout follows the available viewport instead of forcing a 900-pixel
+workspace. Short desktop viewports use a compact page heading/metrics row.
+Narrow layouts stack the camera section above a bounded operator panel and keep
+the same equal split. FK status details have a hover tooltip when abbreviated.
+
+Validation: all 345 JavaScript regressions pass, including shared-pose updates
+with Control hidden and keyboard/gamepad focus isolation. Mock browser renders
+cover Status, Control, Payload and narrow layout; DOM measurements confirm equal
+halves, one live FK element and no desktop document overflow.

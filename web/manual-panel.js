@@ -21,7 +21,7 @@ export function conditioningPresentation(value, stale = false) {
       `${Number(metric.characteristic_length_m).toPrecision(4)} m. This is not a distance or safety percentage.` };
 }
 export class ManualPanel {
-  constructor({ element, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
+  constructor({ element, poseElement, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
     Object.assign(this, { element, client, onError, onNotice });
     this.arm = "";
     this.mode = "joint";
@@ -46,9 +46,12 @@ export class ManualPanel {
       <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
       <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Unlock, align the leader with the held follower, then follow. Freeze or Home pauses following.</p></div>
     </div>
-    <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p><div id="manual-fk"></div>`;
-    this.el = (id) => element.querySelector("#" + id);
-    this.fk = new FKView(this.el("manual-fk"));
+    <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p>`;
+    this.poseElement = poseElement || element.appendChild(document.createElement("section"));
+    this.poseElement.id = "manual-fk";
+    this.el = (id) => element.querySelector("#" + id) ||
+      (this.poseElement?.id === id ? this.poseElement : this.poseElement?.querySelector("#" + id));
+    this.fk = new FKView(this.poseElement);
     this.gamepad = new GamepadPanel({element:this.el('gamepad-panel'),manual:this,onCameraCycle,onCameraLayout,env:gamepadEnv});
     this.el("manual-mode").onchange = () =>
       this.safe(() => this.changeMode(this.el("manual-mode").value));
@@ -119,7 +122,7 @@ export class ManualPanel {
     this.timer = setInterval(() => this.tick(), 33);
     this.poseTimer = setInterval(() => this.refreshPose(), 50);
     this.hostTimer = setInterval(() => {
-      if (this.visible && this.mode === "leader")
+      if ((this.poseVisible ?? this.visible) && this.mode === "leader")
         this.safe(() => this.refreshHosts());
       if (this.leaderRun) this.safe(() => this.heartbeat());
     }, 500);
@@ -156,11 +159,12 @@ export class ManualPanel {
       this.client.currentOperation?.type === "DIRECT"
     );
   }
-  setVisible(value) {
+  setVisible(value, poseVisible = value) {
     this.visible = value;
+    this.poseVisible = poseVisible;
     this.gamepad?.setActive(value && this.mode === "gamepad");
     if (!value) this.clearKeys();
-    else {
+    if (poseVisible) {
       this.refreshPose();
       if (this.mode === "leader") this.safe(() => this.refreshHosts());
     }
@@ -848,7 +852,7 @@ export class ManualPanel {
     }
   }
   async refreshPose() {
-    if (!this.visible || !this.connected || !this.arm || this.poseLoading)
+    if (!(this.poseVisible ?? this.visible) || !this.connected || !this.arm || this.poseLoading)
       return;
     const measured = this.measured();
     if (!measured) { this.renderConditioning(null,true); return; }

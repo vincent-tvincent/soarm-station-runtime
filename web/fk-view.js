@@ -383,10 +383,12 @@ export class FKView {
     const issues = [...this.issues.states].map(
       ([name, v]) => `${name}: ${v.reason || v.state}`,
     );
-    this.element.querySelector(".fk-status").textContent = issues.length
+    const status = this.element.querySelector(".fk-status");
+    status.textContent = issues.length
       ? issues.join(" · ") + (this.stale ? " · awaiting fresh status" : "")
       : this.stale
         ? "Pose / health status is stale"
         : "Drag to orbit · scroll to zoom";
+    status.title = status.textContent;
   }
 }

@@ -18,13 +18,13 @@ test('missing, malformed or stale conditioning never looks singular',()=>{
   assert.equal(conditioningPresentation(full,true).detail,'Waiting for fresh pose');
 });
 
-test('FK display uses the current measured Jacobian and clears it when feedback is stale',async()=>{
+test('shared FK updates measured conditioning with Control hidden and clears it when stale',async()=>{
   const nodes=new Map();
   const el=id=>{if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',style:{setProperty(){}}});return nodes.get(id);};
   const pose={position_m:[.2,0,.1],elevation_rad:0,tool_roll_rad:0,gripper_percent:40,jacobian:full};
   const panel=Object.create(ManualPanel.prototype);
   let fresh=true;
-  Object.assign(panel,{visible:true,connected:true,arm:'arm1',mode:'ik',hosts:[],snapshot:{motor_status:{}},el,
+  Object.assign(panel,{visible:false,poseVisible:true,connected:true,arm:'arm1',mode:'ik',hosts:[],snapshot:{motor_status:{}},el,
     measured:()=>({positions:{joint:0},gripper:40}),stateForArm:()=>({feedback_valid:fresh}),
     element:{querySelector:()=>({textContent:''})},fk:{update(){}},
     client:{request:async()=>({measured:pose,target:{...pose,jacobian:{conditioning:{...full.conditioning,reciprocal_condition:0}}}})}});
