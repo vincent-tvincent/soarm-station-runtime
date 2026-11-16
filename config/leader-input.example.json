@@ -1,0 +1,21 @@
+{
+  "host_id": "operator-computer",
+  "label": "Operator computer",
+  "leaders": [
+    {
+      "id": "my-so101-leader",
+      "label": "SO-101 leader",
+      "match": {"serial": "REPLACE_WITH_LEADER_USB_SERIAL"},
+      "calibration": "calibration/leader.json",
+      "motor_model": "sts3215",
+      "joint_map": {
+        "shoulder_pan": "shoulder_pan",
+        "shoulder_lift": "shoulder_lift",
+        "elbow_flex": "elbow_flex",
+        "wrist_flex": "wrist_flex",
+        "wrist_roll": "wrist_roll"
+      },
+      "gripper_source": "gripper"
+    }
+  ]
+}

@@ -162,6 +162,15 @@ Paths below are relative to the gateway. `{arm_id}`, `{camera_id}`, `{host_id}` 
 
 These routes coordinate an installed native input-host process. They are not required for a generic LLM/CV client. See [leader setup and payloads](docs/leader-input.md).
 
+To reuse a calibrated leader, keep its files on the computer connected to its
+USB cable. Put the existing LeRobot calibration at
+`local/leader-input/calibration/leader.json`, then use
+`local/leader-input/input-host.json` to match its USB serial and reference that
+file. A ready-to-edit [input-host template](config/leader-input.example.json)
+and [copy, configure and connect guide](docs/leader-input.md#reuse-an-existing-leader-calibration)
+are included. Restart the input bridge after editing its profile; Station does
+not need a restart.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/input-hosts` | Live connected hosts and OS serial-device inventory. |

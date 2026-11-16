@@ -1,11 +1,133 @@
 # Native leader input hosts
 
-This bridge makes the Manual Leader host/device dropdown reflect actual OS serial
+This bridge makes the Control panel's Leader host/device dropdown reflect actual OS serial
 devices on a connected Mac or Linux input host. The browser does not discover or
 open USB on its own. An unconfigured serial adapter is visible but cannot be
 started; a configured candidate is checked against live motor calibration only
-after the operator presses **Start**. No leader was opened while implementing or
-testing this feature.
+after the operator presses **Start**. Existing LeRobot calibration files can be
+reused unchanged; an additional input-host profile associates a file with its
+physical USB device.
+
+## Reuse an existing leader calibration
+
+Use the input computer's existing compatible LeRobot environment with `aiohttp`
+and `pyserial` installed. YAML profiles additionally need PyYAML; the supplied
+template uses JSON. No ROS installation is needed on the input computer.
+
+Keep these files on the computer connected to the **leader's USB cable**. In a
+Mac-leader/Pi-follower setup, that means the Mac. The follower does not need to
+be reconnected, and no calibration file needs to be rewritten on either arm.
+
+Use this layout inside the runtime checkout on the input computer:
+
+```text
+local/leader-input/
+├── input-host.json          # Computer identity, device match and calibration path
+├── calibration/
+│   └── leader.json          # Copy of this leader's existing LeRobot calibration
+└── station-ca.pem          # Public Station certificate, for a private TLS setup
+```
+
+`local/` is ignored by Git. A calibration JSON and an input-host JSON are
+different files: pass **input-host.json** to `--config`, not the motor-calibration
+file itself. The calibration file contains the per-motor IDs, homing offsets
+and ranges; the input-host file says which device uses it.
+
+### 1. Copy the existing calibration
+
+From the runtime repository root on the input computer:
+
+```bash
+mkdir -p local/leader-input/calibration
+cp -n /path/to/your/existing/leader-calibration.json \
+  local/leader-input/calibration/leader.json
+cp -n config/leader-input.example.json local/leader-input/input-host.json
+```
+
+These commands preserve existing destination files. If an input-host profile
+already exists, add or update its relevant leader entry rather than replacing
+the whole file. Give each additional leader a distinct calibration filename.
+
+Use the calibration file saved for that physical leader. LeRobot normally
+stores it under its calibration directory in
+`teleoperators/<teleoperator-name>/<id>.json`; a custom `calibration_dir` or
+`HF_LEROBOT_CALIBRATION` changes the location. Use the path printed by the
+calibration command or the working configuration you already use. Copying this
+file does not run calibration or write motor registers.
+
+### 2. Match the USB device
+
+Use the same compatible Python environment that you use for LeRobot:
+
+```bash
+export SOARM_STATION_INPUT_PYTHON=/path/to/your/lerobot-venv/bin/python
+scripts/run-leader-input --list
+```
+
+This lists OS device metadata without opening a motor port. In
+`local/leader-input/input-host.json`, replace
+`REPLACE_WITH_LEADER_USB_SERIAL` with the device's actual `serial` value.
+If the adapter has no unique serial number, use an explicit `match.port`
+instead. The profile's `id` is a logical name; it is not the USB serial number.
+Set `host_id` uniquely for each input computer, and use `label` fields for the
+names shown in the dashboard.
+
+The supplied template already refers to `"calibration": "calibration/leader.json"`.
+That path is relative to **input-host.json**, so it resolves to the file in the
+layout above. Absolute paths are also accepted. The SO-101 template maps the
+five body joints directly and keeps the gripper separate; adjust `joint_map`
+only when the selected follower uses different joint names.
+
+Check the complete local configuration:
+
+```bash
+scripts/run-leader-input --config local/leader-input/input-host.json --list
+```
+
+The intended device should report `configured: true`. This checks discovery,
+file structure and mapping; it does not yet verify calibration against the
+physical motors or begin following. No matching profile, an ambiguous match,
+missing file or invalid calibration is reported in the device's `reason` field.
+
+### 3. Connect the input host to Station
+
+For a Station installation using its generated private certificate, copy its
+**public certificate** to the input computer once:
+
+```bash
+scp user@station-host:/path/to/soarm-station-runtime/local/tls/cert.pem \
+  local/leader-input/station-ca.pem
+```
+
+Then launch the bridge with your Station URL:
+
+```bash
+scripts/run-leader-input \
+  --config local/leader-input/input-host.json \
+  --url https://your-station-host:8443 \
+  --ca local/leader-input/station-ca.pem
+```
+
+Use the hostname covered by the certificate. If Station uses a certificate
+already trusted by the input computer, `--ca` can be omitted. Trusted Tailscale
+peers use Station's existing access policy; no private key needs to be copied.
+
+**If the bridge was already running, stop that bridge and restart it with the
+updated profile.** Its configuration is loaded at startup; dashboard Refresh
+does not reload the local JSON. Station itself does not need a restart.
+
+### 4. Select it in the dashboard
+
+Open **Control → Leader arm**, press **Refresh**, select the input computer,
+then select the configured leader. The native bridge must remain running while
+using it. Press **Start** only when you intend to begin the leader-control
+workflow: live calibration is checked and fresh samples enter the existing
+pickup/following path. **Stop / Esc** ends following.
+
+If Start reports a calibration mismatch, select the existing file that belongs
+to the attached motors. The bridge does not automatically overwrite motor
+calibration. This guide configures an existing calibration; it does not replace
+LeRobot's calibration procedure when a device actually needs one.
 
 ## Data path and ownership
 
@@ -28,55 +150,17 @@ configured CA/system trust store. A legacy `SOARM_STATION_TOKEN`, if explicitly
 present, is sent in the Authorization header, never a URL. No token is generated
 or demanded by the input-host bridge.
 
-## Host installation and launch
-
-Use the input host's compatible LeRobot environment with `aiohttp`, `pyserial`,
-and PyYAML when using YAML configuration. The robot bus reader supports the
-selected LeRobot 0.7 `SerialMotorsBus` API and the historical 0.6
-`FeetechMotorsBus` API through a version-specific import fallback. Hardware
-compatibility still needs a supervised check; passing mocked tests is not that
-check. No ROS installation is needed on the input host.
+## Profile and launcher reference
 
 The launcher uses `SOARM_STATION_INPUT_PYTHON` when set, then this checkout's
-`.venv/bin/python`, then `python3`. Run from a checkout containing these files:
+`.venv/bin/python`, then `python3`. The reader supports the selected LeRobot 0.7
+`SerialMotorsBus` API and historical 0.6 `FeetechMotorsBus` API through a
+version-specific import fallback. Compatibility with a particular device still
+needs verification; mocked tests do not establish physical following.
 
-```bash
-# Enumerate only: no device opening, calibration or network connection.
-SOARM_STATION_INPUT_PYTHON=/path/to/compatible/venv/bin/python \
-  scripts/run-leader-input --config /path/to/input-host.json --list
-
-# Advertise to the existing gateway. This does not start sampling or arm anything.
-SOARM_STATION_INPUT_PYTHON=/path/to/compatible/venv/bin/python \
-  scripts/run-leader-input --config /path/to/input-host.json \
-  --url https://your-gateway-tailnet-name:8443 --ca /path/to/gateway-ca.pem
-```
-
-Without `--config`, the bridge advertises actual serial devices as unconfigured.
-Do not substitute a guessed port or calibration. Create an explicit local
-profile after identifying the leader; the following is a **schema example with
-placeholders**, not a fabricated discovered device:
-
-```json
-{
-  "host_id": "operator-mac",
-  "label": "Operator Mac",
-  "leaders": [{
-    "id": "leader-profile",
-    "label": "Calibrated leader",
-    "match": {"serial": "ACTUAL_USB_SERIAL"},
-    "calibration": "/actual/path/to/leader-calibration.json",
-    "motor_model": "sts3215",
-    "joint_map": {
-      "shoulder_pan": "shoulder_pan",
-      "shoulder_lift": "shoulder_lift",
-      "elbow_flex": "elbow_flex",
-      "wrist_flex": "wrist_flex",
-      "wrist_roll": "wrist_roll"
-    },
-    "gripper_source": "gripper"
-  }]
-}
-```
+Without `--config`, the bridge advertises actual OS serial devices as
+unconfigured. The complete SO-101 profile structure is in
+[config/leader-input.example.json](../config/leader-input.example.json).
 
 Match fields are exact `serial`, `port`, `vid` and `pid`. Multiple matching
 profiles are an error. Stable serial matching is preferable when unique;
