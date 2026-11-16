@@ -220,3 +220,9 @@ Validation: all 345 JavaScript regressions pass, including shared-pose updates
 with Control hidden and keyboard/gamepad focus isolation. Mock browser renders
 cover Status, Control, Payload and narrow layout; DOM measurements confirm equal
 halves, one live FK element and no desktop document overflow.
+
+Control action buttons are pinned beneath the scrolling input area: **Start,
+Stop, Home and Fold** remain visible while joint, IK, leader or gamepad inputs
+scroll. The action row is shown only for the Control tab. Browser layout checks
+at 1280×720, 2560×1440 and 3840×2160 confirmed that all four buttons remain above
+the shared FK view and outside the input scroll container.

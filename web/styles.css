@@ -2125,6 +2125,19 @@ kbd {
   scrollbar-width:thin;
 }
 .operator-controls .manual-control-area { min-height:0; }
+.operator-control-actions {
+  flex-shrink:0;
+  padding-top:8px;
+  border-top:1px solid var(--line);
+  background:var(--paper,#fff);
+}
+.operator-control-actions .manual-actions { margin-top:0; }
+.operator-control-actions #manual-note {
+  min-height:0;
+  max-height:2.6em;
+  overflow:auto;
+  margin:6px 0 0;
+}
 #manual-fk.operator-pose {
   display:grid;
   grid-template-columns:minmax(0,1fr) minmax(0,1fr);

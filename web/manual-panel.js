@@ -21,7 +21,7 @@ export function conditioningPresentation(value, stale = false) {
       `${Number(metric.characteristic_length_m).toPrecision(4)} m. This is not a distance or safety percentage.` };
 }
 export class ManualPanel {
-  constructor({ element, poseElement, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
+  constructor({ element, poseElement, actionElement, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
     Object.assign(this, { element, client, onError, onNotice });
     this.arm = "";
     this.mode = "joint";
@@ -49,7 +49,10 @@ export class ManualPanel {
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p>`;
     this.poseElement = poseElement || element.appendChild(document.createElement("section"));
     this.poseElement.id = "manual-fk";
+    this.actionElement = actionElement;
+    if (actionElement) actionElement.append(element.querySelector('.manual-actions'), element.querySelector('#manual-note'));
     this.el = (id) => element.querySelector("#" + id) ||
+      this.actionElement?.querySelector("#" + id) ||
       (this.poseElement?.id === id ? this.poseElement : this.poseElement?.querySelector("#" + id));
     this.fk = new FKView(this.poseElement);
     this.gamepad = new GamepadPanel({element:this.el('gamepad-panel'),manual:this,onCameraCycle,onCameraLayout,env:gamepadEnv});

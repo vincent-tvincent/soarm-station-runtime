@@ -233,6 +233,7 @@ for (const tab of document.querySelectorAll("[data-tab]"))
     });
     for (const n of ["status", "manual", "payload"])
       $("panel-" + n).hidden = n !== activeTab;
+    $("operator-control-actions").hidden = activeTab !== "manual";
     manual?.setVisible(
       activeTab === "manual" && $("app").dataset.view === "operations",
       $("app").dataset.view === "operations",
@@ -1664,6 +1665,7 @@ graph = new GraphExplorer({
 manual = new ManualPanel({
   element: $("panel-manual"),
   poseElement: $("manual-fk"),
+  actionElement: $("operator-control-actions"),
   client,
   onError: showError,
   onNotice: notice,
