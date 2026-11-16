@@ -1,43 +1,125 @@
 {
-  "source_revision": "3a1b1df",
-  "recorded_at": "2026-11-16T13:53:46.201Z",
+  "source_revision": "d66ed2f",
+  "recorded_at": "2026-11-16T15:04:56.222Z",
   "viewport": {
-    "width": 1600,
-    "height": 900
+    "width": 3840,
+    "height": 2160
   },
   "aspect_ratio": "16:9",
   "source": "Live camera feeds and telemetry from the connected SO-101 station",
   "overlays": "Pointer only",
+  "source_format": "Native 4K browser JPEG frames, quality 90",
+  "native_capture": true,
+  "output_resolution": {
+    "width": 3840,
+    "height": 2160
+  },
+  "panel_checks": [
+    {
+      "label": "status",
+      "viewport": [
+        3840,
+        2160
+      ],
+      "pageHeight": 2160,
+      "bodyHeight": 821,
+      "bodyContent": 821,
+      "operator": true,
+      "fk": true,
+      "camera": true,
+      "controlMode": "joint",
+      "controllerState": "Waiting for a controller"
+    },
+    {
+      "label": "keyboard-ik",
+      "viewport": [
+        3840,
+        2160
+      ],
+      "pageHeight": 2160,
+      "bodyHeight": 756,
+      "bodyContent": 756,
+      "operator": true,
+      "fk": true,
+      "camera": true,
+      "controlMode": "ik",
+      "controllerState": "Waiting for a controller"
+    },
+    {
+      "label": "gamepad",
+      "viewport": [
+        3840,
+        2160
+      ],
+      "pageHeight": 2160,
+      "bodyHeight": 756,
+      "bodyContent": 756,
+      "operator": true,
+      "fk": true,
+      "camera": true,
+      "controlMode": "gamepad",
+      "controllerState": "Waiting for a controller"
+    },
+    {
+      "label": "payload",
+      "viewport": [
+        3840,
+        2160
+      ],
+      "pageHeight": 2160,
+      "bodyHeight": 821,
+      "bodyContent": 821,
+      "operator": true,
+      "fk": true,
+      "camera": true,
+      "controlMode": "gamepad",
+      "controllerState": "Waiting for a controller"
+    },
+    {
+      "label": "ros-graph",
+      "pageHeight": 2160,
+      "viewportHeight": 2160,
+      "listBottom": 2148,
+      "inspectorBottom": 2148
+    }
+  ],
   "page_errors": [],
   "blocked_requests": [],
-  "timing": "Original screenshot timing preserved to GIF centisecond precision",
+  "resizing": "None; captured and encoded at native 3840x2160",
+  "timing": "Real-time playback; frame rate optimized per clip without spatial resizing",
   "clips": [
     {
-      "file": "01-live-cameras.gif",
-      "width": 1280,
-      "height": 720,
-      "frames": 105,
-      "duration_s": 13.04,
-      "bytes": 5599849,
-      "sha256": "16c14625b2b660a9496c07f6bbc85515b8cc47d8e1863f2878aaf6cfef1e10d0"
+      "file": "01-live-cameras-4k.gif",
+      "width": 3840,
+      "height": 2160,
+      "frames": 53,
+      "output_fps": 4,
+      "palette_colors": 96,
+      "duration_s": 13.25,
+      "bytes": 31463375,
+      "sha256": "ea92ce0fd7640f04918db7a09c9d11ae68b98144b5136939762f63f86cb9f9d0"
     },
     {
-      "file": "02-control-and-fk.gif",
-      "width": 1280,
-      "height": 720,
-      "frames": 105,
-      "duration_s": 13.04,
-      "bytes": 4502345,
-      "sha256": "b0fcae6aa48f83b90c1afae7b8cf56c44378f54774b3e38a8da01e64255a4fca"
+      "file": "02-control-and-fk-4k.gif",
+      "width": 3840,
+      "height": 2160,
+      "frames": 57,
+      "output_fps": 4,
+      "palette_colors": 96,
+      "duration_s": 14.25,
+      "bytes": 31040818,
+      "sha256": "8ae79a5caef3eb2354cfff56ea13599a4d7eda11999dbb812ea77884adf1df49"
     },
     {
-      "file": "03-ros-data-flow.gif",
-      "width": 1280,
-      "height": 720,
-      "frames": 97,
-      "duration_s": 12.04,
-      "bytes": 487460,
-      "sha256": "50d2d6dbe11a9ec025d78f71394b5bdbe3a3aaa57230e647adb67fc37a4cd770"
+      "file": "03-ros-data-flow-4k.gif",
+      "width": 3840,
+      "height": 2160,
+      "frames": 74,
+      "output_fps": 6,
+      "palette_colors": 256,
+      "duration_s": 12.34,
+      "bytes": 1506538,
+      "sha256": "7db4ee6f9a0873b0e9d8133429704589fc4cfcb6b8a37571419ec04d06d67324"
     }
   ]
 }

@@ -5,19 +5,26 @@ SO-Arm Station is a ROS 2 application for operating configurable sets of cameras
 ## Live demos
 
 Recorded from a running SO-101 station with live camera feeds and ROS telemetry.
-All demos use a **16:9 desktop layout**.
+New recordings captured and encoded at **native 4K (3840×2160), 16:9**.
+Open an original below to view all panels at full resolution.
 
 **Live cameras — Equal, Primary and Floating layouts**
 
-![Three live camera feeds, switching layouts and promoting the primary view](docs/demos/01-live-cameras.gif)
+![Three live camera feeds, switching layouts and promoting the primary view](docs/demos/01-live-cameras-4k.gif)
 
-**Status, Control and Payload — one persistent 3D FK view**
+[Open 4K original](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/01-live-cameras-4k.gif)
 
-![Switching operator tabs while the live arm pose stays visible, with interactive FK orbit](docs/demos/02-control-and-fk.gif)
+**Control modes — keyboard IK, Gamepad, and persistent 3D FK**
+
+![Switching from keyboard IK to Gamepad with Start, Stop, Home and Fold visible, plus interactive FK](docs/demos/02-control-and-fk-4k.gif)
+
+[Open 4K original](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/02-control-and-fk-4k.gif)
 
 **ROS graph — focused connections and live message counts**
 
-![Live ROS publisher and subscriber connections with measured traffic animation](docs/demos/03-ros-data-flow.gif)
+![Live ROS publisher and subscriber connections with measured traffic animation](docs/demos/03-ros-data-flow-4k.gif)
+
+[Open 4K original](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/03-ros-data-flow-4k.gif)
 
 The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SO-Arm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
 
@@ -178,6 +185,7 @@ Paths below are relative to the gateway. `{arm_id}`, `{camera_id}`, `{host_id}` 
 | POST | `/api/stream` | Forward a current-window `COMMAND`, `HEARTBEAT` or `END` frame for an admitted HTTP stream. |
 | WSS | `/ws/control` | **DIRECT + STREAM only**: opening goal, grant/state feedback and named joint targets. `input_semantics` selects persistent manual intent or the default live samples; see [stream semantics](docs/web-api.md#direct-control-websocket). |
 | POST | `/api/hold` | `{arm_id}`; arm-wide hold, ends the current operation and revokes permission while retaining support torque. |
+| POST | `/api/torque` | Set motor torque with `arm_id`, current `controller_session`, and boolean `enabled`; returns confirmed measured state. |
 | POST | `/api/workflows` | `{arm_id, operator_session_id, definition_id}`; run an already configured workflow definition. Does not upload arbitrary task code. |
 | GET | `/api/manual/{arm_id}/describe` | Kinematic capability, frames, key map, speed levels and available named poses. |
 | POST | `/api/manual/{arm_id}/fk` | Calculate geometry from `{positions, gripper}`; optional target overlay. No actuation. |
