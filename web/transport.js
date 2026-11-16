@@ -234,6 +234,7 @@ export class StationClient {
         cache: "no-store",
         redirect: "error",
         credentials: "same-origin",
+        keepalive: path === '/api/hold',
       });
       if (!response.ok) {
         const raw = await response.text();

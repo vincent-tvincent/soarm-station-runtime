@@ -176,7 +176,7 @@ not need a restart.
 | GET | `/api/input-hosts` | Live connected hosts and OS serial-device inventory. |
 | WSS | `/ws/input-host` | Native host registration, inventory/status and start/stop coordination. |
 | POST | `/api/input-hosts/{host_id}/start` | Start the selected configured leader for an explicitly permitted arm. |
-| POST | `/api/input-hosts/{host_id}/heartbeat` | Renew the matching active leader run's browser lease. |
+| POST | `/api/input-hosts/{host_id}/heartbeat` | Check the matching leader run's status; browser polling does not expire control. |
 | POST | `/api/input-hosts/{host_id}/settings` | Update matching run settings such as `follow_gripper`. |
 | POST | `/api/input-hosts/{host_id}/stop` | Stop the identified leader run. |
 

@@ -47,11 +47,14 @@ def test_old_session_and_sequence_rejected(arm):
     arm._hold('cancel')
     with pytest.raises(ValueError,match='No active'):arm.input(command(arm,g,target(arm),2))
     assert not arm.permission
-def test_pickup_and_gripper_clutch(arm):
+def test_first_direct_target_converges_from_existing_reference_without_pose_alignment(arm):
     g=grant(arm)
-    with pytest.raises(ValueError,match='pickup'):arm.input(command(arm,g,target(arm,.3)))
-    t=target(arm);t['gripper']=99
-    with pytest.raises(ValueError,match='Gripper pickup'):arm.input(command(arm,g,t))
+    t=target(arm,.8);t['gripper']=99
+    arm.input(command(arm,g,t));arm._tick(now(),.01)
+    assert arm.op is not None and arm.last_sequence==1
+    for j in arm.config['joints']:
+        assert 0<arm.backend.q[j['name']]<=j['velocity_rad_s']*.01+1e-9
+    assert arm.backend.gripper==pytest.approx(51.)
 def test_nan_and_unknown_units(arm):
     for v in (float('nan'),float('inf'),100):
         t=target(arm);t['positions'][next(iter(arm.q))]=v

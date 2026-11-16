@@ -25,8 +25,8 @@ def native_start_state(snapshot,resources,elapsed_ms=0.):
 
 
 class LeaderHostRegistry:
-    def __init__(self, state_provider, hold_callback, lease_s=2.5,start_state_provider=None):
-        self.state_provider, self.hold_callback, self.lease_s = state_provider, hold_callback, lease_s
+    def __init__(self, state_provider, hold_callback, lease_s=None,start_state_provider=None):
+        self.state_provider, self.hold_callback = state_provider, hold_callback
         self.start_state_provider=start_state_provider
         self.hosts={};self.closed=False;self.watch_task=None
 
@@ -43,7 +43,8 @@ class LeaderHostRegistry:
                 'sample_age_ms':host.get('sample_age_ms'),
                 'report_age_ms':None if not host.get('last_sample_report') else (now-host['last_sample_report'])*1000,
                 'measured_hz':host.get('measured_hz'),'last_seen_age_ms':(now-host['last_seen'])*1000})
-        return {'schema_version':1,'hosts':result,'browser_lease_ms':int(self.lease_s*1000),
+        return {'schema_version':1,'hosts':result,'browser_lease_ms':None,
+                'lifetime':'explicit_stop_or_input_source_disconnect',
                 'discovery':'connected native input hosts; OS inventory only, no serial probing'}
 
     @staticmethod
@@ -153,6 +154,7 @@ class LeaderHostRegistry:
         if not resource:raise ValueError('Follower resource metadata unavailable')
         joints=[j['name'] for j in resource['joints']]
         if set(joints)!=set(device.get('joint_names') or []):raise ValueError('Configured leader mapping does not match follower joints')
+        limits={j['name']:{'min_rad':j['min_rad'],'max_rad':j['max_rad']} for j in resource['joints']}
         hz=body.get('hz',100)
         if type(hz) not in (int,float) or not 50<=hz<=100:raise ValueError('Leader input rate must be 50..100 Hz')
         follow=body.get('follow_gripper',True)
@@ -169,11 +171,11 @@ class LeaderHostRegistry:
                 'last_browser':time.monotonic()}
         host.update(active=active,state='STARTING',reason='Opening selected leader and checking calibration',latest_pose=None,last_sample_report=None)
         try:
-            await host['ws'].send_json({'type':'start',**{k:v for k,v in active.items() if k!='last_browser'},'joint_names':joints})
+            await host['ws'].send_json({'type':'start',**{k:v for k,v in active.items() if k!='last_browser'},'joint_names':joints,'joint_limits':limits})
         except Exception:
             host['active']=None;host['state']='OFFLINE';raise
         return web.json_response({'accepted':True,'run_id':run_id,'state':'STARTING','reason':host['reason'],
-                                  'follow_gripper':follow,'heartbeat_interval_ms':500,'browser_lease_ms':int(self.lease_s*1000)})
+                                  'follow_gripper':follow,'heartbeat_interval_ms':500,'browser_lease_ms':None})
 
     async def settings_route(self,request):
         from aiohttp import web
@@ -200,11 +202,13 @@ class LeaderHostRegistry:
         from aiohttp import web
         body=await self._body(request);host=self.hosts.get(request.match_info['host_id']);active=host.get('active') if host else None
         if not active or active['run_id']!=body.get('run_id') or active['operator_session_id']!=body.get('operator_session_id'):
-            raise ValueError('Leader heartbeat does not match the active run')
-        if host['state'] in ('STOPPING','OFFLINE','ERROR'):raise ValueError('Leader session is not renewable')
-        if time.monotonic()-active['last_browser']>self.lease_s:raise ValueError('Leader browser lease expired')
+            return web.json_response({'accepted':False,'run_id':body.get('run_id'),'code':'RUN_ENDED',
+                'state':'STOPPED','reason':host.get('reason') if host and not active else 'Leader run is no longer active for this view'})
+        if host['state'] in ('STOPPING','OFFLINE','ERROR'):
+            return web.json_response({'accepted':False,'run_id':active['run_id'],'code':'RUN_ENDED',
+                'state':host['state'],'reason':host.get('reason') or 'Leader run ended'})
         active['last_browser']=time.monotonic()
-        return web.json_response({'accepted':True,'run_id':active['run_id']})
+        return web.json_response({'accepted':True,'run_id':active['run_id'],'state':host['state'],'reason':host.get('reason','')})
 
     async def stop_route(self,request):
         from aiohttp import web
@@ -264,14 +268,6 @@ class LeaderHostRegistry:
             await ws.close()
         return ws
 
-    async def _watch(self):
-        while not self.closed:
-            for host in list(self.hosts.values()):
-                active=host.get('active')
-                if active and host['state']!='STOPPING' and time.monotonic()-active['last_browser']>self.lease_s:
-                    asyncio.create_task(self.stop_host(host,active['run_id'],active['operator_session_id'],'BROWSER_LEASE_EXPIRED'))
-            await asyncio.sleep(.25)
-
     async def close(self):
         self.closed=True
         if self.watch_task:self.watch_task.cancel()
@@ -290,6 +286,5 @@ class LeaderHostRegistry:
             web.post('/api/input-hosts/{host_id}/settings',self.settings_route),
             web.post('/api/input-hosts/{host_id}/stop',self.stop_route),
             web.get('/ws/input-host',self.register_route)])
-        async def startup(app):self.watch_task=asyncio.create_task(self._watch())
         async def shutdown(app):await self.close()
-        app.on_startup.append(startup);app.on_shutdown.append(shutdown)
+        app.on_shutdown.append(shutdown)

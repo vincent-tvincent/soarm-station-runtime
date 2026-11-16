@@ -131,7 +131,7 @@ operation = {
 }
 ```
 
-Here `measured_positions`/`planned_positions` are complete dictionaries of discovered body-joint names to radians, and gripper values are explicit percentages. DIRECT INLINE builds a checked timed path from the admitted reference and allows at most 16 steps. `time_s` is cumulative from operation start, positive and strictly increasing; the gateway derives each step duration. Specify the gripper even when unchanged—omitting it is not a documented preserve command. The aligned pickup requirement described below applies to DIRECT STREAM.
+Here `measured_positions`/`planned_positions` are complete dictionaries of discovered body-joint names to radians, and gripper values are explicit percentages. DIRECT INLINE builds a checked timed path from the admitted reference and allows at most 16 steps. `time_s` is cumulative from operation start, positive and strictly increasing; the gateway derives each step duration. Specify the gripper even when unchanged—omitting it is not a documented preserve command. DIRECT STREAM also starts from the existing measured/held reference and uses the normal speed limits; its first target need not be pose-aligned.
 
 For continuous input use `DIRECT` + `STREAM` with `/ws/control`, described below. This is also the entry point for an LLM agent that already generates joint targets.
 
@@ -202,7 +202,7 @@ The opening message also accepts `input_semantics`:
 
 This choice applies to DIRECT WebSocket operations only. An explicitly requested
 operation duration still applies. Both modes retain permission checks, current
-command windows, aligned pickup, rejection of old/out-of-order frames, and
+command windows, current-reference startup, rejection of old/out-of-order frames, and
 operation-scoped cancellation on socket closure. A connection restart never
 resumes a previous operation.
 
@@ -238,11 +238,11 @@ After `stream_ready`, generate fresh targets using the current grant. A command 
 }
 ```
 
-Replace the illustrative one-joint dictionary with the entire discovered body-joint set. Copy `operation_epoch` and all identities from actual feedback; example values are not defaults. Begin with an aligned pickup target. Increase `sequence` for every transmitted frame, not just target changes. Track `last_accepted_input_id` and `last_applied_input_id`; source validity and actual dispatch are distinct.
+Replace the illustrative one-joint dictionary with the entire discovered body-joint set. Copy `operation_epoch` and all identities from actual feedback; example values are not defaults. The first complete target may differ from the current pose; the controller converges under its existing speed and lead limits. Increase `sequence` for every transmitted frame, not just target changes. Track `last_accepted_input_id` and `last_applied_input_id`; source validity and actual dispatch are distinct.
 
 The host supplies approximately 250-ms windows. Track their usable lifetime against your own local elapsed time, accounting for response delay; never compare monotonic clocks between hosts or re-stamp a cached sensor sample as fresh. The current native operator requests 50–120 Hz input, while the device dispatch loop remains approximately 100 Hz. Keep latest targets rather than queuing stale poses across latency/reconnect.
 
-`HEARTBEAT` and `END` frames carry the same current identities/window/sequence with `payload_kind: "NONE"` and no command body. For `live_sample`, heartbeats maintain source liveness but do not extend a stale target's lifetime. For `persistent_target`, target intent does not need periodic renewal. END or control-socket loss ends that operation and revokes its permission. Reconnection requires an explicit new operation and fresh pickup; it never resumes old commands.
+`HEARTBEAT` and `END` frames carry the same current identities/window/sequence with `payload_kind: "NONE"` and no command body. For `live_sample`, heartbeats maintain source liveness but do not extend a stale target's lifetime. For `persistent_target`, target intent does not need periodic renewal. END or control-socket loss ends that operation and revokes its permission. Reconnection requires an explicit new operation from the current reference; it never resumes old commands.
 
 ### MODEL and TRAJECTORY over HTTP STREAM
 
@@ -274,7 +274,7 @@ await client.connect(); // Optional token argument for bearer-only access.
 // await client.hold("arm1");
 ```
 
-`startManual` seeds pickup from measured state. Its returned promise means the transport opened, not that every target is already admitted; use operation events. This module is the dashboard client, not a separately versioned npm SDK. Native Python leader/JSON clients can inspect `python/soarm_station/operator.py`; that legacy CLI still requires `--ca` and `SOARM_STATION_TOKEN` in its environment even on trusted networks. The newer native leader-host integration supports tokenless trusted access and is documented in [leader-input.md](leader-input.md).
+`startManual` seeds its initial target from measured state. Its returned promise means the transport opened, not that every target is already admitted; use operation events. This module is the dashboard client, not a separately versioned npm SDK. Native Python leader/JSON clients can inspect `python/soarm_station/operator.py`; that legacy CLI still requires `--ca` and `SOARM_STATION_TOKEN` in its environment even on trusted networks. The newer native leader-host integration supports tokenless trusted access and is documented in [leader-input.md](leader-input.md).
 
 ## Cameras, graph and errors
 

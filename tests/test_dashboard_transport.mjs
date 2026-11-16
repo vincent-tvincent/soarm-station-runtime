@@ -270,6 +270,14 @@ const direct = () => ({
 });
 const model = () => ({ model_steps: [{ instruction: "", duration_s: 2 }] });
 
+test('disconnect sends its final hold with fetch keepalive for page exit',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  await f.client.disconnect();
+  const hold=f.calls.find(call=>call.path==='/api/hold');
+  assert.equal(hold.keepalive,true);
+  assert(!f.calls.filter(call=>call.path==='/api/status').some(call=>call.keepalive));
+});
+
 test("authentication is explicit, relative-only, never stored in URLs or serialized client state", async () => {
   const f = fixture();
   await f.client.connect(TOKEN);

@@ -122,7 +122,8 @@ Open **Control → Leader arm**, press **Refresh**, select the input computer,
 then select the configured leader. The native bridge must remain running while
 using it. Press **Start** only when you intend to begin the leader-control
 workflow: live calibration is checked and fresh samples enter the existing
-pickup/following path. **Stop / Esc** ends following.
+smooth following path from the follower's current measured/held reference. The
+leader does not need to match the follower pose before starting. **Stop / Esc** ends following.
 
 If Start reports a calibration mismatch, select the existing file that belongs
 to the attached motors. The bridge does not automatically overwrite motor
@@ -141,8 +142,9 @@ inventory/status and receives explicit start/stop messages. Selected leader inpu
 uses the existing `/ws/control` contract and original Pi-issued windows; each
 sample is read after a window arrives. The bridge never calls permission-enable,
 never calibrates/configures motors, never opens follower/camera devices, and
-never resumes a stopped operation after reconnect. Follower pickup, gripper
-clutch, bounds and expiry remain authoritative in the production runtime.
+never resumes a stopped operation after reconnect. Follower joint bounds, velocity limits and actual input-source freshness remain
+authoritative in the production runtime. Leader targets are clipped to those
+existing bounds so an out-of-range axis does not reject the entire stream.
 
 The gateway's existing trusted-loopback/Tailscale access middleware applies.
 Trusted peers do not need a new login token. TLS is still verified using the
@@ -217,7 +219,7 @@ no additional listener or ROS node is created.
 | --- | --- |
 | GET `/api/input-hosts` | `hosts[]` has `id,label,platform,connected,state,reason,devices[],active,latest_pose,sample_age_ms,report_age_ms,measured_hz`. No placeholder host/device is added. |
 | POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100); optional boolean `follow_gripper` (default true) and `gripper_reference` in percent. Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,follow_gripper,heartbeat_interval_ms,browser_lease_ms`. |
-| POST `/api/input-hosts/{id}/heartbeat` | `run_id,operator_session_id`, about every 500 ms while STARTING/READY/PICKUP/RUNNING. An expired lease cannot be revived. |
+| POST `/api/input-hosts/{id}/heartbeat` | `run_id,operator_session_id`, Status check for this run; it does not renew or expire control. A late request returns `accepted:false, code:RUN_ENDED` and the real terminal reason without affecting another run. |
 | POST `/api/input-hosts/{id}/settings` | Matching `run_id,operator_session_id,follow_gripper` boolean. Forwards a same-run setting change; does not enable permission or renew liveness. |
 | POST `/api/input-hosts/{id}/stop` | Same matching run/session fields. Returns `stopped,hold_confirmed,state,reason`; wrong or absent ownership never issues a global hold. |
 | WS `/ws/input-host` | Native bridge hello/inventory/state/stopped; gateway start/stop/refresh. This is not a browser USB API. |
@@ -229,12 +231,23 @@ identity/calibration has already been verified. Runtime states distinguish
 STARTING, READY, PICKUP, RUNNING, STOPPING, ERROR and OFFLINE. Pose/rate fields are
 observed bridge reports, not fictional defaults; null means no sample.
 
-The browser must heartbeat during startup as well as active input. Its 2.5-second
-lease prevents an unattended gateway timer from keeping a closed control page
-alive. Source/client loss causes a scoped stop/hold; reconnect only advertises
-again. The **Home** shortcut first stops the matching leader run and waits for
-both `stopped` and `hold_confirmed`; only then may the UI enable a new manual/Home
-operation. Never implement Home by jumping the leader coordinate offset.
+The native input stream owns the run lifetime. There is no browser-heartbeat
+expiry; `browser_lease_ms` is null. A delayed UI poll does not stop a healthy
+leader stream. Use **Stop / Esc**, disable control or disconnect the input host
+to end following. Dashboard disconnect/page exit sends a Hold request using
+fetch keepalive; it is a request, not an independently guaranteed crash detector.
+If the browser disappears without delivering that request, the native stream
+can continue while fresh leader input arrives. Source/control-socket loss still
+stops the operation, and reconnect only advertises again.
+
+The **Home** shortcut stops the matching leader run and waits for `stopped`
+and `hold_confirmed` before starting the Home operation. Initial leader and
+follower poses need not align: the native reference starts from the existing
+measured/held pose and converges under the existing joint/gripper speed limits.
+A delayed sample that misses its Pi-issued window is discarded and freshly read
+rather than causing an extra 50-ms bridge abort. Native feedback/source-loss
+handling remains in the controller. Result messages preserve the native terminal
+reason so a late UI status request does not mask it with a heartbeat mismatch.
 
 The **Gripper follow** toggle (UI shortcut **O**) changes only the jaw command
 source. Disabled follow retains the last successfully sent jaw reference while
@@ -242,7 +255,7 @@ body poses continue from fresh leader samples. Before the first sent command,
 use a valid supplied `gripper_reference`, otherwise the current follower
 `gripper_percent` from control feedback. Missing feedback never becomes a
 fabricated 50% or 0% target. Enabling follow resumes fresh calibrated leader jaw
-samples through the existing runtime pickup/clutch and motion bounds. It does
+samples through the existing runtime motion bounds and velocity limits. It does
 not reset the operation or change coordinates. `hosts[].active.follow_gripper`
 is the desired setting; `active.gripper_reference` reports the most recent
 observed sent jaw target. `latest_pose` remains the real leader pose, even when
@@ -252,7 +265,7 @@ its jaw is not being followed.
 
 Tests inject OS inventory, calibration files, fake motor buses, mocked WebSockets
 and fake samplers. They open no serial hardware and perform no physical motion.
-Check real serial identity, existing leader calibration, source latency, pickup,
+Check real serial identity, existing leader calibration, source latency, initial convergence,
 stop/disconnect and rate behavior in a separately authorized hardware session.
 Inventory availability, sampling, follower admission and physical following are
 distinct milestones.

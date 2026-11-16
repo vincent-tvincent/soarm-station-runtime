@@ -252,7 +252,7 @@ class ArmController:
             self.tracking_wait={};self.tracking_anchor={};self.tracking_outside_since=None
             t=now()
             self.op={**copy.deepcopy(request),'operation_id':uid(),'operation_epoch':self.epoch,'instruction':instruction,
-                     'start':t,'deadline':None if duration is None else t+duration,'last_live':t,'last_direct':0.,'picked_up':False,
+                     'start':t,'deadline':None if duration is None else t+duration,'last_live':t,'last_direct':0.,
                      'persistent_target':persistent,
                      'requires_liveness':(mode=='STREAM' and not persistent) or request.get('require_liveness',False),
                      'requires_gripper_settle':any('gripper' in point for point in request.get('points',[]))}
@@ -312,12 +312,13 @@ class ArmController:
             if not duplicate:
                 if kind=='DIRECT':
                     q,g=self._target(body)
-                    if not self.op['picked_up'] and max(abs(q[n]-self.q[n]) for n in q)>.2:raise ValueError('Leader pickup: align to measured pose')
-                    if not self.op['picked_up'] and abs(g-self.gripper)>15:raise ValueError('Gripper pickup: align to measured opening')
+                    # begin() already seeds the admitted reference from the
+                    # current measured/held pose. _limit() handles convergence;
+                    # the first target need not match a physical input device.
                 elif kind=='TRAJECTORY':path=self._trajectory(body['points'],self._reference())
                 else:instruction=self._instruction(self.system['profiles'][self.op['profile_id']],body.get('instruction',''))
                 # Commit only after the entire new semantic intent validates.
-                if kind=='DIRECT':self.target=(q,g);self.op['picked_up']=True;self.op['last_direct']=t
+                if kind=='DIRECT':self.target=(q,g);self.op['last_direct']=t
                 elif kind=='TRAJECTORY':
                     self.path=path;self.op['start']=t;self.op['endpoint_reached']=False
                     self.op['requires_gripper_settle']=any('gripper' in point for point in body['points'])

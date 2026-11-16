@@ -843,9 +843,13 @@ export class ManualPanel {
             ? host.latest_pose
             : null
           : this.target;
+      // Jaw visualization has calibrated end stops; retain the unmodified
+      // observation in host.latest_pose while drawing its bounded opening.
+      const visualOverlay=this.mode==='leader' && overlay && Number.isFinite(overlay.gripper)
+        ? {...overlay,gripper:Math.max(0,Math.min(100,overlay.gripper))}:overlay;
       const value = await this.client.request(
         `/api/manual/${encodeURIComponent(arm)}/fk`,
-        { ...measured, target: overlay },
+        { ...measured, target: visualOverlay },
       );
       if (arm !== this.arm || !this.connected) return;
       const g = value.measured;
@@ -912,7 +916,7 @@ export class ManualPanel {
       if (observedRun && this.leaderRun === observedRun) {
         const h = this.hosts.find((h) => h.id === observedRun.host);
         const state = h?.active?.state || h?.state;
-        this.el("leader-status").textContent = state || "Waiting for host";
+        this.el("leader-status").textContent = [state || "Waiting for host",h?.reason].filter(Boolean).join(' · ');
         if (state === "STOPPING") observedRun.stopping = true;
         if (
           !h ||
@@ -921,6 +925,7 @@ export class ManualPanel {
           ["ERROR", "STOPPED", "OFFLINE", "IDLE"].includes(state)
         ) {
           this.leaderRun = null;
+          this.note(h?.reason || 'Leader run ended.');
           this.updateControls();
         }
       }
@@ -971,18 +976,21 @@ export class ManualPanel {
     const run = this.leaderRun;
     if (!run || run.stopping) return;
     try {
-      await this.client.request(
+      const result = await this.client.request(
         `/api/input-hosts/${encodeURIComponent(run.host)}/heartbeat`,
         {
           run_id: run.run_id,
           operator_session_id: this.client.operatorSessionId,
         },
       );
+      if(this.leaderRun===run && result?.accepted===false) {
+        this.leaderRun=null;
+        this.note(result.reason || 'Leader run ended.');
+        this.updateControls();
+      }
     } catch (e) {
       if (this.leaderRun === run) {
-        this.leaderRun = null;
-        this.note("Leader connection ended. Start again to follow.");
-        this.onError(e);
+        this.note("Leader status temporarily unavailable; use Stop to end following.");
       }
     }
   }

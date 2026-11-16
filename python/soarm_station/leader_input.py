@@ -111,6 +111,22 @@ def select_gripper_command(sample, follow, last_sent, initial_reference, followe
     raise ValueError('Follower gripper reference unavailable; no default jaw target is generated')
 
 
+def bounded_leader_target(measured,limits):
+    """Keep all axes live when the leader travels beyond the follower's range."""
+    values=measured.get('positions',{})
+    if not limits or set(values)!=set(limits):raise ValueError('Complete follower joint limits are required')
+    target=copy.deepcopy(measured)
+    for name,value in values.items():
+        low,high=limits[name]['min_rad'],limits[name]['max_rad']
+        if any(type(v) not in (int,float) or not math.isfinite(v) for v in (value,low,high)) or low>=high:
+            raise ValueError('Invalid leader sample or follower limits: '+name)
+        target['positions'][name]=max(low,min(high,value))
+    gripper=measured.get('gripper')
+    if type(gripper) not in (int,float) or not math.isfinite(gripper):raise ValueError('Invalid leader gripper sample')
+    target['gripper']=max(0.,min(100.,gripper))
+    return target
+
+
 def discover(config, enumerate_ports=serial_inventory):
     """Return real OS devices, marking configured candidates without opening them."""
     result = []
@@ -186,7 +202,7 @@ class ReadOnlyLeader:
         values = self.bus.sync_read("Present_Position")
         positions = {target: math.radians(float(values[source])) for source,target in self.profile["joint_map"].items()}
         gripper = float(values[self.profile.get("gripper_source", "gripper")])
-        if not all(math.isfinite(v) for v in positions.values()) or not math.isfinite(gripper) or not 0 <= gripper <= 100:
+        if not all(math.isfinite(v) for v in positions.values()) or not math.isfinite(gripper):
             raise ValueError("Invalid measured leader sample")
         return {"body": {"positions": positions, "gripper": gripper, "gripper_unit": "percent"},
                 "started_ns": started, "completed_ns": time.monotonic_ns()}
@@ -318,10 +334,12 @@ class InputHostBridge:
                             first_grant=latest["grant"] is None
                             latest.update(grant=body["grant"],received=time.monotonic())
                             if first_grant:
-                                await self.emit(type="state",run_id=run_id,state="READY",reason="Follower grant received; align leader for pickup",operation_id=body["grant"].get("operation_id"))
+                                await self.emit(type="state",run_id=run_id,state="READY",reason="Follower ready; following from its current reference",operation_id=body["grant"].get("operation_id"))
                         elif body["type"]=="state":latest.update(state=body.get("state"),feedback_received=time.monotonic())
                         elif body["type"]=="error":raise RuntimeError(body["reason"])
-                        elif body["type"]=="result":raise RuntimeError("Follower operation ended")
+                        elif body["type"]=="result":
+                            result=body.get('result') or {}
+                            raise RuntimeError(result.get('reason') or result.get('result_code') or 'Follower operation ended')
                 receiver=asyncio.create_task(receive());sequence=0;started=time.monotonic();last_report=0.
                 last_sent_gripper=None
                 try:
@@ -329,23 +347,26 @@ class InputHostBridge:
                         tick=time.monotonic()
                         if receiver.done():await receiver;raise RuntimeError("Follower control socket closed")
                         grant=copy.deepcopy(latest["grant"])
+                        grant_received=latest['received']
                         if not grant or not grant.get("stream_ready"):
                             if tick-started>5:raise TimeoutError("Follower did not grant READY")
                             await asyncio.sleep(.01);continue
                         if not latest["feedback_received"]:
                             if tick-started>5:raise TimeoutError("Follower supplied no measured-state feedback")
                             await asyncio.sleep(.002);continue
-                        if tick-latest["feedback_received"]>.5:raise TimeoutError("Follower measured-state feedback lost")
                         # This read starts after the original Pi window was received.
-                        if tick-latest["received"] >= grant.get("window_valid_for_ms",0)/1000:
+                        if tick-grant_received >= grant.get("window_valid_for_ms",0)/1000:
                             await asyncio.sleep(.002);continue
                         sample=await sampler.sample()
                         if receiver.done():await receiver;raise RuntimeError("Follower control socket closed")
-                        if time.monotonic_ns()-sample["completed_ns"]>50_000_000:raise TimeoutError("Leader sample became stale before send")
+                        # A delayed read can miss this server window. Drop it and
+                        # read again under a fresh window instead of ending a run.
+                        if time.monotonic()-grant_received >= grant.get("window_valid_for_ms",0)/1000:
+                            continue
                         # Read the current setting after the asynchronous native read.
                         # Only the outgoing jaw target changes; retain the real leader
                         # sample for the pose overlay and continue all body joints.
-                        body=copy.deepcopy(sample['body'])
+                        body=bounded_leader_target(sample['body'],request.get('joint_limits'))
                         follow=request.get('follow_gripper',True)
                         body['gripper']=select_gripper_command(body.get('gripper'),follow,last_sent_gripper,
                             request.get('gripper_reference'),latest['state'])
@@ -356,8 +377,8 @@ class InputHostBridge:
                         if tick-last_report>=.1:
                             reason=latest["grant"].get("reason","")
                             running=(latest["state"] or {}).get("phase")=="ACTIVE" and (latest["state"] or {}).get("operation_id")==grant.get("operation_id")
-                            await self.emit(type="state",run_id=run_id,state="RUNNING" if running and "pickup" not in reason.lower() else "PICKUP",
-                                reason=reason or ("" if running else "Awaiting follower pickup/admission"),operation_id=grant.get("operation_id"),pose=sample["body"],
+                            await self.emit(type="state",run_id=run_id,state="RUNNING" if running else "READY",
+                                reason=reason or ("" if running else "Following from current follower reference"),operation_id=grant.get("operation_id"),pose=sample["body"],
                                 follow_gripper=follow,gripper_reference=last_sent_gripper,
                                 sample_age_ms=(time.monotonic_ns()-sample["completed_ns"])/1e6,
                                 measured_hz=sequence/max(.001,time.monotonic()-started),sequence=sequence)

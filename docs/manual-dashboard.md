@@ -22,7 +22,7 @@ N requests the configured Home in every manual mode, Space preserves the wrist
 at Home, M requests configured Fold, and Esc stops. Keys do not operate while
 editing an input/select/text field. Releasing keys, blur or hiding the panel
 ends held jog intent. Mode changes stop the old producer. The existing DIRECT
-stream retains single motor ownership, windows, pickup and normal limiting.
+stream retains single motor ownership, windows, current-reference startup and normal limiting.
 No game controller is included in this revision.
 
 Home preserves the admitted gripper reference when available, including under

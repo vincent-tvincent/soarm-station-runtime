@@ -36,6 +36,32 @@ function fixture(){
   return{panel,client,calls,states};
 }
 
+test('late leader status reports the real ended-run reason without a mismatch toast',async()=>{
+  const {panel,client,calls}=fixture();
+  panel.leaderRun={host:'host',run_id:'old'};
+  client.request=async()=>({accepted:false,code:'RUN_ENDED',reason:'Actual controller reason'});
+  await panel.heartbeat();
+  assert.equal(panel.leaderRun,null);
+  assert(calls.some(row=>row[0]==='note'&&row[1]==='Actual controller reason'));
+  assert(!calls.some(row=>row[0]==='error'));
+});
+
+test('a failed browser status poll does not stop a native leader stream',async()=>{
+  const {panel,client,calls}=fixture();const run={host:'host',run_id:'live'};panel.leaderRun=run;
+  client.request=async()=>{throw Error('temporary HTTP failure');};
+  await panel.heartbeat();
+  assert.equal(panel.leaderRun,run);
+  assert(!calls.some(row=>row[0]==='error'||row[0]==='hold'));
+});
+
+test('late status response for old leader run cannot clear its replacement',async()=>{
+  const {panel,client}=fixture(),gate=deferred();
+  panel.leaderRun={host:'host',run_id:'old'};client.request=()=>gate.promise;
+  const pending=panel.heartbeat();const replacement={host:'host',run_id:'new'};panel.leaderRun=replacement;
+  gate.resolve({accepted:false,reason:'Old run ended'});await pending;
+  assert.equal(panel.leaderRun,replacement);
+});
+
 test('default arm capabilities load when the initial connection becomes ready',async()=>{
   const {panel,calls}=fixture();
   panel.arm='';

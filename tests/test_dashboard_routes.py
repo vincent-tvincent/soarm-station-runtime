@@ -147,7 +147,7 @@ def test_leader_start_reads_native_permission_off_http_thread_before_ros_cache_u
     monkeypatch.setattr(module,'Client',NativeClient)
     async def unused(request):raise AssertionError('Unrelated route was requested')
     owner=types.SimpleNamespace(config={'web':{},'arms':[],'socket':'test-native-socket'},
-        public_resources={'arms':[{'id':'arm1','joints':[{'name':'pan'}]}]},
+        public_resources={'arms':[{'id':'arm1','joints':[{'name':'pan','min_rad':-2.,'max_rad':2.}]}]},
         states={'arm1':{'permission':False,'feedback_valid':False}})
     for name in ('index','status','history','permission','hold','stream_input','operate','operation_status',
                  'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample','graph_watch'):

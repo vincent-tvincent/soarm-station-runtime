@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command
+from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command,bounded_leader_target
 from soarm_station.leader_gateway import LeaderHostRegistry,native_start_state
 
 
@@ -90,7 +90,7 @@ class Socket:
 def registry_fixture(host_config):
     state={'arms':{'follower':{'permission':True,'feedback_valid':True,'runtime_boot_id':'boot',
                              'controller_session':'controller','operation_id':''}},
-           'resources':{'arms':[{'id':'follower','joints':[{'name':'pan'},{'name':'lift'}]}]}}
+           'resources':{'arms':[{'id':'follower','joints':[{'name':'pan','min_rad':-2.,'max_rad':2.},{'name':'lift','min_rad':-2.,'max_rad':2.}]}]}}
     held=[]
     async def hold(arm,session,operator,operation):held.append((arm,session,operator,operation));return {'success':True}
     registry=LeaderHostRegistry(lambda:state,hold)
@@ -208,13 +208,18 @@ def test_stop_and_heartbeat_cannot_take_over_unrelated_sessions(host_config):
         assert not (await registry.stop_host(host,'missing','operator'))['accepted'] and not held
         result=json.loads((await registry.start_route(Request(body))).text);run_id=result['run_id']
         with pytest.raises(ValueError,match='session'):await registry.stop_host(host,run_id,'different-operator')
-        with pytest.raises(ValueError,match='match'):await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'other'}))
+        denied=json.loads((await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'other'}))).text)
+        assert not denied['accepted'] and host['active']['run_id']==run_id
         active=host['active'];active['operation_id']='owned-operation';state['arms']['follower']['operation_id']='unrelated-operation'
         assert not (await registry._hold_current(active))['success'] and not held
         state['arms']['follower']['operation_id']='owned-operation'
         assert (await registry._hold_current(active))['success'] and held==[('follower','controller','operator','owned-operation')]
-        active['last_browser']=time.monotonic()-3
-        with pytest.raises(ValueError,match='expired'):await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'operator'}))
+        active['last_browser']=time.monotonic()-3600
+        reply=json.loads((await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'operator'}))).text)
+        assert reply['accepted'] and registry.snapshot()['browser_lease_ms'] is None
+        host['active']=None;host['reason']='Actual native terminal reason'
+        late=json.loads((await registry.heartbeat_route(Request({'run_id':run_id,'operator_session_id':'operator'}))).text)
+        assert not late['accepted'] and late['reason']=='Actual native terminal reason'
     asyncio.run(check())
 
 
@@ -229,7 +234,8 @@ def test_bad_browser_shapes_raise_validation_errors(host_config):
     asyncio.run(check())
 
 
-def test_native_bridge_samples_only_after_grant_and_never_enables_permission(host_config):
+@pytest.mark.parametrize('delivery_delay',[0.,.07])
+def test_native_bridge_samples_only_after_grant_and_never_enables_permission(host_config,delivery_delay):
     async def check():
         command_sent=asyncio.Event();log=[]
         class Control:
@@ -256,12 +262,15 @@ def test_native_bridge_samples_only_after_grant_and_never_enables_permission(hos
             async def start(self):log.append('reader_started')
             async def sample(self):
                 assert 'grant_sent' in log;log.append('sample')
-                t=time.monotonic_ns();return {'body':{'positions':{'pan':.1,'lift':-.1},'gripper':50.,'gripper_unit':'percent'},'started_ns':t,'completed_ns':t}
+                t=time.monotonic_ns()
+                await asyncio.sleep(delivery_delay)
+                return {'body':{'positions':{'pan':.1,'lift':-.1},'gripper':50.,'gripper_unit':'percent'},'started_ns':t,'completed_ns':t}
             async def close(self):log.append('reader_closed')
         bridge=InputHostBridge(host_config,'https://gateway.invalid',None,sampler_factory=Sampler,enumerate_ports=ports)
         bridge.session=Session();bridge.registry=Socket();bridge.advertisement();assert not log
         request={'run_id':'run','device_id':'profile-leader','arm_id':'follower','operator_session_id':'operator',
-                 'runtime_boot_id':'boot','controller_session':'session','joint_names':['pan','lift'],'hz':100}
+                 'runtime_boot_id':'boot','controller_session':'session','joint_names':['pan','lift'],'hz':100,
+                 'joint_limits':{name:{'min_rad':-2.,'max_rad':2.} for name in ('pan','lift')}}
         bridge.active=request;bridge.task=asyncio.create_task(bridge.operate(request))
         await asyncio.wait_for(command_sent.wait(),1)
         await bridge.stop('run')
@@ -339,6 +348,7 @@ def test_bridge_toggle_keeps_body_live_and_holds_last_sent_jaw(host_config):
         bridge.session=Session();bridge.registry=Socket()
         request={'run_id':'run','device_id':'profile-leader','arm_id':'follower','operator_session_id':'operator',
                  'runtime_boot_id':'boot','controller_session':'session','joint_names':['pan','lift'],'hz':100,
+                 'joint_limits':{name:{'min_rad':-2.,'max_rad':2.} for name in ('pan','lift')},
                  'follow_gripper':False,'gripper_reference':37.5}
         bridge.active=request
         assert not bridge.apply_settings({'run_id':'old','operator_session_id':'operator','follow_gripper':True})
@@ -350,3 +360,13 @@ def test_bridge_toggle_keeps_body_live_and_holds_last_sent_jaw(host_config):
         assert outgoing[0]['positions']['pan']<outgoing[1]['positions']['pan']<outgoing[2]['positions']['pan']
         assert [s['gripper'] for s in samples[:3]]==[80.,70.,60.] # actual overlay samples were not rewritten
     asyncio.run(check())
+
+
+def test_leader_targets_clip_existing_follower_limits_without_mutating_observation():
+    measured={'positions':{'pan':3.,'lift':-.3},'gripper':-2.,'gripper_unit':'percent'}
+    limits={'pan':{'min_rad':-1.,'max_rad':1.},'lift':{'min_rad':-.5,'max_rad':.5}}
+    result=bounded_leader_target(measured,limits)
+    assert result=={'positions':{'pan':1.,'lift':-.3},'gripper':0.,'gripper_unit':'percent'}
+    assert measured['positions']['pan']==3. and measured['gripper']==-2.
+    with pytest.raises(ValueError):bounded_leader_target(measured,None)
+    with pytest.raises(ValueError):bounded_leader_target({**measured,'positions':{'pan':float('nan'),'lift':0.}},limits)

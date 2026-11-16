@@ -44,6 +44,24 @@ def test_healthy_stream_runs_beyond_120_seconds(setup):
         tick(arm,clock,.1)
     assert arm.op is not None and arm.permission and arm.op['deadline'] is None
 
+
+def test_large_initial_leader_pose_keeps_stream_alive_and_respects_existing_slew_limits(setup):
+    from soarm_station.leader_input import bounded_leader_target
+    arm,clock=setup;begin(arm)
+    limits={j['name']:{'min_rad':j['min_rad'],'max_rad':j['max_rad']} for j in arm.config['joints']}
+    measured={'positions':{name:10. for name in arm.q},'gripper':120.,'gripper_unit':'percent'}
+    desired=bounded_leader_target(measured,limits)
+    for i in range(220):
+        previous=dict(arm.commanded_q);jaw=arm.commanded_gripper
+        arm.input(frame(arm,desired,identifier=str(i)))
+        tick(arm,clock,.01)
+        assert arm.op is not None
+        for joint in arm.config['joints']:
+            assert abs(arm.commanded_q[joint['name']]-previous[joint['name']])<=joint['velocity_rad_s']*.01+1e-8
+        assert abs(arm.commanded_gripper-jaw)<=arm.config['gripper']['velocity_percent_s']*.01+1e-8
+    assert arm.phase=='ACTIVE' and arm.permission and arm.last_input=='219'
+    assert arm.rejected_frames==0
+
 def test_browser_persistent_target_survives_idle_then_accepts_fresh_intent(setup):
     arm,clock=setup;begin(arm,persistent_target=True)
     assert arm.op['persistent_target'] and not arm.op['requires_liveness']
