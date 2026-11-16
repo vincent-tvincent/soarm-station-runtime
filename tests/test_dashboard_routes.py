@@ -148,14 +148,20 @@ def test_prepared_resources_preserve_static_profile_ids_with_managed_looking_pre
     assert original['arms'][0]['profile_ids']==['pm_custom','legacy']
 
 
-def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
+def test_leader_cleanup_uses_native_snapshot_without_policy_ipc_and_precedes_policy_store_cleanup(monkeypatch):
     from aiohttp.test_utils import TestClient,TestServer
     calls=[]
     async def unused(request):raise AssertionError('Route was not requested')
     def expanded_state():raise AssertionError('Leader cleanup must not query policy IPC')
     manager=types.SimpleNamespace(close=lambda:calls.append('policy'))
-    owner=types.SimpleNamespace(config={'web':{},'arms':[]},public_resources={'arms':[]},
-        states={'arm1':{'controller_session':'controller','operation_id':'','permission':False}},
+    native={'arms':{'arm1':{'controller_session':'controller','operation_id':'','permission':False,'hold_pending':False,'phase':'HOLD'}}}
+    class NativeClient:
+        def __init__(self,path):assert path=='/mock/native.sock'
+        def call(self,operation):assert operation=='snapshot';calls.append('native');return native
+        def close(self):pass
+    monkeypatch.setattr('soarm_station_system.dashboard_node.Client',NativeClient)
+    owner=types.SimpleNamespace(config={'web':{},'arms':[],'socket':'/mock/native.sock'},public_resources={'arms':[]},
+        states={'arm1':{'controller_session':'controller','operation_id':'owned','permission':True}},
         state=expanded_state,policy_manager=manager)
     for name in ('index','status','history','permission','hold','stream_input','operate','operation_status',
                  'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample','graph_watch'):
@@ -171,8 +177,8 @@ def test_leader_cleanup_uses_ros_cache_and_precedes_policy_store_cleanup():
             result=await owner.leader_registry._hold_current({'arm_id':'arm1','controller_session':'controller',
                 'operation_id':'owned','operator_session_id':'operator'})
             assert result['success']
-            assert calls==[]
-        assert calls==['leader','policy']
+            assert calls==['native']
+        assert calls==['native','leader','policy']
     asyncio.run(exercise())
 
 

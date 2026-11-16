@@ -160,7 +160,7 @@ class DashboardNode(BaseNode):
             return native_start_state(snapshot,self.public_resources,(time.monotonic()-started)*1000)
         # Admission uses authoritative native state: the permission service may
         # reply before the ROS cache sees its next status publication. Cleanup
-        # retains the cached ROS view and never queries the policy store.
+        # also verifies native hold completion and never queries the policy store.
         self.leader_registry=LeaderHostRegistry(lambda:{'arms':dict(self.states),'resources':self.public_resources},
             conditional_hold,start_state_provider=leader_start_state)
         self.leader_registry.register_routes(app)
