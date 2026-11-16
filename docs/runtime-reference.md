@@ -73,6 +73,12 @@ initialization, retired processes and capacity limits remain explicit; they do
 not become fabricated zero traffic. An already-running node whose initialization
 was not captured needs to be relaunched under the collector for full mapping.
 
+Each snapshot reader is finalized before rotation. The collector drains a
+partially consumed finite iterator without counting discarded events, releases
+references held by exception frames, then collects Babeltrace graph/listener
+cycles. This prevents deleted snapshot files from retaining open descriptors
+and native message buffers. See the [resource lifecycle fix](rpc-trace-resource-fix.md).
+
 The collector uses the standard [ROS tracing design](https://github.com/ros2/ros2_tracing/blob/rolling/doc/design_ros_2.md)
 and installed LTTng/Babeltrace tooling. See the
 [graph API contract](dashboard-api.md#service-and-action-rpc-activity) for phase

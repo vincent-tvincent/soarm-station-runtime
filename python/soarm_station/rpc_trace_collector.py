@@ -1,5 +1,6 @@
 """Standard LTTng snapshot collector, owned temporary storage and local UDS only."""
 import argparse
+import gc
 import fcntl
 import json
 import math
@@ -14,8 +15,9 @@ import subprocess
 import tempfile
 import threading
 import time
+import traceback
 import uuid
-from collections import OrderedDict
+from collections import OrderedDict,deque
 
 from .ipc import receive, send
 from .rpc_trace import INIT_EVENTS, RPC_PHASES, RpcTraceCounters
@@ -116,12 +118,51 @@ class SnapshotReader:
         import bt2
         directory = Path(directory)
         self.read_packet_sequences(directory)
+        iterator=None;exhausted=False;failure=None
+        try:
+            iterator=bt2.TraceCollectionMessageIterator(str(directory))
+            exhausted=self._consume_iterator(bt2,iterator)
+        except BaseException as error:
+            # A failed iterator constructor/decoder can leave its graph in an
+            # exception traceback. Clear completed frames, preserving the error
+            # type, message and traceback locations, before collecting cycles.
+            failure=error;self._clear_exception_frames(error)
+            raise
+        finally:
+            # bt2 2.x exposes no close() on TraceCollectionMessageIterator. Its
+            # graph retains a bound port-listener callback to the iterator; ref
+            # counting alone therefore leaves source files open across captures.
+            # The helper frame releases message/event/field wrappers first, then
+            # one collector-local cycle collection finalizes the native graph.
+            try:
+                if iterator is not None and not exhausted:
+                    # A partially consumed bt2 graph also retains native message
+                    # memory. Finish its finite, byte-bounded snapshot using the
+                    # public iterator API; discarded events never reach counters.
+                    deque(iterator,maxlen=0)
+            except BaseException as error:
+                self._clear_exception_frames(error)
+                if failure is None:raise
+            finally:
+                iterator=None
+                gc.collect()
+
+    @staticmethod
+    def _clear_exception_frames(error):
+        pending=[error];seen=set()
+        while pending:
+            current=pending.pop()
+            if id(current) in seen:continue
+            seen.add(id(current));traceback.clear_frames(current.__traceback__)
+            pending.extend(e for e in (current.__cause__,current.__context__) if e is not None)
+
+    def _consume_iterator(self,bt2,iterator):
         count = 0
-        for message in bt2.TraceCollectionMessageIterator(str(directory)):
+        for message in iterator:
             if not isinstance(message, bt2._EventMessageConst): continue
             count += 1
             if count > self.max_events:
-                self.counters.report_loss(events=1, reason='Snapshot decode event bound reached'); break
+                self.counters.report_loss(events=1, reason='Snapshot event processing bound reached'); return False
             event = message.event
             wanted = INIT_FIELDS.get(event.name) or RPC_FIELDS.get(event.name)
             if wanted is None: continue
@@ -150,6 +191,7 @@ class SnapshotReader:
                 self.counters.report_loss(events=1, reason='Trace timestamp collision bound reached'); continue
             identities.add(fingerprint); self.watermarks[key] = (stamp, identities)
             self.counters.ingest(event.name, pid, stamp, fields)
+        return True
 
 
 class LttngSnapshotSource:
