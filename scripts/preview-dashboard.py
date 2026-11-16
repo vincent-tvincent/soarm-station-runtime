@@ -159,6 +159,17 @@ class Preview:
         body = await request.json(); self.hold_arm(body.get("arm_id"))
         return self.response({"success": True, "message": "Mock hold confirmed; no hardware", "mock": True})
 
+    async def torque(self, request):
+        body=await request.json();arm=self.arm(body.get('arm_id'))
+        if type(body.get('enabled')) is not bool:raise ValueError('Torque enabled must be boolean')
+        if body.get('controller_session')!=arm['controller_session']:raise ValueError('Controller session mismatch')
+        desired='ON' if body['enabled'] else 'OFF'
+        if not body['enabled'] or arm.get('measured_torque')!=desired:self.hold_arm(body['arm_id'])
+        arm['measured_torque']=desired
+        for row in self.data['status'].get('motor_status',{}).get(body['arm_id'],{}).get('motors',[]):
+            row['torque_enabled']=body['enabled']
+        return self.response({'success':True,'measured_torque':desired,'message':'Mock torque '+desired+'; no hardware','mock':True})
+
     def submit(self, body):
         arm = self.arm(body.get("arm_id"))
         if not arm["permission"]:
@@ -316,7 +327,7 @@ def build_app(preview):
     routes=[web.get("/",preview.index),web.get("/assets/{name}",preview.asset),web.get("/api/preview",preview.preview_info),
             web.post("/api/preview/scenario",preview.set_scenario),web.get("/api/status",preview.status),web.get("/api/resources",preview.resources),
             web.get("/api/graph",preview.graph),web.get("/api/v1/ros/graph",preview.graph),web.post("/api/graph/sample",preview.sample),web.post("/api/v1/ros/sample",preview.sample),
-            web.get("/api/history",preview.history),web.post("/api/permission",preview.permission),web.post("/api/hold",preview.hold),web.post("/api/operate",preview.operate),
+            web.get("/api/history",preview.history),web.post("/api/permission",preview.permission),web.post("/api/hold",preview.hold),web.post("/api/torque",preview.torque),web.post("/api/operate",preview.operate),
             web.get("/api/operations/{id}",preview.operation_status),web.post("/api/operations/{id}/cancel",preview.cancel),web.post("/api/stream",preview.stream),web.post("/api/workflows",preview.workflow),
             web.get("/api/cameras/{id}.jpg",preview.image),web.get("/ws/camera/{id}",preview.camera_socket),web.get("/ws/control",preview.control_socket)]
     app.add_routes(routes)

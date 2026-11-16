@@ -48,6 +48,30 @@ Read joint names/limits, arm IDs and camera IDs from `/api/resources`. Status bo
 
 Units are radians for body joints, metres for Cartesian positions, XYZW for quaternions, seconds for HTTP durations, and calibrated percent for the separate gripper (0 closed / 100 open). MODEL outputs are adapted using the trained profile contract, not assumed to use those units directly.
 
+## Torque control
+
+`POST /api/torque` changes motor holding torque independently of control permission:
+
+```json
+{"arm_id":"arm1","controller_session":"FROM_CURRENT_STATUS","enabled":false}
+```
+
+The response contains `success`, `measured_torque` (`ON`, `OFF`, `MIXED` or
+`UNKNOWN`) and `message`. It forwards through
+`/soarm_station/lerobot/set_torque` (`soarm_station_interfaces/srv/SetTorque`)
+to the existing native motor owner. Read-only profiles reject torque writes.
+
+Disabling revokes the current operation/permission before removing motor torque.
+The arm is then free to move and must be physically supported. Enabling stages
+freshly measured motor positions before applying torque; it does not grant
+control permission or resume old inputs. Repeating an already-satisfied target
+avoids motor writes. Replies require complete motor readback; unsuccessful or
+unconfirmed changes must not be treated as a known physical state.
+
+The existing permission/operation API remains separate. Intentionally starting
+a new operation retains the adapter's existing staged startup behavior; an old
+stream cannot resume after torque is disabled.
+
 ## Starting an operation
 
 For a motion request, read current state, explicitly obtain permission, then send an operation with the same operator identity and current boot/controller IDs. The following functions extend the read-only helper above. **Calling them can operate the selected arm.** Use the mock configuration when first integrating a client.

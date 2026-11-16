@@ -44,6 +44,7 @@
           <button id="enable-control" class="primary" disabled>
             Enable control</button
           ><button id="hold" class="danger" disabled>Hold / disable</button>
+          <button id="toggle-torque" disabled>Enable torque</button>
         </div>
         <div class="metrics">
           <div>
@@ -54,6 +55,11 @@
             <span>Feedback age</span><strong id="feedback-age">—</strong
             ><small>ms</small>
           </div>
+          <div><span>Conditioning</span><strong id="summary-conditioning">—</strong></div>
+          <div class="metric-status"><span>Errors</span><strong id="summary-errors">—</strong></div>
+          <div><span>Torque</span><strong id="summary-torque">—</strong></div>
+          <div><span>Average temperature</span><strong id="summary-temperature">—</strong><small>°C</small></div>
+          <div><span>Average voltage</span><strong id="summary-voltage">—</strong><small>V</small></div>
         </div>
         <div class="operations-workspace">
           <section class="observation">

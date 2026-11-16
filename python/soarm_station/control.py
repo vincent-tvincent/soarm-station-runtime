@@ -8,7 +8,7 @@ import time
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from .hardware import DeviceLock, make_arm
+from .hardware import DeviceLock, make_arm, TorqueConfirmationError
 
 def now(): return time.clock_gettime(time.CLOCK_BOOTTIME)
 def uid(): return uuid.uuid4().hex
@@ -25,6 +25,7 @@ class ArmController:
         self.target=None; self.path=None; self.last_write=0.; self.hold_pending=False; self.hold_event=threading.Event()
         self.commanded_q=None;self.commanded_gripper=None
         self.hold_retarget=True
+        self.torque_request=None
         self.pending_result_id=None;self.result_ready=set()
         self.semantic_revision=0;self.semantic_record=None;self.last_input_error=''
         self.last_frame_sequence=None;self.last_frame_window_remaining_ms=None;self.rejected_frames=0;self.hold_context={}
@@ -54,6 +55,7 @@ class ArmController:
                     if tick-last_tick>.3 and self.op and not self._persistent_teleop(): self._hold('CONTROL_GAP')
                     if tick>=next_health:
                         self.health_data=self.backend.health();self.health_time_ns=time.time_ns();next_health=tick+1
+                    if self.torque_request is not None:self._process_torque()
                     if self.hold_pending:
                         self._finish_hold()
                     self._tick(now(),min(.03,max(.001,tick-last_tick)))
@@ -64,7 +66,15 @@ class ArmController:
         except Exception as exc:
             with self.lock:
                 self._fault(str(exc))
+                if self.torque_request is not None:
+                    measured=getattr(exc,'measured_torque','UNKNOWN')
+                    self.health_data['torque']=measured
+                    # An aggregate readback cannot establish each motor's state.
+                    self.health_data['motors']=[{**row,'torque_enabled':None} for row in self.health_data.get('motors',[])]
+                    self._resolve_torque(False,measured,'Hardware error: '+str(exc))
         finally:
+            with self.lock:
+                if self.torque_request is not None:self._resolve_torque(False,'UNKNOWN','Motor owner stopped')
             self.backend.close()
             if lock: lock.close()
             self.hold_event.set()
@@ -97,6 +107,8 @@ class ArmController:
                 # Preserve its support torque instead of replacing it with a lagged measurement.
                 self.health_data.update(self.backend.health());self.health_time_ns=time.time_ns()
                 if self.health_data.get('torque')!='ON':raise RuntimeError('Torque lost before completion confirmation')
+        self._confirm_hold()
+    def _confirm_hold(self):
         if self.pending_result_id is not None:
             self.result_ready.add(self.pending_result_id);self.pending_result_id=None
         self.hold_pending=False;self.hold_event.set()
@@ -109,11 +121,60 @@ class ArmController:
         with self.lock: self._hold(reason)
         confirmed=self.hold_event.wait(1.5)
         return {'success':confirmed and self.phase!='FAULT','message':self.error or reason}
+    def set_torque(self,enabled,session):
+        """Queue a serial-owner operation; the caller never touches the bus."""
+        if type(enabled)!=bool:raise ValueError('enabled must be boolean')
+        with self.lock:
+            if not session or session!=self.session:raise ValueError('Controller session mismatch')
+            if self.config.get('read_only',False):raise ValueError('This deployment profile is read-only')
+            if self.stop.is_set() or not self.thread.is_alive() or self.phase=='FAULT':
+                raise ValueError('Motor owner unavailable')
+            if self.torque_request is not None:raise ValueError('Torque change is already pending')
+            # OFF is an explicit stop even if its physical acknowledgement later
+            # fails. No canceled/slow request may resume the preceding operation.
+            if not enabled:self._hold('TORQUE_DISABLED')
+            request={'enabled':enabled,'session':session,'epoch':self.epoch,
+                'event':threading.Event(),'canceled':threading.Event(),'result':None}
+            self.torque_request=request
+        # Only an acknowledgement bound, never a motion/input expiration. If
+        # it has not started, a timed-out request cannot execute on a later tick.
+        if not request['event'].wait(1.5):
+            request['canceled'].set()
+            return {'success':False,'measured_torque':'UNKNOWN',
+                'message':'Torque change was not confirmed; read current state before retrying'}
+        return request['result']
+    def _resolve_torque(self,success,measured,message):
+        request=self.torque_request;self.torque_request=None
+        request['result']={'success':success,'measured_torque':measured,'message':message}
+        request['event'].set()
+    def _process_torque(self):
+        """Run under the controller lock, on the sole motor-owner thread."""
+        request=self.torque_request
+        if self.stop.is_set() or request['canceled'].is_set() or request['session']!=self.session or request['epoch']!=self.epoch:
+            self._resolve_torque(False,'UNKNOWN','Torque request was canceled or superseded');return
+        measured=self.backend.torque_state()
+        if request['canceled'].is_set():
+            self._resolve_torque(False,measured,'Torque request was canceled before dispatch');return
+        enabled=request['enabled'];desired='ON' if enabled else 'OFF'
+        if not enabled or measured!=desired:
+            # Revoke every old input/plan before changing torque. OFF itself is
+            # the stop; do not issue an unnecessary hold goal before disabling.
+            if enabled:self._hold('TORQUE_ENABLED')
+            if measured!=desired:
+                result=self.backend.set_torque(enabled);measured=result['torque']
+                self.health_data.update(result)
+            self._confirm_hold()
+        # Refresh motor rows as well as the aggregate state, using real readback.
+        self.health_data=self.backend.health();self.health_time_ns=time.time_ns()
+        measured=self.health_data.get('torque','UNKNOWN')
+        if measured!=desired:raise TorqueConfirmationError(desired,measured)
+        self._resolve_torque(True,measured,'Torque '+desired+' confirmed; '+('control remains disabled' if not self.permission else 'state unchanged'))
     def set_permission(self,enable,principal,session):
         if not enable: return self.hold('PERMISSION_REVOKED')
         with self.lock:
             if session != self.session: raise ValueError('Controller session mismatch')
             if not principal: raise ValueError('Principal required')
+            if self.torque_request is not None:raise ValueError('Torque change is pending')
             if self.hold_pending:raise ValueError('Hold confirmation is pending')
             if self.config.get('read_only',False):raise ValueError('This deployment profile is read-only')
             if self.phase=='FAULT' or not self.q or now()-self.sample_time>.15:
@@ -193,7 +254,7 @@ class ArmController:
 
     def begin(self,request):
         with self.lock:
-            if self.op or self.hold_pending:raise ValueError('BUSY')
+            if self.op or self.hold_pending or self.torque_request is not None:raise ValueError('BUSY')
             if not self.permission or request.get('principal')!=self.principal:raise ValueError('Permission required')
             if request.get('runtime_boot_id')!=self.boot or request.get('controller_session')!=self.session:
                 raise ValueError('Runtime/session mismatch')
@@ -339,7 +400,7 @@ class ArmController:
         return {'accepted':True,'input_id':self.last_input,'intent_generation':self.generation,'semantic_revision':self.semantic_revision}
 
     def _tick(self,t,dt):
-        if not self.op: return
+        if not self.op or self.torque_request is not None: return
         op=self.op
         persistent=self._persistent_teleop()
         if not self.permission or (op['deadline'] is not None and t>op['deadline']) or (not persistent and op['requires_liveness'] and t-op['last_live']>.6):

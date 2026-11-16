@@ -15,7 +15,7 @@ from rosidl_runtime_py.convert import message_to_ordereddict
 from sensor_msgs.msg import JointState,CompressedImage
 from diagnostic_msgs.msg import DiagnosticArray
 from soarm_station_interfaces.msg import OperationStatus,OperationInput,Event,UploadStatus,WorkflowStatus,WorkflowDecision
-from soarm_station_interfaces.srv import SetControlPermission,Hold,QueryHistory
+from soarm_station_interfaces.srv import SetControlPermission,SetTorque,Hold,QueryHistory
 from soarm_station_interfaces.action import ExecuteOperation,ExecuteWorkflow
 from .conversion import goal_from_dict,stream_from_dict
 from .common import BaseNode,STATE,SENSOR,run,topic
@@ -96,6 +96,7 @@ class DashboardNode(BaseNode):
         group=ReentrantCallbackGroup()
         self.permission_client=self.create_client(SetControlPermission,'/soarm_station/lerobot/set_permission',callback_group=group)
         self.hold_client=self.create_client(Hold,'/soarm_station/lerobot/hold',callback_group=group)
+        self.torque_client=self.create_client(SetTorque,'/soarm_station/lerobot/set_torque',callback_group=group)
         self.history_client=self.create_client(QueryHistory,'/soarm_station/telemetry/query_history',callback_group=group)
         self.operation=ActionClient(self,ExecuteOperation,'/soarm_station/lerobot/operate',callback_group=group)
         self.workflow=ActionClient(self,ExecuteWorkflow,'/soarm_station/workflows/execute',callback_group=group)
@@ -135,6 +136,7 @@ class DashboardNode(BaseNode):
         app=web.Application(middlewares=[dashboard_access_middleware(self.config.get('web',{}),token)],client_max_size=262144)
         app.router.add_get('/',self.index);app.router.add_get('/api/status',self.status);app.router.add_get('/api/history',self.history)
         app.router.add_post('/api/permission',self.permission);app.router.add_post('/api/hold',self.hold)
+        app.router.add_post('/api/torque',self.torque)
         app.router.add_post('/api/stream',self.stream_input);app.router.add_post('/api/operate',self.operate);app.router.add_get('/api/operations/{id}',self.operation_status)
         app.router.add_post('/api/workflows',self.start_workflow);app.router.add_get('/api/cameras/{id}.jpg',self.image)
         app.router.add_get('/ws/control',self.control);app.router.add_get('/ws/camera/{id}',self.camera_stream)
@@ -237,6 +239,15 @@ class DashboardNode(BaseNode):
             if inspect.isawaitable(result):result=await result
             return web.json_response(result if isinstance(result,dict) else {'success':bool(result)})
         return web.json_response(asdict(await resolved(self.hold_client.call_async(Hold.Request(arm_id=b['arm_id'])))))
+    async def torque(self,r):
+        body=await r.json()
+        if not isinstance(body,dict) or type(body.get('enabled')) is not bool:
+            raise ValueError('Torque enabled must be boolean')
+        for key in ('arm_id','controller_session'):
+            if not isinstance(body.get(key),str) or not 1<=len(body[key])<=64:
+                raise ValueError('Explicit bounded '+key+' required')
+        request=SetTorque.Request(arm_id=body['arm_id'],expected_controller_session=body['controller_session'],enabled=body['enabled'])
+        return web.json_response(asdict(await resolved(self.torque_client.call_async(request))))
     async def submit(self,b,principal,feedback=None,*,persistent_target=False):
         g=goal_from_dict(b,principal,persistent_target=persistent_target);latest={}
         def receive_feedback(m):

@@ -21,8 +21,8 @@ export function conditioningPresentation(value, stale = false) {
       `${Number(metric.characteristic_length_m).toPrecision(4)} m. This is not a distance or safety percentage.` };
 }
 export class ManualPanel {
-  constructor({ element, poseElement, actionElement, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
-    Object.assign(this, { element, client, onError, onNotice });
+  constructor({ element, poseElement, actionElement, client, onError, onNotice, onConditioning, onCameraCycle, onCameraLayout, gamepadEnv }) {
+    Object.assign(this, { element, client, onError, onNotice, onConditioning });
     this.arm = "";
     this.mode = "joint";
     this.followGripper = true;
@@ -920,6 +920,7 @@ export class ManualPanel {
     const indicator = this.el('ik-mobility');
     indicator?.style?.setProperty('--mobility-color',display.color);
     if (indicator) indicator.title = display.detail;
+    this.onConditioning?.({armId:this.arm,controllerSession:this.stateForArm().controller_session,...display});
   }
   async refreshHosts() {
     if (this.loadingHosts || !this.connected) return;

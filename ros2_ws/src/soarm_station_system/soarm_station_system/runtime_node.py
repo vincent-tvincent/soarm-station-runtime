@@ -12,7 +12,7 @@ from sensor_msgs.msg import JointState,Image,CompressedImage,CameraInfo
 from diagnostic_msgs.msg import DiagnosticArray,DiagnosticStatus,KeyValue
 from soarm_station_interfaces.msg import OperationStatus,OperationInput
 from soarm_station_interfaces.action import ExecuteOperation
-from soarm_station_interfaces.srv import SetControlPermission,Hold
+from soarm_station_interfaces.srv import SetControlPermission,SetTorque,Hold
 from soarm_station.ipc import Client
 from soarm_station.dashboard_data import motor_snapshot
 from .common import BaseNode,STATE,SENSOR,run,stamp_ns,topic
@@ -38,6 +38,7 @@ class RuntimeNode(BaseNode):
                 self.create_publisher(Image,prefix+'/image_raw',SENSOR))
         group=ReentrantCallbackGroup()
         self.create_service(SetControlPermission,'/soarm_station/lerobot/set_permission',self.permission,callback_group=group)
+        self.create_service(SetTorque,'/soarm_station/lerobot/set_torque',self.set_torque,callback_group=group)
         self.create_service(Hold,'/soarm_station/lerobot/hold',self.hold,callback_group=group)
         self.create_subscription(OperationInput,'/soarm_station/lerobot/command_stream',self.input,SENSOR,callback_group=group)
         self.action=ActionServer(self,ExecuteOperation,'/soarm_station/lerobot/operate',execute_callback=self.execute,
@@ -98,6 +99,17 @@ class RuntimeNode(BaseNode):
     def hold(self,req,res):
         try:r=self.control_client.call('hold',arm_id=req.arm_id);res.success=r['success'];res.message=r['message'][:512]
         except Exception as exc:res.message=str(exc)[:512]
+        return res
+    def set_torque(self,req,res):
+        # Only the native owner performs serial I/O and supplies fresh readback.
+        # A cached status publication cannot prove the requested change occurred.
+        res.success=False;res.measured_torque='UNKNOWN'
+        try:
+            result=self.control_client.call('set_torque',arm_id=req.arm_id,
+                expected_controller_session=req.expected_controller_session,enabled=req.enabled)
+            res.success=result['success'];res.measured_torque=result['measured_torque'];res.message=result['message'][:512]
+        except Exception as exc:
+            res.success=False;res.measured_torque='UNKNOWN';res.message=str(exc)[:512]
         return res
     def input(self,m):
         try:self.control_client.call('input',arm_id=m.arm_id,frame=frame_to_dict(m))

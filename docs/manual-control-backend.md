@@ -226,3 +226,29 @@ Stop, Home and Fold** remain visible while joint, IK, leader or gamepad inputs
 scroll. The action row is shown only for the Control tab. Browser layout checks
 at 1280×720, 2560×1440 and 3840×2160 confirmed that all four buttons remain above
 the shared FK view and outside the input scroll container.
+
+
+## Operations summary bar and torque control
+
+The bar shows joint feedback rate/age, measured conditioning, current reported
+errors, measured torque, and mean motor temperature/voltage. Means use finite,
+current readings from the selected arm's body motors and gripper. Missing/stale
+readings are excluded, with coverage in the tooltip; no available readings show
+an em dash. Torque distinguishes On, Off, Mixed and Unknown. Error summaries use
+reported runtime faults, motor issue latches and diagnostic errors; ordinary
+operator Hold is not an error. Stale data never implies an all-clear state.
+Conditioning reuses the shared FK computation rather than adding another poll.
+
+The separate toolbar torque button invokes `/api/torque`. Its label follows
+measured torque; pending changes are acknowledged by the motor owner. Control
+permission remains separate. Disabling removes holding force, so its tooltip
+explicitly calls for supporting the arm. No automatic torque changes are made
+by monitoring, page navigation or summary calculations.
+
+
+The torque feature was validated with 351 browser/unit regressions and 149 Linux
+controller/ROS/gateway tests, including complete torque readback and cancellation
+races. UI checks at widths 700, 1280, 1440 and 3840 verified all seven summary
+cells without horizontal overflow; a local in-memory mock exercised both button
+states. Hardware torque transitions are intentionally not part of automated
+production deployment checks.

@@ -319,7 +319,7 @@ small {
 }
 .metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
   margin-bottom: 20px;
@@ -2162,9 +2162,23 @@ kbd {
   #app[data-view="operations"] .page-heading h1 { font-size:32px; }
   #app[data-view="operations"] .title-rule { margin-top:6px; height:3px; }
   #operations .metrics { padding:8px 0; margin-bottom:12px; }
-  #operations .metrics > div { display:flex; align-items:baseline; gap:8px; }
+  #operations .metrics > div { display:block; }
   #operations .metrics span { margin-bottom:0; }
   #operations .metrics strong { font-size:20px; margin-right:0; }
+}
+#operations .metric-status strong { font-size:18px; }
+.metrics > div { min-width:0; }
+.metrics strong { overflow-wrap:anywhere; }
+.metrics .has-issue { color:var(--red); }
+@media (max-width:1200px) {
+  #operations .metrics { grid-template-columns:repeat(4,minmax(0,1fr)); row-gap:12px; }
+  #operations .metrics > div:nth-child(4n) { border-right:0; }
+  #operations .metrics > div:nth-child(4n+1) { padding-left:0; }
+}
+@media (max-width:650px) {
+  #operations .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #operations .metrics > div:nth-child(2n) { border-right:0; }
+  #operations .metrics > div:nth-child(2n+1) { padding-left:0; }
 }
 
 @media (min-width:1000px) and (max-height:1100px) {

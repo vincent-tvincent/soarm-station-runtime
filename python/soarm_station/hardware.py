@@ -8,6 +8,11 @@ from pathlib import Path
 import time
 from .dashboard_data import health_rows
 
+class TorqueConfirmationError(RuntimeError):
+    def __init__(self,desired,measured):
+        self.measured_torque=measured
+        super().__init__('Torque '+desired+' was not confirmed (measured '+measured+')')
+
 class DeviceLock:
     def __init__(self, directory, identity):
         Path(directory).mkdir(parents=True,exist_ok=True)
@@ -25,6 +30,14 @@ class MockArm:
         self.gripper=50.; self.writes=0; self.torque=False
     def connect(self): pass
     def read(self): return dict(self.q), self.gripper
+    def torque_state(self): return 'ON' if self.torque else 'OFF'
+    def set_torque(self,enabled):
+        if self.config.get('read_only',False):raise PermissionError('This deployment profile is read-only')
+        if type(enabled)!=bool:raise ValueError('enabled must be boolean')
+        if self.torque!=enabled:
+            if enabled:self.writes+=1 # Stage the current pose; never move it.
+            self.torque=enabled
+        return {'torque':self.torque_state(),'writes':self.writes}
     def health(self):
         names=[j['name'] for j in self.config['joints']]+[self.config.get('gripper',{}).get('name','gripper')]
         goals={n:math.degrees(v) for n,v in self.q.items()};goals[names[-1]]=self.gripper
@@ -60,8 +73,38 @@ class LeRobotArm:
     def read(self):
         values=self.bus.sync_read('Present_Position')
         return {j['name']:math.radians(values[j['name']]) for j in self.config['joints']},float(values[self.gripper_name])
+    def _torque_values(self):
+        values=self.bus.sync_read('Torque_Enable',normalize=False)
+        expected={j['name'] for j in self.config.get('joints',[])}|{self.gripper_name}
+        if not values or not expected<=values.keys() or any(v not in (0,1) for v in values.values()):
+            raise RuntimeError('Incomplete or invalid measured torque state')
+        return values
+    def torque_state(self):
+        values=self._torque_values()
+        return 'ON' if all(values.values()) else 'OFF' if not any(values.values()) else 'MIXED'
+    def set_torque(self,enabled):
+        """Called only by the serial owner, including all readback and staging."""
+        if self.config.get('read_only',False):raise PermissionError('This deployment profile is read-only')
+        if type(enabled)!=bool:raise ValueError('enabled must be boolean')
+        desired='ON' if enabled else 'OFF';state=self.torque_state()
+        if state==desired:return {'torque':state,'writes':self.writes}
+        self.dispatch_ready=False
+        if enabled:
+            present=self.bus.sync_read('Present_Position',normalize=False)
+            expected={j['name'] for j in self.config.get('joints',[])}|{self.gripper_name}
+            if not present or not expected<=present.keys() or any(not isinstance(v,(int,float)) or not math.isfinite(v) for v in present.values()):
+                raise RuntimeError('Incomplete or invalid present position for torque enable')
+            # A goal write can itself engage these servos. Seed the exact fresh
+            # raw measurement before enabling; no normalized target/old goal.
+            self.bus.sync_write('Goal_Position',present,normalize=False);self.writes+=1
+            self.bus.enable_torque()
+        else:self.bus.disable_torque()
+        measured=self.torque_state()
+        if measured!=desired:raise TorqueConfirmationError(desired,measured)
+        self.dispatch_ready=enabled
+        return {'torque':measured,'writes':self.writes}
     def health(self):
-        torque=self.bus.sync_read('Torque_Enable',normalize=False)
+        torque=self._torque_values()
         voltage=self.bus.sync_read('Present_Voltage',normalize=False)
         temp=self.bus.sync_read('Present_Temperature',normalize=False)
         goals=self.bus.sync_read('Goal_Position')
@@ -156,5 +199,6 @@ class ReadOnlySO101:
             'voltage_v':min(voltage.values()),'temperature_c':max(temp.values()),'writes':0,'read_only':True,
             'source':'measured','motors':health_rows(self.config,self.calibration,torque,voltage,temp)}
     def send(self,q,gripper):raise PermissionError('Read-only monitoring profile; use a supervised writable backend for motion')
+    def set_torque(self,enabled):raise PermissionError('This deployment profile is read-only')
     def close(self):
         if self.serial is not None:self.serial.close()

@@ -31,6 +31,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 "action/ExecuteOperation.action"
 "action/ExecuteWorkflow.action"
 "srv/SetControlPermission.srv"
+"srv/SetTorque.srv"
 "srv/Hold.srv"
 "srv/RecordEvent.srv"
 "srv/QueryHistory.srv"

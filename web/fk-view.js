@@ -112,6 +112,33 @@ export function motorIssuePresentation(motor,states,{stale=false}={}) {
   return {active:false,kind:null,state:unavailable?'stale':'unknown',label:unavailable?'Status stale':'Not reported',
     detail:unavailable?'Motion issue status is stale or unavailable.':current?.reason||'No motor-specific motion issue observation was reported.'};
 }
+const NORMAL_HOLD_REASONS = new Set(['OPERATOR_HOLD','OPERATOR_STOP','PERMISSION_REVOKED',
+  'SOURCE_STOP','CONTROL_OWNER_DISCONNECTED','CANCELED','CANCELLED','SHUTDOWN','PATH_COMPLETE',
+  'TORQUE_DISABLED','TORQUE_ENABLED','TORQUE_CHANGE','TORQUE_TRANSITION']);
+export function operationHealthSummary({arm={},motors=[],issues=new Map(),stale=false,connected=true,recordError='',inference=[]}={}) {
+  const fresh=connected&&!stale;
+  const current=motors.filter(m=>fresh&&!['stale','unavailable'].includes(m.source_state));
+  const mean=field=>{
+    const values=current.map(m=>m[field]).filter(Number.isFinite);
+    return {value:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,count:values.length,total:motors.length};
+  };
+  const torqueValues=current.map(m=>m.torque_enabled).filter(v=>typeof v==='boolean');
+  const mixed=torqueValues.includes(true)&&torqueValues.includes(false);
+  const torque=!fresh?'Unknown':mixed?'Mixed':torqueValues.length&&torqueValues.length===motors.length
+    ?torqueValues[0]?'On':'Off':'Unknown';
+  const reports=[];
+  for(const motor of motors){const issue=motorIssuePresentation(motor,issues,{stale:!fresh});if(issue.active)reports.push(`${motor.name}: ${issue.detail}`);}
+  const fault=typeof arm.fault==='string'?arm.fault.trim():'';
+  if(arm.phase==='FAULT'||fault&&!NORMAL_HOLD_REASONS.has(fault)){
+    const message=fault||'Runtime fault';if(!reports.some(report=>report.includes(message)))reports.push(message);
+  }
+  if(recordError)reports.push('Motor telemetry: '+recordError);
+  for(const status of inference){if(status.level>=2)reports.push(`${status.name||'Inference'}: ${status.message||'Error reported'}`);}
+  return {temperature:mean('temperature_c'),voltage:mean('voltage_v'),
+    torque:{value:torque,detail:!fresh?'Torque feedback is stale or unavailable':`${torqueValues.filter(Boolean).length} on / ${torqueValues.length} known / ${motors.length} motors`},
+    errors:{value:reports.length?`${reports.length} issue${reports.length===1?'':'s'}`:!connected?'Offline':stale?'Stale':!motors.length?'Unknown':'None',
+      active:reports.length>0,detail:reports.length?reports.join('\n'):!fresh?'Waiting for current health feedback':'No current errors reported by the runtime or motors'}};
+}
 export class FKView {
   constructor(element) {
     this.element = element;

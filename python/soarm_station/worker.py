@@ -124,6 +124,7 @@ class Runtime:
         if r.get('arm_id') not in self.arms: raise ValueError('Unknown arm resource')
         a=self.arms[r['arm_id']]
         if op=='permission': return a.set_permission(r['enable'],r['principal'],r['controller_session'])
+        if op=='set_torque': return a.set_torque(r['enabled'],r['expected_controller_session'])
         if op=='begin': return self.policy_runtime.begin(a,r['request'])
         if op=='input': return a.input(r['frame'])
         if op=='hold': return a.hold()

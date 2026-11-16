@@ -12,7 +12,7 @@ import { GraphExplorer } from "./graph.js";
 import { ManualPanel } from "./manual-panel.js";
 import { PolicyManagement } from "./policy-management.js";
 import { fitRect, packEqualCameras } from "./camera-layout.js";
-import { JointIssueCache, motorIssuePresentation } from "./fk-view.js";
+import { JointIssueCache, motorIssuePresentation, operationHealthSummary } from "./fk-view.js";
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => {
   $(id).textContent = value ?? "—";
@@ -45,6 +45,7 @@ let snapshot = {},
   policies,
   connected = false,
   motorStatusDelayed = false,
+  torquePending = false,
   operation = null,
   historyRows = [];
 const motorIssueCache = new JointIssueCache();
@@ -143,13 +144,18 @@ function updateControls() {
     a.permission ||
     !!busy;
   $("hold").disabled = !connected || !selectedArm;
+  const torqueKnown = ['ON','OFF','MIXED'].includes(a.measured_torque);
+  const torqueOff = a.measured_torque === 'OFF';
+  $('toggle-torque').textContent = torquePending ? 'Applying torque…' : torqueKnown ? torqueOff ? 'Enable torque' : 'Disable torque' : 'Torque unavailable';
+  $('toggle-torque').disabled = !connected || !selectedArm || armConfig().read_only || torquePending || !torqueKnown;
+  $('toggle-torque').title = torqueOff ? 'Hold the current pose with motor torque; control remains a separate action.' : 'Removes motor holding force. Support the arm before disabling torque.';
   $("run-payload").disabled =
     !connected ||
     !selectedArm ||
     !a.permission ||
     !!busy ||
     ($("operation-type").value === "MODEL" && !$("profile-select").value);
-  $("arm-select").disabled = !!busy;
+  $("arm-select").disabled = !!busy || torquePending;
   manual?.updateControls();
   $("send-update").disabled =
     !busy ||
@@ -259,6 +265,13 @@ $("hold").onclick = () =>
     else await client.hold(selectedArm);
     notice("Hold requested. Support torque is preserved.");
   });
+$('toggle-torque').onclick = () => safely(async()=>{
+  if(torquePending)return;
+  const arm=selectedArm,enabled=armState().measured_torque==='OFF';
+  torquePending=true;updateControls();
+  try{const result=await client.setTorque(arm,enabled);notice(result.message||`Torque ${enabled?'enabled':'disabled'}.`);}
+  finally{torquePending=false;updateControls();}
+});
 function renderState(state) {
   snapshot = state || {};
   motorStatusDelayed = false;
@@ -418,6 +431,16 @@ function renderMotors() {
   const statusStale=motorStatusIsStale(motorRecord);
   const issues=motorIssueCache.update(selectedArm,armState().controller_session,motors,{stale:statusStale});
   const presentations=new Map(motors.map(m=>[m.name,motorIssuePresentation(m,issues.states,{stale:statusStale})]));
+  const summary=operationHealthSummary({arm:armState(),motors,issues:issues.states,stale:statusStale,
+    connected,recordError:motorRecord?.error,inference:snapshot.inference?.[selectedArm]?.status||[]});
+  for(const [name,metric] of [['temperature',summary.temperature],['voltage',summary.voltage]]){
+    text('summary-'+name,number(metric.value,name==='voltage'?2:1));
+    $('summary-'+name).title=metric.count?`Average of ${metric.count} / ${metric.total} motor readings`:'No fresh motor readings';
+  }
+  text('summary-errors',summary.errors.value);$('summary-errors').title=summary.errors.detail;
+  $('summary-errors').classList.toggle('has-issue',summary.errors.active);
+  text('summary-torque',summary.torque.value);$('summary-torque').title=summary.torque.detail;
+  if(!connected){text('summary-conditioning','—');$('summary-conditioning').title='Disconnected';}
   text(
     "motor-source",
     !connected || motorStatusDelayed
@@ -1669,6 +1692,12 @@ manual = new ManualPanel({
   client,
   onError: showError,
   onNotice: notice,
+  onConditioning: result => {
+    if(result.armId!==selectedArm || result.controllerSession!==armState().controller_session)return;
+    text('summary-conditioning',connected?result.value:'—');
+    $('summary-conditioning').title=connected?result.detail:'Disconnected';
+    $('summary-conditioning').style.color=result.color;
+  },
   onCameraCycle: () => {
     if (!cameraIds.length) return;
     primaryCamera = cameraIds[(cameraIds.indexOf(primaryCamera) + 1) % cameraIds.length];

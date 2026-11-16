@@ -1,0 +1,7 @@
+string<=64 arm_id
+string<=64 expected_controller_session
+bool enabled
+---
+bool success
+string<=16 measured_torque
+string<=512 message

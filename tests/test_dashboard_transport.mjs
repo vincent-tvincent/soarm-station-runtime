@@ -1118,3 +1118,22 @@ test("an obsolete camera stop handle does not close a replacement subscription",
   assert.equal(f.sockets[1].readyState, 0);
   await f.client.disconnect();
 });
+
+
+test('torque command is typed, exact-arm scoped and does not grant control',async()=>{
+ const f=fixture();await f.client.connect(TOKEN);
+ f.setRoute(call=>call.path==='/api/torque'?f.response({success:true,measured_torque:call.body.enabled?'ON':'OFF',message:'Applied'}):undefined);
+ const result=await f.client.setTorque('arm1',false);
+ assert.equal(result.measured_torque,'OFF');
+ assert.deepEqual(f.calls.find(c=>c.path==='/api/torque').body,{arm_id:'arm1',controller_session:'session1',enabled:false});
+ assert.equal(f.client.state.arms.arm1.permission,false);
+ assert(!f.calls.some(c=>c.path==='/api/permission'||c.path==='/api/hold'));
+ await assert.rejects(f.client.setTorque('arm1','false'),/boolean/);
+});
+
+test('failed torque requests preserve last measured state and propagate actual reason',async()=>{
+ const f=fixture();await f.client.connect(TOKEN);const before=f.client.state.arms.arm1.measured_torque;
+ f.setRoute(call=>call.path==='/api/torque'?f.response({success:false,measured_torque:'UNKNOWN',message:'Readback failed'}):undefined);
+ await assert.rejects(f.client.setTorque('arm1',false),/Readback failed/);
+ assert.equal(f.client.state.arms.arm1.measured_torque,before);
+});

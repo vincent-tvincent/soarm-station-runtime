@@ -465,6 +465,23 @@ export class StationClient {
     return result;
   }
 
+  async setTorque(armId, enabled) {
+    this._requireConnected();
+    if (typeof enabled !== 'boolean') throw new StationError('Torque target must be boolean','INVALID_INPUT');
+    const arm=this._arm(armId),generation=this._generation;
+    const result=await this._request('/api/torque',{
+      arm_id:armId,controller_session:arm.controller_session,enabled,
+    });
+    if(generation!==this._generation || this.state.arms?.[armId]?.controller_session!==arm.controller_session)
+      throw new StationError('Torque reply belongs to a previous connection','CANCELED');
+    if(!result.success)throw new StationError(result.message||'Torque change failed','TORQUE_REJECTED');
+    this.state.arms[armId]={...this.state.arms[armId],measured_torque:result.measured_torque,
+      ...(!enabled?{permission:false}:{})};
+    if(!enabled)this._ownedArms.delete(armId);
+    this._notifyState(true);
+    return result;
+  }
+
   _positions(positions, armId) {
     if (
       !positions ||
