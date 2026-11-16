@@ -2,6 +2,23 @@
 
 SO-Arm Station is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, a private-network web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
 
+## Live demos
+
+Recorded from a running SO-101 station with live camera feeds and ROS telemetry.
+All demos use a **16:9 desktop layout**.
+
+**Live cameras — Equal, Primary and Floating layouts**
+
+![Three live camera feeds, switching layouts and promoting the primary view](docs/demos/01-live-cameras.gif)
+
+**Status, Control and Payload — one persistent 3D FK view**
+
+![Switching operator tabs while the live arm pose stays visible, with interactive FK orbit](docs/demos/02-control-and-fk.gif)
+
+**ROS graph — focused connections and live message counts**
+
+![Live ROS publisher and subscriber connections with measured traffic animation](docs/demos/03-ros-data-flow.gif)
+
 The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SO-Arm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
 
 Repository: [vincent-tvincent/soarm-station-runtime](https://github.com/vincent-tvincent/soarm-station-runtime). Companion repository: `soarm-station-training` (separate).

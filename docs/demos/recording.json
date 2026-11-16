@@ -1,0 +1,43 @@
+{
+  "source_revision": "3a1b1df",
+  "recorded_at": "2026-11-16T13:53:46.201Z",
+  "viewport": {
+    "width": 1600,
+    "height": 900
+  },
+  "aspect_ratio": "16:9",
+  "source": "Live camera feeds and telemetry from the connected SO-101 station",
+  "overlays": "Pointer only",
+  "page_errors": [],
+  "blocked_requests": [],
+  "timing": "Original screenshot timing preserved to GIF centisecond precision",
+  "clips": [
+    {
+      "file": "01-live-cameras.gif",
+      "width": 1280,
+      "height": 720,
+      "frames": 105,
+      "duration_s": 13.04,
+      "bytes": 5599849,
+      "sha256": "16c14625b2b660a9496c07f6bbc85515b8cc47d8e1863f2878aaf6cfef1e10d0"
+    },
+    {
+      "file": "02-control-and-fk.gif",
+      "width": 1280,
+      "height": 720,
+      "frames": 105,
+      "duration_s": 13.04,
+      "bytes": 4502345,
+      "sha256": "b0fcae6aa48f83b90c1afae7b8cf56c44378f54774b3e38a8da01e64255a4fca"
+    },
+    {
+      "file": "03-ros-data-flow.gif",
+      "width": 1280,
+      "height": 720,
+      "frames": 97,
+      "duration_s": 12.04,
+      "bytes": 487460,
+      "sha256": "50d2d6dbe11a9ec025d78f71394b5bdbe3a3aaa57230e647adb67fc37a4cd770"
+    }
+  ]
+}
