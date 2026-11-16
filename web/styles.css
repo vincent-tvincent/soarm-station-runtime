@@ -2209,4 +2209,3 @@ kbd {
 .fk-jacobian { display:grid; grid-template-columns:auto auto; align-items:baseline; column-gap:7px; row-gap:2px; color:var(--mobility-color,#666); }
 .fk-jacobian > span:not(.sr-only) { font-size:10px; text-transform:uppercase; }
 .fk-jacobian strong { font-size:16px; font-variant-numeric:tabular-nums; }
-.fk-jacobian > .fk-measured-update { grid-column:1 / -1; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }

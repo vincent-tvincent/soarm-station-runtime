@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {JointIssueColors, JointIssueCache, motorIssuePresentation, measuredPosePresentation, FKView} from '../web/fk-view.js';
+import {JointIssueColors, JointIssueCache, motorIssuePresentation} from '../web/fk-view.js';
 
 const motor=(issue,source_state='measured')=>({name:'elbow',source_state,motion_issue:issue});
 const positive=(code='TRACKING_NOT_PROGRESSING',kind='stall',extra={})=>({
@@ -83,41 +83,4 @@ test('issue caches are scoped to arm/session and retire old sessions while missi
   for(let index=3;index<100;index++)cache.update('arm-a','session-'+index,[motor(unknown)]);
   assert.equal(cache.caches.size,2,'at most the current session per observed arm');
   assert.equal(cache.forArm('arm-a').states.size,0);
-});
-
-test('actual measured stamps visibly advance while full rank stays unchanged',()=>{
-  const jacobian={rank:5,max_rank:5,rows:6,columns:5,singular_values:[1,.5,.01],rank_tolerance:1e-15};
-  const first=measuredPosePresentation({stamp:{sec:1,nanosec:123000000},sequence:100,jacobian});
-  const next=measuredPosePresentation({stamp:{sec:1,nanosec:456000000},sequence:120,
-    jacobian:{...jacobian,singular_values:[1,.5,.005]}});
-  assert.equal(first.text,'Pose 00:00:01.123Z');assert.equal(next.text,'Pose 00:00:01.456Z');
-  assert.match(first.title,/Minimum singular value: 1.000e-2/);
-  assert.match(next.title,/Minimum singular value: 5.000e-3/);
-  assert.match(next.title,/Rank tolerance: 1.000e-15/);assert.match(next.title,/rank can remain unchanged/);
-  assert.equal(jacobian.rank,5);
-});
-
-test('repeated FK renderings cannot invent a measured update; missing and stale stamps are explicit',()=>{
-  const observation={stamp:{sec:2,nanosec:1},sequence:2,jacobian:{singular_values:[0],rank_tolerance:0}};
-  assert.deepEqual(measuredPosePresentation(observation),measuredPosePresentation(observation));
-  assert.equal(measuredPosePresentation({sequence:12}).text,'Pose #12');
-  assert.equal(measuredPosePresentation({}).state,'unknown');
-  for(const stamp of [{sec:-1,nanosec:0},{sec:0,nanosec:0},{sec:1,nanosec:1e9},{sec:NaN,nanosec:1}])
-    assert.equal(measuredPosePresentation({stamp}).state,'unknown');
-  const stale=measuredPosePresentation(observation,true);
-  assert.equal(stale.text,'Pose stale');assert.doesNotMatch(stale.title,/singular|Sample #/);
-});
-
-test('FK indicator updates only its measured label and tooltip, preserving the existing rank/color display',()=>{
-  const elements=new Map([['#ik-measured-update',{dataset:{},textContent:''}],
-    ['#ik-mobility',{title:'',style:{setProperty(){throw Error('Indicator must not change rank color');}}}],
-    ['#ik-mobility-rank',{textContent:'5 / 5'}]]);
-  const owner={element:{querySelector:selector=>elements.get(selector)}};
-  FKView.prototype.updateMeasuredIndicator.call(owner,{stamp:{sec:10,nanosec:0},sequence:50,
-    jacobian:{singular_values:[1,.02],rank_tolerance:1e-15}});
-  assert.equal(elements.get('#ik-measured-update').textContent,'Pose 00:00:10.000Z');
-  assert.equal(elements.get('#ik-mobility-rank').textContent,'5 / 5');
-  assert.match(elements.get('#ik-mobility').title,/Minimum singular value/);
-  FKView.prototype.updateMeasuredIndicator.call(owner,{},true);
-  assert.equal(elements.get('#ik-measured-update').textContent,'Pose stale');
 });

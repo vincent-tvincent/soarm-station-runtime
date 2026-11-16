@@ -177,6 +177,11 @@ class ManualControl:
             if joint['kind'] not in ('fixed', 'revolute', 'continuous') or joint['mimic']:
                 raise ManualUnavailable('Only fixed and independent rotational TCP-chain joints are supported')
         self.chain = chain
+        # A fixed model scale, independent of pose and base placement. Use the
+        # chain's translation lengths after the first actuated joint through TCP.
+        first_moving = next(i for i,joint in enumerate(chain) if joint['kind'] != 'fixed')
+        self.conditioning_length_m = float(sum(np.linalg.norm(joint['origin'][:3,3])
+            for joint in chain[first_moving+1:]))
         jaw = joints.get(self.config.get('gripper', {}).get('urdf_joint_name', self.config.get('gripper', {}).get('name', 'gripper')))
         self.branch = jaw if jaw and jaw['name'] not in moving else None
         if not self.frame: self.frame = self.model_base
@@ -248,7 +253,7 @@ class ManualControl:
                 'gripper_visual': gripper_visual}
 
     def jacobian_diagnostics(self, positions):
-        """Numerical rank of the full 6xN geometric body-arm Jacobian.
+        """Geometric diagnostics and dimensionless arm conditioning.
 
         Columns are [axis x (TCP - joint origin); axis], expressed in the URDF
         model base. All configured body joints participate; the separate jaw
@@ -271,10 +276,27 @@ class ManualControl:
         largest = float(singular[0]) if len(singular) else 0.
         tolerance = float(np.finfo(jacobian.dtype).eps * max(jacobian.shape) * largest)
         rank = int(np.count_nonzero(singular > tolerance))
+        length = self.conditioning_length_m
+        conditioning = {'available': False, 'reciprocal_condition': None,
+            'characteristic_length_m': length, 'matrix_kind': 'scaled_geometric',
+            'scope': 'full_arm', 'reason': 'Model has no nonzero translational chain length'}
+        if math.isfinite(length) and length > 0.:
+            scaled = jacobian.copy()
+            scaled[:3] /= length
+            values = np.linalg.svd(scaled, compute_uv=False)
+            # Thin SVD is intentional for the five-axis arm: do not append the
+            # structurally unavailable sixth Cartesian direction as a zero.
+            maximum = float(values[0]) if len(values) else 0.
+            minimum = float(values[-1]) if len(values) else 0.
+            cutoff = float(np.finfo(float).eps * max(scaled.shape) * maximum)
+            ratio = minimum / maximum if maximum > 0. and minimum > cutoff else 0.
+            conditioning.update(available=True, reciprocal_condition=float(np.clip(ratio,0.,1.)),
+                singular_values=[float(value) for value in values], reason='')
         return {'matrix_kind': 'geometric', 'task_label': 'Arm Jacobian',
                 'reference_frame': self.model_base, 'rows': 6, 'columns': len(q),
                 'joint_names': list(self.names), 'rank': rank, 'max_rank': min(jacobian.shape),
-                'singular_values': [float(value) for value in singular], 'rank_tolerance': tolerance}
+                'singular_values': [float(value) for value in singular], 'rank_tolerance': tolerance,
+                'conditioning': conditioning}
 
     def describe(self):
         poses = {}

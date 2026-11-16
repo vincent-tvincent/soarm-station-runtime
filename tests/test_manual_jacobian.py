@@ -81,6 +81,37 @@ class GeometricJacobianTests(unittest.TestCase):
         self.assertLess(extended['singular_values'][-1],home['singular_values'][-1]/10)
         self.assertGreater(extended['singular_values'][-1],extended['rank_tolerance'])
 
+    def test_conditioning_matches_independent_scaled_matrix(self):
+        result=self.planar().jacobian_diagnostics({'q1':0.,'q2':math.pi/2,'q3':0.})['conditioning']
+        jac=np.array([[-.75,-.75,-.25],[1.,0.,0.],[0.,0.,0.],
+                      [0.,0.,0.],[0.,0.,0.],[1.,1.,1.]])
+        jac[:3]/=1.75
+        singular=np.linalg.svd(jac,compute_uv=False)
+        self.assertTrue(result['available'])
+        self.assertEqual(result['characteristic_length_m'],1.75)
+        self.assertAlmostEqual(result['reciprocal_condition'],singular[-1]/singular[0])
+
+    def test_conditioning_approaches_zero_before_rank_changes(self):
+        model=self.planar();values=[]
+        for angle in (1.,.1,.01,.001,1e-6):
+            result=model.jacobian_diagnostics({'q1':0.,'q2':angle,'q3':0.})
+            self.assertEqual(result['rank'],3)
+            values.append(result['conditioning']['reciprocal_condition'])
+        self.assertTrue(all(a>b>0 for a,b in zip(values,values[1:])))
+        exact=model.jacobian_diagnostics({'q1':0.,'q2':0.,'q3':0.})
+        self.assertEqual(exact['conditioning']['reciprocal_condition'],0.)
+
+    def test_conditioning_is_invariant_under_uniform_model_scaling(self):
+        pose={'q1':.4,'q2':.7,'q3':-.2}
+        unit=self.planar().jacobian_diagnostics(pose)['conditioning']
+        large=self.planar((1000.,500.,250.)).jacobian_diagnostics(pose)['conditioning']
+        self.assertAlmostEqual(unit['reciprocal_condition'],large['reciprocal_condition'],places=12)
+        self.assertAlmostEqual(large['characteristic_length_m'],1000*unit['characteristic_length_m'])
+
+    def test_zero_length_model_does_not_invent_a_conditioning_scale(self):
+        metric=self.planar((0.,0.,0.)).jacobian_diagnostics({'q1':0.,'q2':0.,'q3':0.})['conditioning']
+        self.assertFalse(metric['available']);self.assertIsNone(metric['reciprocal_condition'])
+
     def test_diagnostics_do_not_mutate_fk_or_ik(self):
         model=ManualControl(config());positions=copy.deepcopy(HOME)
         geometry=model.fk(positions,37.)
@@ -119,6 +150,9 @@ class JacobianHTTPTests(unittest.IsolatedAsyncioTestCase):
         value=json.loads(response.text)
         self.assertEqual(value['measured']['jacobian']['matrix_kind'],'geometric')
         self.assertEqual(value['measured']['jacobian']['rows'],6)
+        metric=value['measured']['jacobian']['conditioning']
+        self.assertTrue(metric['available']);self.assertGreater(metric['reciprocal_condition'],0.)
+        self.assertLessEqual(metric['reciprocal_condition'],1.)
         self.assertEqual(value['measured']['gripper_percent'],50.)
         self.assertEqual(value['target']['gripper_percent'],35.)
         self.assertNotIn('jacobian',value['target'])

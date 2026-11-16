@@ -11,15 +11,14 @@ const AXES = [
 const MOVE_KEYS = new Set(AXES.flatMap((a) => [a[1], a[3]]));
 const finite = Number.isFinite;
 const copy = (value) => structuredClone(value);
-export function jacobianRankPresentation(value, stale = false) {
-  if (stale || !value || !Number.isInteger(value.rank) || !Number.isInteger(value.max_rank) ||
-      value.max_rank <= 0 || value.rank < 0 || value.rank > value.max_rank)
-    return { rank: '—', color: '#666', detail: stale ? 'Waiting for fresh pose' : 'Unavailable' };
-  const missing = value.max_rank - value.rank;
-  const redness = missing === 0 ? 0 : Math.min(1,.45 + .55 * missing / value.max_rank);
-  const rgb = [25,25,25].map((component,i)=>Math.round(component+([217,35,27][i]-component)*redness));
-  return { rank: `${value.rank} / ${value.max_rank}`, color: `rgb(${rgb.join(', ')})`,
-    detail: `${value.rows || 6} × ${value.columns || value.max_rank} geometric Jacobian · measured pose` };
+export function conditioningPresentation(value, stale = false) {
+  const metric = value?.conditioning, ratio = metric?.reciprocal_condition;
+  if (stale || metric?.available !== true || !Number.isFinite(ratio) || ratio < 0 || ratio > 1)
+    return { value: '—', color: '#666', detail: stale ? 'Waiting for fresh pose' : metric?.reason || 'Conditioning unavailable' };
+  return { value: ratio === 0 ? '0' : ratio.toPrecision(3), color: ratio === 0 ? '#d9231b' : '#191919',
+    detail: `Measured full-arm conditioning: σmin / σmax = ${ratio.toPrecision(6)}. ` +
+      `0 = singular; nearer 1 = more balanced motion. Translation is divided by the fixed model length ` +
+      `${Number(metric.characteristic_length_m).toPrecision(4)} m. This is not a distance or safety percentage.` };
 }
 export class ManualPanel {
   constructor({ element, client, onError, onNotice, onCameraCycle, onCameraLayout, gamepadEnv }) {
@@ -190,7 +189,7 @@ export class ManualPanel {
       this.config = (resources.arms || []).find((a) => a.id === arm) || {};
       this.resetTargets();
       this.gamepad?.resetForArm();
-      this.renderJacobianRank(null,true);
+      this.renderConditioning(null,true);
     }
     // Initial status can select the default arm before connect() announces its
     // connected state. Fetch capabilities when that connection becomes ready.
@@ -198,7 +197,7 @@ export class ManualPanel {
       this.safe(() => this.loadDescription());
     if (!this.target && this.measured()) this.resetTargets();
     if (!this.connected) {
-      this.renderJacobianRank(null,true);
+      this.renderConditioning(null,true);
       this.cancelIntent();
       this.ownsStream = false;
       this.leaderRun = null;
@@ -852,14 +851,12 @@ export class ManualPanel {
     if (!this.visible || !this.connected || !this.arm || this.poseLoading)
       return;
     const measured = this.measured();
-    if (!measured) { this.renderJacobianRank(null,true); return; }
+    if (!measured) { this.renderConditioning(null,true); return; }
     this.poseLoading = true;
     const arm = this.arm;
     const observation = {
       armId: arm,
       controllerSession: this.stateForArm().controller_session,
-      stamp: copy(this.snapshot?.joints?.[arm]?.header?.stamp),
-      sequence: this.stateForArm().sample_sequence,
     };
     try {
       const host = this.hosts.find(
@@ -881,7 +878,7 @@ export class ManualPanel {
       );
       if (arm !== this.arm || !this.connected || observation.controllerSession !== this.stateForArm().controller_session) return;
       const g = value.measured;
-      this.renderJacobianRank(g.jacobian, !this.stateForArm().feedback_valid);
+      this.renderConditioning(g.jacobian, !this.stateForArm().feedback_valid);
       const readouts = {
         X: `${(g.position_m[0] * 1000).toFixed(0)} mm`,
         Y: `${(g.position_m[1] * 1000).toFixed(0)} mm`,
@@ -902,19 +899,20 @@ export class ManualPanel {
         observation,
       );
     } catch (e) {
-      this.renderJacobianRank(null);
+      this.renderConditioning(null);
       this.el("manual-fk").querySelector(".fk-empty").textContent =
         "Kinematic model unavailable";
     } finally {
       this.poseLoading = false;
     }
   }
-  renderJacobianRank(value, stale = false) {
-    if (stale || !value) this.fk.updateMeasuredIndicator?.({}, true);
-    const display = jacobianRankPresentation(value,stale);
-    this.el('ik-mobility-rank').textContent = display.rank;
+  renderConditioning(value, stale = false) {
+    const display = conditioningPresentation(value,stale);
+    this.el('ik-conditioning-value').textContent = display.value;
     this.el('ik-mobility-detail').textContent = display.detail;
-    this.el('ik-mobility')?.style?.setProperty('--mobility-color',display.color);
+    const indicator = this.el('ik-mobility');
+    indicator?.style?.setProperty('--mobility-color',display.color);
+    if (indicator) indicator.title = display.detail;
   }
   async refreshHosts() {
     if (this.loadingHosts || !this.connected) return;

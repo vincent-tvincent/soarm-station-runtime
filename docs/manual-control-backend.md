@@ -131,44 +131,70 @@ rates only. The absolute jaw target advances independently under the existing
 jaw velocity limit. Both producers share the corrected solver and per-arm
 calculation lock. This endpoint calculates a target and never dispatches it.
 
-## Geometric Jacobian matrix rank — November15
+## Live arm conditioning — November 16, 2026
 
-`ManualControl.jacobian_diagnostics(positions)` reports the numerical matrix rank of the **full geometric body-arm Jacobian**. It is a read-only calculation using the same URDF chain and TCP as FK. All configured body joints participate; the separate gripper/jaw joint does not. It does not use the task-dependent wrist freeze or the 0.06 angular residual scale used by the IK solver.
+The dashboard displays **Conditioning**, a dimensionless reciprocal condition
+number `sigma_min / sigma_max`. It varies continuously as the measured arm pose
+approaches a singularity: 0 denotes numerical singularity and values nearer 1
+indicate more balanced motion capability. It is not a physical distance, joint
+limit margin, safety percentage or execution restriction. Rank and the measured
+timestamp are no longer displayed.
 
-For rotational joint `i`, expressed in the URDF model base frame, its column is:
+The reported scope is the full configured body arm, in every control mode.
+The separate jaw does not participate. This describes loss of the arm's own
+independent motion directions; it is not a task-specific IK success prediction.
+
+For each rotational joint, the geometric Jacobian column is
+`[axis × (TCP − origin); axis]`. To avoid mixing metres and angular units, the
+linear rows are divided by a fixed characteristic model length `L`:
 
 ```text
-J[:, i] = [ axis_i × (tcp_position − joint_origin_i) ]  # linear velocity
-          [ axis_i                                ]  # angular velocity
+J_scaled = [ J_linear / L ]
+           [ J_angular    ]
+conditioning = smallest_singular_value(J_scaled) / largest_singular_value(J_scaled)
 ```
 
-Thus `J` has 6 rows and N body-joint columns: XYZ linear velocity followed by XYZ angular twist. Translation uses metres and joint angles use radians. This is the unweighted geometric matrix, not an XYZ-only matrix or the solver's elevation/roll residual Jacobian. The reference frame is the model root (`base_link` for the current asset); the surrounding FK geometry retains its configured ROS base-frame alias.
+`L` is the sum of URDF translation lengths after the first actuated joint through
+the TCP. It does not change with the measured pose or an unrelated fixed base
+placement. Uniformly scaling all model lengths preserves the indicator. For the
+bundled SO-101 model, `L = 0.47794512444016124 m`. This scaling is our explicit
+metric convention; changing the model/TCP can change its values.
 
-The existing authenticated FK HTTP response adds `measured.jacobian`. This example is computed from the configured SO-101 model at the historical Home joint values, not a live hardware observation:
+The thin SVD returns five singular values for the SO-101's 6×5 matrix. Do not
+append a sixth zero: six independent Cartesian directions are structurally
+unavailable on this five-axis arm. Values below the floating-point SVD tolerance
+report zero; a model with no nonzero characteristic length reports unavailable.
+
+`POST /api/manual/{arm}/fk` adds this object at
+`measured.jacobian.conditioning`:
 
 ```json
 {
-  "matrix_kind": "geometric",
-  "task_label": "Arm Jacobian",
-  "reference_frame": "base_link",
-  "rows": 6,
-  "columns": 5,
-  "joint_names": ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"],
-  "rank": 5,
-  "max_rank": 5,
-  "singular_values": [1.7735911452351456, 1.1352602644195757, 0.8783797698012464, 0.09557622586592236, 0.060821242294087884],
-  "rank_tolerance": 2.3628980708536305e-15
+  "available": true,
+  "reciprocal_condition": 0.06634749774247155,
+  "characteristic_length_m": 0.47794512444016124,
+  "matrix_kind": "scaled_geometric",
+  "scope": "full_arm",
+  "singular_values": [1.9086059456, 1.1895622594, 0.9215250833, 0.1867435001, 0.1266312287],
+  "reason": ""
 }
 ```
 
-Singular values are in descending order. No mode parameter is needed. Plain Python `fk()` and target-overlay geometry are unchanged; the HTTP wrapper attaches diagnostics only to measured geometry.
+The example is computed at the historical Home pose used by the unit tests,
+not live hardware. A captured near-extension pose gives `0.0011629599103152586`
+with the same scale. Both had previously displayed rank 5/5.
 
-Numerical rank counts singular values strictly greater than `machine_epsilon × max(6, N) × largest_singular_value`, the standard floating-point SVD rank threshold. `max_rank = min(6, N)`, so the current five-axis body has a maximum of **5**, not 6. This is numerical rank of the configured model: finite precision and the chosen model units determine the threshold. A near-singular matrix can remain full rank. The captured near-extension pose and Home both return 5/5; that is intentional. No condition-number threshold, inverse-condition score or arbitrary “mobility percentage” changes the rank. The UI colors rank loss only (`rank < max_rank`).
+The legacy raw-Jacobian rank and singular-value API fields remain available to
+existing clients, but are not used by the dashboard display. Plain `fk()`, target
+geometry, IK constraints and motor dispatch are unchanged. Missing/stale feedback
+shows an em dash rather than a fabricated zero. Small nonzero values retain three
+significant figures, switching to scientific notation when needed.
 
-Full rank does not prove a requested finite pose/path is reachable, joints have remaining travel, motion is collision-free, or hardware is healthy/tracking accurately. Conversely, this diagnostic adds no execution rejection or control gate. It performs no device reads, writes, calibration or permission changes.
+Validation includes an independently derived planar Jacobian, continuous decline
+before rank loss, exact singularity, uniform model scaling, missing model scale,
+measured-versus-target selection and stale data. The timestamp component was
+removed entirely. Background diagnostics do not open devices or execute motion.
 
-`tests/test_manual_jacobian.py` contains nine hardware-free cases: a hand-derived bent 3R planar Jacobian, rank 3→2 when that chain is exactly straight, a nearby pose remaining full rank, coincident rotational axes retaining their angular rank, all five SO-101 body joints with no gripper, captured-extension versus Home, unchanged FK/IK behavior, and HTTP field/error behavior. Run:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python -m unittest discover -s tests -p test_manual_jacobian.py -v
-```
+Background: [Modern Robotics, Manipulability](https://modernrobotics.northwestern.edu/nu-gm-book-resource/5-4-manipulability/)
+explains singular-value ratios and the different units of linear/angular motion;
+the fixed model-length normalization above is this application's choice.
