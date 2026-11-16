@@ -278,6 +278,34 @@ test('disconnect sends its final hold with fetch keepalive for page exit',async(
   assert(!f.calls.filter(call=>call.path==='/api/status').some(call=>call.keepalive));
 });
 
+for (const accepted of [true,false]) test(`scoped handoff stops local targets before Hold and closes socket after response (${accepted})`,async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();await opening;
+  ws.message({type:'grant',grant:f.grant(null)});await flush();
+  const gate=deferred();let arrived=false;
+  f.setRoute(call=>{
+    if(call.path==='/api/hold'){
+      arrived=true;assert.equal(ws.readyState,1,'EOF must not clear owner before conditional hold');
+      assert.equal(call.body.operation_id,'op-manual');return gate.promise;
+    }
+  });
+  const holding=f.client.hold('arm1',{controller_session:'session1',operator_session_id:f.client.operatorSessionId,operation_id:'op-manual'});
+  await flush();assert(arrived);assert.equal(f.client.currentOperation,null);
+  const sent=ws.sent.length;await f.clock.advance(100);assert.equal(ws.sent.length,sent);
+  gate.resolve(f.response({success:accepted,message:'Owner changed'}));
+  if(accepted)await holding;else await assert.rejects(holding,/Owner changed/);
+  assert.equal(ws.readyState,3,'failed requests also close only the captured old socket');
+});
+
+test('a late scoped Hold never closes a replacement local stream on the same arm',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();await opening;
+  ws.message({type:'grant',grant:f.grant(null,{operation_id:'new-op'})});await flush();
+  f.setRoute(call=>call.path==='/api/hold'?f.response({success:false,message:'Operation changed'}):undefined);
+  await assert.rejects(f.client.hold('arm1',{controller_session:'session1',operator_session_id:f.client.operatorSessionId,operation_id:'old-op'}),/Operation changed/);
+  assert.equal(ws.readyState,1);assert.equal(f.client.currentOperation.operationId,'new-op');
+});
+
 test("authentication is explicit, relative-only, never stored in URLs or serialized client state", async () => {
   const f = fixture();
   await f.client.connect(TOKEN);

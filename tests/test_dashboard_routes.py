@@ -12,6 +12,49 @@ except ImportError:ROS_AVAILABLE=False
 pytestmark=pytest.mark.skipif(not ROS_AVAILABLE,reason='Sourced ROS environment required')
 
 
+@pytest.mark.parametrize('operation_id',[None,'owned-operation'])
+def test_scoped_hold_routes_exact_identity_to_native_owned_hold(operation_id):
+    calls=[]
+    async def scoped(*args):calls.append(args);return {'success':False,'message':'Owner changed'}
+    def global_hold(*args):raise AssertionError('Scoped cleanup must never use global Hold')
+    owner=types.SimpleNamespace(leader_registry=types.SimpleNamespace(hold_callback=scoped),
+        hold_client=types.SimpleNamespace(call_async=global_hold))
+    class Request:
+        async def json(self):return {'arm_id':'arm1','controller_session':'session',
+            'operator_session_id':'operator','operation_id':operation_id}
+    response=asyncio.run(DashboardNode.hold(owner,Request()))
+    assert json.loads(response.text)=={'success':False,'message':'Owner changed'}
+    assert calls==[('arm1','session','operator',operation_id)]
+
+
+@pytest.mark.parametrize('scope',[
+    {'controller_session':'session'}, {'operator_session_id':'operator'}, {'operation_id':None},
+    {'controller_session':'session','operator_session_id':'operator'},
+    {'controller_session':'session','operator_session_id':'','operation_id':None},
+    {'controller_session':'session','operator_session_id':'operator','operation_id':''},
+])
+def test_partial_hold_scope_is_rejected_without_downgrading_to_global_hold(scope):
+    def forbidden(*args):raise AssertionError('Invalid scope reached a hold backend')
+    owner=types.SimpleNamespace(leader_registry=types.SimpleNamespace(hold_callback=forbidden),
+        hold_client=types.SimpleNamespace(call_async=forbidden))
+    class Request:
+        async def json(self):return {'arm_id':'arm1',**scope}
+    with pytest.raises(ValueError):asyncio.run(DashboardNode.hold(owner,Request()))
+
+
+def test_explicit_unscoped_hold_keeps_existing_ros_route(monkeypatch):
+    import soarm_station_system.dashboard_node as module
+    calls=[]
+    async def resolved(value):return value
+    monkeypatch.setattr(module,'resolved',resolved);monkeypatch.setattr(module,'asdict',lambda value:value)
+    def call(request):calls.append(request.arm_id);return {'success':True,'reason':'explicit hold'}
+    owner=types.SimpleNamespace(hold_client=types.SimpleNamespace(call_async=call))
+    class Request:
+        async def json(self):return {'arm_id':'arm1'}
+    assert json.loads(asyncio.run(DashboardNode.hold(owner,Request())).text)['success']
+    assert calls==['arm1']
+
+
 def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypatch):
     from aiohttp.test_utils import TestClient,TestServer
     token='t'*32

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command,bounded_leader_target,sample_until_control_ends
+from soarm_station.leader_input import ReadOnlyLeader, InputHostBridge, discover, load_config, select_gripper_command,bounded_leader_target,sample_until_control_ends,pickup_matches
 from soarm_station.leader_gateway import LeaderHostRegistry,native_start_state
 
 
@@ -406,4 +406,65 @@ def test_stop_cancels_the_reader_without_canceling_unrelated_receiver_ownership(
         receiver.cancel()
         try:await receiver
         except asyncio.CancelledError:pass
+    asyncio.run(check())
+
+
+def test_pickup_uses_raw_pose_and_optional_gripper_not_clipped_command():
+    reference={'positions':{'pan':2.,'lift':0.},'gripper':40.,'joint_tolerance_rad':.12,'gripper_tolerance_percent':10.}
+    sample={'positions':{'pan':9.,'lift':0.},'gripper':40.}
+    limits={name:{'min_rad':-2.,'max_rad':2.} for name in ('pan','lift')}
+    assert not pickup_matches(sample,reference)
+    assert pickup_matches(bounded_leader_target(sample,limits),reference) # would incorrectly unlock if clipping happened first
+    sample={'positions':{'pan':1.95,'lift':.04},'gripper':90.}
+    assert not pickup_matches(sample,reference)
+    assert pickup_matches(sample,reference,False)
+    assert not pickup_matches({'positions':{'pan':float('nan'),'lift':0.},'gripper':40.},reference)
+
+
+def test_gateway_pickup_reference_is_native_not_a_browser_supplied_pose(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        state['arms']['follower'].update(positions={'pan':.4,'lift':-.3},gripper=41.)
+        result=json.loads((await registry.start_route(Request({**body,'pickup':True,
+            'pickup_reference':{'positions':{'pan':9.,'lift':9.},'gripper':90.}}))).text)
+        assert result['accepted'] and not held
+        request=registry.hosts['test-host']['ws'].sent[0]
+        assert request['pickup_reference']['positions']=={'pan':.4,'lift':-.3}
+        assert request['pickup_reference']['gripper']==41.
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('replacement',[False,True])
+def test_leader_stop_checks_native_completion_when_control_eof_wins(host_config,replacement):
+    async def check():
+        registry,cached,held,body=registry_fixture(host_config)
+        await registry.start_route(Request(body));active=registry.hosts['test-host']['active'];active['operation_id']='old-op'
+        cached['arms']['follower']['operation_id']='old-op'
+        native=copy.deepcopy(cached)
+        async def hold(*args):
+            native['arms']['follower'].update(operation_id='replacement' if replacement else '',permission=replacement,
+                hold_pending=False,phase='ACTIVE' if replacement else 'HOLD')
+            return {'success':False,'message':'Owner changed'}
+        registry.hold_callback=hold;registry.start_state_provider=lambda:native
+        result=await registry._hold_current(active)
+        assert result['success'] is (not replacement)
+        assert cached['arms']['follower']['operation_id']=='old-op' # cache is deliberately behind
+        assert not held
+    asyncio.run(check())
+
+
+def test_leader_stop_waits_for_native_hold_completion(host_config):
+    async def check():
+        registry,cached,held,body=registry_fixture(host_config)
+        await registry.start_route(Request(body));active=registry.hosts['test-host']['active']
+        native=copy.deepcopy(cached);native['arms']['follower'].update(permission=False,hold_pending=True,phase='HOLD')
+        reads=0
+        async def read():
+            nonlocal reads
+            reads+=1
+            if reads>=3:native['arms']['follower']['hold_pending']=False
+            return native
+        registry.start_state_provider=read
+        assert (await registry._hold_current(active))['success']
+        assert reads>=3 and not held
     asyncio.run(check())

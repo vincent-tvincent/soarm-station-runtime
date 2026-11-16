@@ -51,7 +51,7 @@ def test_home_change_preserves_independent_roll_reference_operator_yaw_speeds_an
     for name,expected in [('minus_90',-math.pi/2),('reference',0.),('plus_90',math.pi/2)]:
         assert model.roll_preset(name,home,41.)['target']['positions']['wrist_roll']==expected
     description=model.describe()
-    assert description['default_level']==2
+    assert description['default_level']==3
     assert [entry['translation_m_s'] for entry in description['speed_levels']]==[.015,.040,.080,.120,.160]
     partial=model.preset('home',{**home,'wrist_roll':.3},41.,preserve_wrist=True)
     assert partial['target']['positions']['wrist_roll']==.3

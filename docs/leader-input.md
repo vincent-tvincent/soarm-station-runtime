@@ -4,7 +4,7 @@ This bridge makes the Control panel's Leader host/device dropdown reflect actual
 devices on a connected Mac or Linux input host. The browser does not discover or
 open USB on its own. An unconfigured serial adapter is visible but cannot be
 started; a configured candidate is checked against live motor calibration only
-after the operator presses **Start**. Existing LeRobot calibration files can be
+after the operator presses **Unlock / follow**. Existing LeRobot calibration files can be
 reused unchanged; an additional input-host profile associates a file with its
 physical USB device.
 
@@ -120,10 +120,14 @@ does not reload the local JSON. Station itself does not need a restart.
 
 Open **Control → Leader arm**, press **Refresh**, select the input computer,
 then select the configured leader. The native bridge must remain running while
-using it. Press **Start** only when you intend to begin the leader-control
-workflow: live calibration is checked and fresh samples enter the existing
-smooth following path from the follower's current measured/held reference. The
-leader does not need to match the follower pose before starting. **Stop / Esc** ends following.
+using it. Press **Unlock / follow** to check calibration and start sampling. The follower
+stays held during **ALIGNING**; match the raw calibrated leader pose to the held
+follower to begin following. Body pickup uses 0.12 rad per joint (about 6.9°),
+and 10 percentage points for the jaw when **Gripper follow** is enabled. The
+leader overlay and sampling rate keep updating during alignment. There is no
+alignment countdown. **Freeze / Esc** holds the follower; unlock and align to
+resume. Home first stops following, moves to its configured target, and can
+hand back to the leader through the same unlock-and-align sequence.
 
 If Start reports a calibration mismatch, select the existing file that belongs
 to the attached motors. The bridge does not automatically overwrite motor
@@ -172,7 +176,7 @@ degree normalization and explicitly converted to ROS radians; the separate jaw
 value remains percent. The mapping must exactly match the selected follower's
 joint names. Calibration is compared, never rewritten.
 
-The sampler runs in one bounded child. A native connect/read timeout or Stop
+The sampler runs in one child. A native connection/driver error or Stop
 terminates that child if necessary, releasing its OS handles. It shares the
 existing physical-device lock naming convention. An occupied device, invalid
 calibration or mismatch stops the requested run rather than opening a second
@@ -218,7 +222,7 @@ no additional listener or ROS node is created.
 | Method/path | Contract |
 | --- | --- |
 | GET `/api/input-hosts` | `hosts[]` has `id,label,platform,connected,state,reason,devices[],active,latest_pose,sample_age_ms,report_age_ms,measured_hz`. No placeholder host/device is added. |
-| POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100); optional boolean `follow_gripper` (default true) and `gripper_reference` in percent. Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,follow_gripper,heartbeat_interval_ms,browser_lease_ms`. |
+| POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100); optional boolean `follow_gripper` (default true), `gripper_reference` in percent, and `pickup` (default false; the dashboard sends true). Pickup captures an authoritative native held/measured reference, never a browser-supplied pose. Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,follow_gripper,heartbeat_interval_ms,browser_lease_ms`. |
 | POST `/api/input-hosts/{id}/heartbeat` | `run_id,operator_session_id`, Status check for this run; it does not renew or expire control. A late request returns `accepted:false, code:RUN_ENDED` and the real terminal reason without affecting another run. |
 | POST `/api/input-hosts/{id}/settings` | Matching `run_id,operator_session_id,follow_gripper` boolean. Forwards a same-run setting change; does not enable permission or renew liveness. |
 | POST `/api/input-hosts/{id}/stop` | Same matching run/session fields. Returns `stopped,hold_confirmed,state,reason`; wrong or absent ownership never issues a global hold. |
@@ -228,7 +232,7 @@ Each device entry contains `id,label,configured,reason,port,serial,joint_names`
 and available VID/PID/profile metadata. `configured=true` means a matching local
 profile/calibration file is structurally usable; it does not claim that motor
 identity/calibration has already been verified. Runtime states distinguish
-STARTING, READY, PICKUP, RUNNING, STOPPING, ERROR and OFFLINE. Pose/rate fields are
+STARTING, READY, ALIGNING, RUNNING, STOPPING, ERROR and OFFLINE. Pose/rate fields are
 observed bridge reports, not fictional defaults; null means no sample.
 
 The native input stream owns the run lifetime. There is no browser-heartbeat
@@ -241,9 +245,9 @@ can continue while fresh leader input arrives. Source/control-socket loss still
 stops the operation, and reconnect only advertises again.
 
 The **Home** shortcut stops the matching leader run and waits for `stopped`
-and `hold_confirmed` before starting the Home operation. Initial leader and
-follower poses need not align: the native reference starts from the existing
-measured/held pose and converges under the existing joint/gripper speed limits.
+and `hold_confirmed` before starting the Home operation. Unlock retires only the panel-owned Home stream, confirms its hold and obtains
+a fresh permission grant before opening the next leader run. Pickup waits for
+alignment with the newly captured held pose before sending movement commands.
 A delayed sample that misses its Pi-issued window is discarded and freshly read
 rather than causing an extra 50-ms bridge abort. Native feedback/source-loss
 handling remains in the controller. Result messages preserve the native terminal
@@ -272,3 +276,23 @@ Check real serial identity, existing leader calibration, source latency, initial
 stop/disconnect and rate behavior in a separately authorized hardware session.
 Inventory availability, sampling, follower admission and physical following are
 distinct milestones.
+
+
+## Continuous teleoperation lifetime — November 16, 2026
+
+The bridge and command-line operator now explicitly open a `persistent_target`
+DIRECT stream, like keyboard and gamepad control. Input gaps, browser polling
+and alignment have no session expiry. A control-loop delay or stale measured
+feedback pauses dispatch without discarding the run; fresh feedback resumes the
+same operation. Profile stream-duration/tracking timers do not terminate this
+teleoperation contract. A caller-specified operation duration is still honored.
+
+Pi-issued packet windows still reject delayed/replayed samples; a rejected old
+sample does not end the session. New samples use fresh windows. Explicit Freeze,
+control-socket closure, host disconnect and actual hardware faults still stop
+control. Reconnection advertises the input host and does not automatically resume.
+
+A joint reference displaced outside its tracking band recovers inward at the
+configured velocity while other joints continue. This software tracking state
+is distinct from a reported servo protection fault. Status shows both per motor,
+including the reported reason and target-versus-measured error.

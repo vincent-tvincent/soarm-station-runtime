@@ -27,7 +27,7 @@ export class ManualPanel {
     this.arm = "";
     this.mode = "joint";
     this.followGripper = true;
-    this.level = 2;
+    this.level = 3;
     this.keys = new Set();
     this.epoch = 0;
     this.intentGeneration = 0;
@@ -43,9 +43,9 @@ export class ManualPanel {
     element.innerHTML = `<label class="field-label manual-mode-label">Control mode<select id="manual-mode" aria-label="Control mode"><option value="joint">Joint targets</option><option value="ik">IK · keyboard jog</option><option value="leader">Leader arm</option><option value="gamepad">Gamepad · Xbox / DualSense</option></select></label>
     <div class="manual-control-area">
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
-      <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Normal</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 2 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
+      <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Coarse</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 3 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
       <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
-      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">The selected leader follows through the station. Home stops following.</p></div>
+      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Unlock, align the leader with the held follower, then follow. Freeze or Home pauses following.</p></div>
     </div>
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p><div id="manual-fk"></div>`;
     this.el = (id) => element.querySelector("#" + id);
@@ -256,7 +256,7 @@ export class ManualPanel {
       !!this.measured();
     this.el("start-manual").disabled =
       !ready ||
-      active ||
+      (active && !(this.mode === "leader" && this.isOwnStream() && this.client.currentOperation?.operationId && !this.leaderRun)) ||
       this.busy ||
       (["ik","gamepad"].includes(this.mode) && !this.descriptor?.available) ||
       (this.mode === "gamepad" && (!this.descriptor?.analog_rates || !this.gamepad?.canStart())) ||
@@ -264,9 +264,9 @@ export class ManualPanel {
     this.el("start-manual").innerHTML = this.busy
       ? "Starting…"
       : this.mode === "leader"
-        ? "Follow"
+        ? "Unlock / follow"
         : this.mode === "gamepad" ? "Start <kbd>A / ✕</kbd>" : "Start";
-    this.el("stop-manual").innerHTML = this.mode === "gamepad" ? "Stop <kbd>B / ○</kbd>" : "Stop <kbd>Esc</kbd>";
+    this.el("stop-manual").innerHTML = this.mode === "leader" ? "Freeze <kbd>Esc</kbd>" : this.mode === "gamepad" ? "Stop <kbd>B / ○</kbd>" : "Stop <kbd>Esc</kbd>";
     this.el("home-manual").innerHTML = this.mode === "gamepad" ? "Home <kbd>Y / △</kbd>" : "Home <kbd>N</kbd>";
     this.el("stop-manual").disabled = !this.connected || !this.arm;
     for (const name of ["home", "fold"]) {
@@ -396,10 +396,10 @@ export class ManualPanel {
       context.principal === this.client.operatorSessionId
     );
   }
-  async holdArm(arm) {
+  async holdArm(arm, scope = null) {
     this.expectedTermination++;
     try {
-      return await this.client.hold(arm);
+      return await this.client.hold(arm, scope);
     } finally {
       this.expectedTermination--;
     }
@@ -473,10 +473,28 @@ export class ManualPanel {
     const context = this.intentContext();
     this.actionBusy(1);
     try {
+      if (context.mode === "leader") {
+        if (this.leaderRun) throw Error("Freeze the current leader run first.");
+        if (this.isOwnStream()) {
+          // Home can leave this panel's preset stream holding its target.
+          // Retire that exact local stream before requesting leader ownership.
+          const operation = this.client.currentOperation;
+          if (!operation.operationId) throw Error("Waiting for the preset stream to finish opening.");
+          await this.holdArm(context.arm, {
+            controller_session: context.session,
+            operator_session_id: context.principal,
+            operation_id: operation.operationId,
+          });
+          this.ownsStream = false;
+          if (!this.currentIntent(context)) return;
+        } else if (this.client.currentOperation || this.stateForArm().operation_id) {
+          throw Error("Another operation owns the arm. Stop it before unlocking the leader.");
+        }
+      }
       if (!this.dirty || this.mode !== "joint") this.resetTargets();
       if (!this.target) throw Error("Complete measured pose is unavailable.");
       const staged = copy(this.target);
-      if (!this.stateForArm().permission) {
+      if (context.mode === "leader" || !this.stateForArm().permission) {
         await this.client.enable(context.arm);
         if (!this.currentIntent(context)) {
           await this.retireCanceled(context);
@@ -496,6 +514,7 @@ export class ManualPanel {
             runtime_boot_id: context.boot,
             controller_session: context.session,
             hz: 100,
+            pickup: true,
             follow_gripper: this.followGripper,
             gripper_reference: this.preservedGripper(this.measured()),
           },
@@ -508,7 +527,7 @@ export class ManualPanel {
           return;
         }
         this.leaderRun = run;
-        this.note("Leader starting · waiting for fresh input.");
+        this.note("Unlocked · align the leader with the frozen follower to begin following.");
       } else {
         await this.client.startManual(context.arm);
         if (!this.currentIntent(context)) {
@@ -547,7 +566,7 @@ export class ManualPanel {
     try {
       if (run) await this.stopLeader(run);
       else if (arm && this.connected) await this.holdArm(arm);
-      this.note("Stopped. Support torque is preserved.");
+      this.note(this.mode === "leader" ? "Frozen. Unlock, then align the leader with the held pose to resume." : "Stopped. Support torque is preserved.");
     } finally {
       this.actionBusy(-1);
     }
@@ -624,10 +643,12 @@ export class ManualPanel {
   }
   async sendIntent(target, message, context) {
     if (!this.currentIntent(context)) return;
+    let grantRequired = false;
     if (this.leaderRun) {
       const run = this.leaderRun;
       this.leaderRun = null;
       await this.stopLeader(run);
+      grantRequired = true;
       if (!this.currentIntent(context)) return;
     }
     if (!this.isOwnStream()) {
@@ -635,9 +656,10 @@ export class ManualPanel {
         if (this.client.currentOperation.armId !== context.arm)
           throw Error("Another arm owns the current operation.");
         await this.holdArm(context.arm);
+        grantRequired = true;
         if (!this.currentIntent(context)) return;
       }
-      if (!this.stateForArm().permission) {
+      if (grantRequired || !this.stateForArm().permission) {
         try {
           await this.client.enable(context.arm);
         } catch (error) {
@@ -833,6 +855,12 @@ export class ManualPanel {
     if (!measured) { this.renderJacobianRank(null,true); return; }
     this.poseLoading = true;
     const arm = this.arm;
+    const observation = {
+      armId: arm,
+      controllerSession: this.stateForArm().controller_session,
+      stamp: copy(this.snapshot?.joints?.[arm]?.header?.stamp),
+      sequence: this.stateForArm().sample_sequence,
+    };
     try {
       const host = this.hosts.find(
         (h) => h.id === this.el("leader-host").value,
@@ -851,7 +879,7 @@ export class ManualPanel {
         `/api/manual/${encodeURIComponent(arm)}/fk`,
         { ...measured, target: visualOverlay },
       );
-      if (arm !== this.arm || !this.connected) return;
+      if (arm !== this.arm || !this.connected || observation.controllerSession !== this.stateForArm().controller_session) return;
       const g = value.measured;
       this.renderJacobianRank(g.jacobian, !this.stateForArm().feedback_valid);
       const readouts = {
@@ -871,6 +899,7 @@ export class ManualPanel {
         record?.motors || [],
         !this.stateForArm().feedback_valid || record?.state === "stale",
         this.mode === "leader" ? "Leader" : "Target",
+        observation,
       );
     } catch (e) {
       this.renderJacobianRank(null);
@@ -881,6 +910,7 @@ export class ManualPanel {
     }
   }
   renderJacobianRank(value, stale = false) {
+    if (stale || !value) this.fk.updateMeasuredIndicator?.({}, true);
     const display = jacobianRankPresentation(value,stale);
     this.el('ik-mobility-rank').textContent = display.rank;
     this.el('ik-mobility-detail').textContent = display.detail;

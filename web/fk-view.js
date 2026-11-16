@@ -36,8 +36,9 @@ export class JointIssueColors {
   constructor() {
     this.states = new Map();
   }
-  update(motors = []) {
+  update(motors = [], {stale = false} = {}) {
     for (const motor of motors) {
+      if(typeof motor?.name !== 'string' || !motor.name)continue;
       const issue = motor.motion_issue;
       if (!issue) continue;
       const previous = this.states.get(motor.name);
@@ -47,7 +48,8 @@ export class JointIssueColors {
           ...pending.filter((item) => item.kind !== issue.kind),
           issue,
         ];
-      } else if (issue.feedback_fresh && Array.isArray(issue.clear_kinds)) {
+      } else if (!stale && !['stale','unavailable'].includes(motor.source_state) &&
+        issue.feedback_fresh && Array.isArray(issue.clear_kinds)) {
         pending = pending.filter(
           (item) => !issue.clear_kinds.includes(item.kind),
         );
@@ -64,16 +66,82 @@ export class JointIssueColors {
     this.states.clear();
   }
 }
+export class JointIssueCache {
+  constructor() {this.caches=new Map();this.sessions=new Map();}
+  forArm(armId,controllerSession='') {
+    const session=typeof controllerSession==='string' && controllerSession
+      ?controllerSession:this.sessions.get(armId)||'';
+    const previous=this.sessions.get(armId)||'';
+    if(session && session!==previous) {
+      this.caches.delete(JSON.stringify([armId,previous]));
+      this.sessions.set(armId,session);
+    }
+    const key=JSON.stringify([armId,session]);
+    if(!this.caches.has(key))this.caches.set(key,new JointIssueColors());
+    return this.caches.get(key);
+  }
+  update(armId,controllerSession,motors=[],options={}) {
+    const issues=this.forArm(armId,controllerSession);issues.update(motors,options);return issues;
+  }
+}
+function issueLabel(issue) {
+  if(['REFERENCE_OUTSIDE_ENVELOPE','TRACKING_ENVELOPE_LOST'].includes(issue.code))return 'Tracking blocked';
+  if(issue.kind==='stall')return 'Tracking stalled';
+  return {SERVO_PROTECTION:'Servo protection',FEEDBACK_ERROR:'Feedback error',
+    CALIBRATION_MISMATCH:'Calibration fault'}[issue.code] || 'Reported fault';
+}
+function issueDetail(issue) {
+  const error=Number.isFinite(issue.tracking_error)?
+    `tracking error ${issue.tracking_error.toFixed(3)} ${issue.tracking_error_unit==='percent'?'%':issue.tracking_error_unit||''}`.trim():null;
+  return [`${issueLabel(issue)} (${issue.kind}${issue.code?' · '+issue.code:''})`,issue.reason,
+    error,issue.source?'source '+issue.source:null].filter(Boolean).join(' · ');
+}
+export function motorIssuePresentation(motor,states,{stale=false}={}) {
+  const current=motor?.motion_issue,latched=states?.get(motor?.name);
+  const pending=latched?.pending || (latched?[latched]:[]);
+  const unavailable=stale || ['stale','unavailable'].includes(motor?.source_state);
+  if(pending.length) {
+    const retained=unavailable || !current?.feedback_fresh || pending.some(issue=>
+      current?.active!==true || current.kind!==issue.kind || current.code!==issue.code);
+    return {active:true,kind:latched.kind,state:retained?'retained':'active',
+      label:issueLabel(latched)+(pending.length>1?` +${pending.length-1}`:'')+(retained?' · retained':''),
+      detail:pending.map(issueDetail).join(' / ')+(retained?' · Retained report; awaiting a fresh explicit clear.':'')};
+  }
+  if(!unavailable && current?.state==='clear' && current.feedback_fresh && current.clear_kinds?.length)
+    return {active:false,kind:null,state:'clear',label:'Following',detail:current.reason||'Fresh following feedback reported.'};
+  return {active:false,kind:null,state:unavailable?'stale':'unknown',label:unavailable?'Status stale':'Not reported',
+    detail:unavailable?'Motion issue status is stale or unavailable.':current?.reason||'No motor-specific motion issue observation was reported.'};
+}
+const RANK_TOOLTIP='Numerical rank of the full arm geometric Jacobian, excluding the gripper. Lower rank is redder; near-singular matrices can still have full rank.';
+export function measuredPosePresentation({stamp,sequence,jacobian}={},stale=false) {
+  if(stale)return {text:'Pose stale',state:'stale',title:'Waiting for a fresh measured joint sample.'};
+  const validSequence=Number.isSafeInteger(sequence) && sequence>=0;
+  const validStamp=Number.isSafeInteger(stamp?.sec) && stamp.sec>=0 &&
+    Number.isInteger(stamp?.nanosec) && stamp.nanosec>=0 && stamp.nanosec<1e9;
+  const millis=validStamp?stamp.sec*1000+Math.floor(stamp.nanosec/1e6):0;
+  const date=millis>0 && Number.isFinite(millis)?new Date(millis):null;
+  const iso=date && !Number.isNaN(date.getTime())?date.toISOString():null;
+  if(!iso && !validSequence)return {text:'Waiting for sample',state:'unknown',title:'A measured joint timestamp or sample sequence has not been reported.'};
+  const detail=[iso?`Measured joint timestamp: ${iso}`:null,validSequence?`Sample #${sequence}`:null];
+  const singular=jacobian?.singular_values;
+  if(Array.isArray(singular) && singular.length && singular.every(value=>Number.isFinite(value)&&value>=0))
+    detail.push(`Minimum singular value: ${Math.min(...singular).toExponential(3)}`);
+  if(Number.isFinite(jacobian?.rank_tolerance) && jacobian.rank_tolerance>=0)
+    detail.push(`Rank tolerance: ${jacobian.rank_tolerance.toExponential(3)}`);
+  return {text:iso?`Pose ${iso.slice(11,23)}Z`:`Pose #${sequence}`,state:'measured',
+    title:detail.join(' · ')+'. The numerical rank can remain unchanged across measured updates.'};
+}
 export class FKView {
   constructor(element) {
     this.element = element;
-    this.issues = new JointIssueColors();
-    this.issueCaches = new Map();
+    this.issueCaches = new JointIssueCache();
+    this.issues = this.issueCaches.forArm('');
     this.armId = "";
+    this.controllerSession = "";
     this.yaw = -0.68;
     this.pitch = 0.42;
     this.zoom = 1;
-    element.innerHTML = `<div class="panel-subheading"><h3>Arm pose</h3><div class="fk-jacobian" id="ik-mobility" title="Numerical rank of the full arm geometric Jacobian, excluding the gripper. Lower rank is redder; near-singular matrices can still have full rank."><span>Jacobian rank</span><strong id="ik-mobility-rank">—</strong><span id="ik-mobility-detail" class="sr-only">Measured pose</span></div><button type="button" class="text-button" data-reset>Reset view</button></div><div class="fk-stage" tabindex="0" aria-label="Arm pose. Drag to orbit, scroll to zoom, double-click to reset."><svg viewBox="0 0 420 300" role="img" aria-label="Measured robot joint positions"></svg><span class="fk-empty">Waiting for measured pose</span></div><div class="fk-legend"><span>— Measured</span><span class="muted">┄ Target</span><span class="fk-alert-key">● Fault / stall</span><span style="display:inline-flex;align-items:center;gap:4px"><svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true"><line x1="0" y1="5" x2="18" y2="5" stroke="${DIFFERENCE_COLOR}" stroke-width="1.1" stroke-dasharray="3 4"/></svg>Position difference</span></div><div class="fk-readout"></div><p class="detail-note fk-status">Drag to orbit · scroll to zoom</p>`;
+    element.innerHTML = `<div class="panel-subheading"><h3>Arm pose</h3><div class="fk-jacobian" id="ik-mobility" title="${RANK_TOOLTIP}"><span>Jacobian rank</span><strong id="ik-mobility-rank">—</strong><span id="ik-mobility-detail" class="sr-only">Measured pose</span><span id="ik-measured-update" class="fk-measured-update">Waiting for sample</span></div><button type="button" class="text-button" data-reset>Reset view</button></div><div class="fk-stage" tabindex="0" aria-label="Arm pose. Drag to orbit, scroll to zoom, double-click to reset."><svg viewBox="0 0 420 300" role="img" aria-label="Measured robot joint positions"></svg><span class="fk-empty">Waiting for measured pose</span></div><div class="fk-legend"><span>— Measured</span><span class="muted">┄ Target</span><span class="fk-alert-key">● Fault / stall</span><span style="display:inline-flex;align-items:center;gap:4px"><svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true"><line x1="0" y1="5" x2="18" y2="5" stroke="${DIFFERENCE_COLOR}" stroke-width="1.1" stroke-dasharray="3 4"/></svg>Position difference</span></div><div class="fk-readout"></div><p class="detail-note fk-status">Drag to orbit · scroll to zoom</p>`;
     this.svg = element.querySelector("svg");
     this.stage = element.querySelector(".fk-stage");
     const reset = () => {
@@ -139,22 +207,32 @@ export class FKView {
       }
     };
   }
-  resetArm(armId = "") {
-    this.issueCaches.set(this.armId, this.issues);
+  resetArm(armId = "",controllerSession = "") {
     this.armId = armId;
-    this.issues = this.issueCaches.get(armId) || new JointIssueColors();
+    this.controllerSession=controllerSession;
+    this.issues = this.issueCaches.forArm(armId,controllerSession);
     this.geometry = null;
     this.target = null;
+    this.updateMeasuredIndicator();
     this.draw();
   }
-  update(geometry, target, motors, stale = false, overlayLabel = "Target") {
+  update(geometry, target, motors, stale = false, overlayLabel = "Target",observation = {}) {
     this.element.querySelector(".fk-legend span:nth-child(2)").textContent =
       "┄ " + overlayLabel;
     this.geometry = geometry;
     this.target = target;
-    this.issues.update(motors);
+    if(observation.armId && observation.armId!==this.armId)this.controllerSession='';
+    this.armId=observation.armId||this.armId;
+    this.controllerSession=observation.controllerSession||this.controllerSession;
+    this.issues=this.issueCaches.update(this.armId,this.controllerSession,motors,{stale});
     this.stale = stale;
+    this.updateMeasuredIndicator({...observation,jacobian:geometry?.jacobian},stale);
     this.draw();
+  }
+  updateMeasuredIndicator(observation={},stale=false) {
+    const display=measuredPosePresentation(observation,stale),indicator=this.element.querySelector('#ik-measured-update');
+    if(indicator){indicator.textContent=display.text;indicator.title=display.title;indicator.dataset.state=display.state;}
+    const rank=this.element.querySelector('#ik-mobility');if(rank)rank.title=RANK_TOOLTIP+' '+display.title;
   }
   project(p) {
     const [x, y, z] = p,

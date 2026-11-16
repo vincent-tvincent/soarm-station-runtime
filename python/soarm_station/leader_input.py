@@ -293,6 +293,17 @@ class ProcessSampler:
             self.connection.close();self.process=None;self.connection=None
 
 
+def pickup_matches(sample, reference, follow_gripper=True):
+    """Match raw calibrated angles, never the clipped command; no alignment timer."""
+    if reference is None:return True
+    positions=sample.get('positions',{})
+    if set(positions)!=set(reference['positions']):return False
+    if any(not math.isfinite(positions[n]) or abs(positions[n]-q)>reference['joint_tolerance_rad']
+           for n,q in reference['positions'].items()):return False
+    return not follow_gripper or (math.isfinite(sample.get('gripper',float('nan')))
+        and abs(sample['gripper']-reference['gripper'])<=reference['gripper_tolerance_percent'])
+
+
 class InputHostBridge:
     def __init__(self, config, url, tls, headers=None, sampler_factory=ProcessSampler, enumerate_ports=serial_inventory):
         self.config, self.url, self.tls, self.headers = config, url.rstrip("/"), tls, headers or {}
@@ -339,7 +350,7 @@ class InputHostBridge:
             async with self.session.ws_connect(self.url+"/ws/control",ssl=self.tls,max_msg_size=262144,heartbeat=10) as control:
                 await control.send_json({"arm_id":arm_id,"runtime_boot_id":request["runtime_boot_id"],
                     "controller_session":request["controller_session"],"operator_session_id":request["operator_session_id"],
-                    "operation_type":"DIRECT","mode":"STREAM"})
+                    "operation_type":"DIRECT","mode":"STREAM","input_semantics":"persistent_target"})
                 latest={"grant":None,"received":0.,"feedback_received":0.,"state":None}
                 async def receive():
                     async for message in control:
@@ -357,6 +368,9 @@ class InputHostBridge:
                             raise RuntimeError(result.get('reason') or result.get('result_code') or 'Follower operation ended')
                 receiver=asyncio.create_task(receive());sequence=0;started=time.monotonic();last_report=0.
                 last_sent_gripper=None
+                pickup_reference=request.get('pickup_reference')
+                picked_up=pickup_reference is None
+                sample_count=0
                 try:
                     while True:
                         tick=time.monotonic()
@@ -373,6 +387,7 @@ class InputHostBridge:
                         if tick-grant_received >= grant.get("window_valid_for_ms",0)/1000:
                             await asyncio.sleep(.002);continue
                         sample=await sample_until_control_ends(sampler,receiver)
+                        sample_count+=1
                         if receiver.done():await receiver;raise RuntimeError("Follower control socket closed")
                         # A delayed read can miss this server window. Drop it and
                         # read again under a fresh window instead of ending a run.
@@ -384,19 +399,22 @@ class InputHostBridge:
                         body=bounded_leader_target(sample['body'],request.get('joint_limits'))
                         follow=request.get('follow_gripper',True)
                         body['gripper']=select_gripper_command(body.get('gripper'),follow,last_sent_gripper,
-                            request.get('gripper_reference'),latest['state'])
-                        sequence+=1
-                        await control.send_json({**grant,"arm_id":arm_id,"frame_kind":"COMMAND","sequence":sequence,
-                            "input_id":uuid.uuid4().hex,"body":body})
-                        last_sent_gripper=body['gripper']
+                            pickup_reference['gripper'] if pickup_reference else request.get('gripper_reference'),latest['state'])
+                        if not picked_up and pickup_matches(sample['body'],pickup_reference,follow):
+                            picked_up=True
+                        if picked_up:
+                            sequence+=1
+                            await control.send_json({**grant,"arm_id":arm_id,"frame_kind":"COMMAND","sequence":sequence,
+                                "input_id":uuid.uuid4().hex,"body":body})
+                            last_sent_gripper=body['gripper']
                         if tick-last_report>=.1:
                             reason=latest["grant"].get("reason","")
                             running=(latest["state"] or {}).get("phase")=="ACTIVE" and (latest["state"] or {}).get("operation_id")==grant.get("operation_id")
-                            await self.emit(type="state",run_id=run_id,state="RUNNING" if running else "READY",
-                                reason=reason or ("" if running else "Following from current follower reference"),operation_id=grant.get("operation_id"),pose=sample["body"],
+                            await self.emit(type="state",run_id=run_id,state="ALIGNING" if not picked_up else "RUNNING" if running else "READY",
+                                reason="Align the leader with the held follower pose; there is no time limit" if not picked_up else reason or ("" if running else "Following from current follower reference"),operation_id=grant.get("operation_id"),pose=sample["body"],
                                 follow_gripper=follow,gripper_reference=last_sent_gripper,
                                 sample_age_ms=(time.monotonic_ns()-sample["completed_ns"])/1e6,
-                                measured_hz=sequence/max(.001,time.monotonic()-started),sequence=sequence)
+                                measured_hz=sample_count/max(.001,time.monotonic()-started),sequence=sequence)
                             last_report=tick
                         await asyncio.sleep(max(0,1/request["hz"]-(time.monotonic()-tick)))
                 finally:

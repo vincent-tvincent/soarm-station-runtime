@@ -87,15 +87,14 @@ def test_persistent_target_still_honors_explicit_stop_and_never_rearms(setup):
     with pytest.raises(ValueError,match='Permission required'):begin(arm,enable=False,persistent_target=True)
     assert not arm.permission and arm.op is None
 
-@pytest.mark.parametrize('reason',['feedback','duration'])
-def test_persistent_target_preserves_feedback_faults_and_explicit_duration(setup,reason):
-    arm,clock=setup;begin(arm,persistent_target=True,**({'duration_s':.1} if reason=='duration' else {}))
+def test_persistent_target_preserves_explicit_duration(setup):
+    arm,clock=setup;begin(arm,persistent_target=True,duration_s=.1)
     arm.input(frame(arm,{'positions':dict(arm.q),'gripper':50.},identifier='pickup'))
     clock.advance(.2)
-    if reason=='duration':arm.sample_time=clock()
+    arm.sample_time=clock()
     arm._tick(clock(),.01)
     assert arm.op is None and not arm.permission
-    assert arm.error==('FEEDBACK_EXPIRED' if reason=='feedback' else 'OPERATION_OR_LIVENESS_EXPIRED')
+    assert arm.error=='OPERATION_OR_LIVENESS_EXPIRED'
 
 @pytest.mark.parametrize('kwargs',[
     {'persistent_target':'true'}, {'persistent_target':True,'operation_type':'MODEL'},

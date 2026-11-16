@@ -19,7 +19,7 @@ calculator.roll_preset('minus_90', positions_rad, gripper_percent)
 
 `positions_rad` is the exact full configured body-joint dictionary. The gripper is a separate finite percentage: 0 closed, 100 open. Do not fill a missing observation with zero/50 or infer a jaw angle from that percentage. FK can display finite observations outside command bounds; generated targets must remain inside the **configured** joint bounds. This calculator does not silently replace those bounds with different URDF bounds. Deployment configuration must already reflect the selected calibrated model/domain.
 
-`describe()` returns `available`, `reason`, `frame_id`, `model_base_frame`, `tcp_frame`, `model_sha256`, `joint_names`, `keymap`, `speed_levels`, `default_level:2`, `max_dt_s:0.1`, `position_only`, `poses:{home:{available,reason?},fold:{available,reason?}}`, a derived `presets:{home:bool,fold:bool}`, `wrist_roll_reference_rad`, and `roll_presets_rad`. Missing URDF makes FK/IK unavailable; missing named poses do not disable ordinary FK/IK. Geometry is explicitly not a collision check.
+`describe()` returns `available`, `reason`, `frame_id`, `model_base_frame`, `tcp_frame`, `model_sha256`, `joint_names`, `keymap`, `speed_levels`, `default_level:3`, `max_dt_s:0.1`, `position_only`, `poses:{home:{available,reason?},fold:{available,reason?}}`, a derived `presets:{home:bool,fold:bool}`, `wrist_roll_reference_rad`, and `roll_presets_rad`. Missing URDF makes FK/IK unavailable; missing named poses do not disable ordinary FK/IK. Geometry is explicitly not a collision check.
 
 `step()` returns:
 
@@ -60,7 +60,7 @@ The TCP includes its fixed URDF transform. The gripper marker stays at its hinge
 | R / T / E | configured motor wrist-roll reference −90° / reference / +90° |
 | N / Space / M | configured Home / Home preserving wrist / Fold |
 
-The caller handles one-shot keys and position-only toggle (Tab); `step` receives held motion keys, `level`, `shift`, and `position_only`. It accepts browser `KeyboardEvent.code` names and lower-case motion letters/brackets. Level 2 is Normal/default for this UI. Input rates for levels 1–5 are 15/40/80/120/160 mm/s, 10/25/45/70/100 °/s and 10/30/60/90/120 jaw percentage points/s, as in the prior input router. These are requested rates, not measured hardware speeds; configured per-joint/gripper velocity limits still apply. XYZ diagonals are normalized. Optional `manual_control.control_frame_yaw_rad` rotates the XY control frame.
+The caller handles one-shot keys and position-only toggle (Tab); `step` receives held motion keys, `level`, `shift`, and `position_only`. It accepts browser `KeyboardEvent.code` names and lower-case motion letters/brackets. Level 3 (Coarse) is the default; level 2 remains Normal. Input rates for levels 1–5 are 15/40/80/120/160 mm/s, 10/25/45/70/100 °/s and 10/30/60/90/120 jaw percentage points/s, as in the prior input router. These are requested rates, not measured hardware speeds; configured per-joint/gripper velocity limits still apply. XYZ diagonals are normalized. Optional `manual_control.control_frame_yaw_rad` rotates the XY control frame.
 
 Position-only ignores orientation keys/constraints. Ordinary XYZ/elevation jogging freezes the wrist-roll motor unless G/S is active, avoiding an extra independent roll constraint on the five-axis arm. G/S solves position, elevation and tool roll with free azimuth. R/T/E instead select an absolute **motor wrist-roll** target and preserve the other joints; repeated presses do not accumulate angles.
 

@@ -22,7 +22,7 @@ function fixture(){
   const el=id=>{if(!elements.has(id))elements.set(id,{value:id==='leader-host'?'host':id==='leader-device'?'leader':'',textContent:'Normal',disabled:false,dataset:{},replaceChildren(){},classList:{toggle(){}}});return elements.get(id);};
   const client={operatorSessionId:'operator',currentOperation:null,
     async enable(arm){calls.push(['enable',arm]);states[arm].permission=true;return{accepted:true};},
-    async startManual(arm){calls.push(['start',arm]);this.currentOperation={armId:arm,type:'DIRECT',mode:'STREAM',ready:true};return this.currentOperation;},
+    async startManual(arm){calls.push(['start',arm]);this.currentOperation={armId:arm,type:'DIRECT',mode:'STREAM',operationId:'test-op',ready:true};return this.currentOperation;},
     async hold(arm){calls.push(['hold',arm]);this.currentOperation=null;states[arm].permission=false;emitTransportClose(panel,'stopping',arm);return{success:true};},
     setManualTarget(value){calls.push(['target',structuredClone(value)]);},
     async request(path,body){calls.push(['request',path,structuredClone(body)]);return{target:target(1)};},
@@ -135,9 +135,47 @@ for(const cancel of ['stop','arm','mode','disconnect'])test(`delayed Home cannot
 test('a late leader start is explicitly stopped after cancellation',async()=>{
   const{panel,client,calls,states}=fixture(),gate=deferred();panel.mode='leader';states.a.permission=true;
   client.request=async(path,body)=>{calls.push(['request',path,body]);return path.endsWith('/start')?gate.promise:{accepted:true,stopped:true,hold_confirmed:true};};
-  const start=panel.start();await panel.stop();gate.resolve({accepted:true,run_id:'late-run'});await start;
+  const start=panel.start();await Promise.resolve();await panel.stop();gate.resolve({accepted:true,run_id:'late-run'});await start;
   assert.equal(panel.leaderRun,null);
   assert(calls.some(x=>x[0]==='request'&&x[1].endsWith('/stop')&&x[2].run_id==='late-run'));
+});
+
+test('Leader unlock retires only its own Home stream and refreshes permission before pickup',async()=>{
+  const {panel,client,calls,states}=fixture();panel.mode='leader';states.a.permission=true;
+  panel.leaderRun={host:'host',run_id:'first'};
+  client.request=async(path,body)=>{
+    calls.push(['request',path,body]);
+    if(path.endsWith('/stop'))return {stopped:true,hold_confirmed:true}; // intentionally stale permission cache
+    if(path.endsWith('/start'))return {accepted:true,run_id:'second'};
+    return {target:target(.4,50)};
+  };
+  await panel.preset('home');
+  assert(panel.isOwnStream());assert.equal(panel.leaderRun,null);
+  assert.deepEqual(calls.filter(c=>['enable','start'].includes(c[0])),[['enable','a'],['start','a']]);
+  ManualPanel.prototype.updateControls.call(panel);
+  assert.equal(panel.el('start-manual').disabled,false);
+  const offset=calls.length;
+  await panel.start();
+  assert.deepEqual(calls.slice(offset).filter(c=>['hold','enable','request'].includes(c[0])).map(c=>c[0]),['hold','enable','request']);
+  assert.equal(panel.leaderRun.run_id,'second');assert(!panel.ownsStream);
+  assert(calls.some(c=>c[0]==='request'&&c[1].endsWith('/start')&&c[2].pickup===true));
+});
+
+test('Leader unlock refuses a foreign operation without hold or permission changes',async()=>{
+  const {panel,client,calls,states}=fixture();panel.mode='leader';
+  states.a.operation_id='foreign';client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM'};
+  await assert.rejects(panel.start(),/Another operation/);
+  assert(!calls.some(c=>['hold','enable','request'].includes(c[0])));
+});
+
+test('Stop during the Home to Leader handoff cannot start following afterward',async()=>{
+  const {panel,client,calls}=fixture(),gate=deferred();panel.mode='leader';panel.ownsStream=true;
+  client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',operationId:'test-op'};
+  const hold=client.hold.bind(client);let first=true;
+  client.hold=async arm=>{if(first){first=false;await gate.promise;}return hold(arm);};
+  const pending=panel.start();await panel.stop();gate.resolve();await pending;
+  assert.equal(panel.leaderRun,null);
+  assert(!calls.some(c=>c[0]==='enable'||c[0]==='request'&&c[1].endsWith('/start')));
 });
 
 test('continuous IK advances its accepted reference with only one pending solve',async()=>{

@@ -72,17 +72,37 @@ class LeaderHostRegistry:
 
     async def _hold_current(self, active):
         if active is None:return {'success':False,'reason':'No registry-owned run'}
-        state=self.state_provider().get('arms',{}).get(active['arm_id'])
+        async def read_state():
+            value=(self.start_state_provider or self.state_provider)()
+            value=await value if inspect.isawaitable(value) else value
+            return value.get('arms',{}).get(active['arm_id'])
+        async def confirm_ended(state):
+            # WSS EOF may have already revoked this run before its stop ACK.
+            # Read native completion, not the lagging ROS permission cache.
+            deadline=time.monotonic()+1.5
+            while (state and state.get('controller_session')==active['controller_session']
+                   and not state.get('operation_id') and not state.get('permission')
+                   and state.get('phase')!='FAULT'):
+                if not state.get('hold_pending',False):
+                    return {'success':True,'reason':'Run already held and permission disabled'}
+                if time.monotonic()>=deadline:break
+                await asyncio.sleep(.01);state=await read_state()
+            return {'success':False,'reason':'Owned hold is not confirmed; no unrelated hold issued'}
+        state=await read_state()
         if not state or state.get('controller_session')!=active['controller_session']:
             return {'success':False,'reason':'Controller session changed; no unrelated hold issued'}
         current=state.get('operation_id','');owned=active.get('operation_id','')
         if current and current!=owned:
             return {'success':False,'reason':'Current operation ownership not confirmed; no unrelated hold issued'}
         if not current and not state.get('permission',False):
-            return {'success':True,'reason':'Run already stopped and permission disabled'}
+            return await confirm_ended(state)
         result=self.hold_callback(active['arm_id'],active['controller_session'],active['operator_session_id'],active.get('operation_id') or None)
         result=await result if inspect.isawaitable(result) else result
-        return result if isinstance(result,dict) else {'success':bool(result)}
+        result=result if isinstance(result,dict) else {'success':bool(result)}
+        if not result.get('success'):
+            ended=await confirm_ended(await read_state())
+            if ended['success']:return ended
+        return result
 
     async def stop_host(self, host, run_id, principal, reason='OPERATOR_STOP'):
         active=host.get('active')
@@ -159,6 +179,19 @@ class LeaderHostRegistry:
         if type(hz) not in (int,float) or not 50<=hz<=100:raise ValueError('Leader input rate must be 50..100 Hz')
         follow=body.get('follow_gripper',True)
         if type(follow) is not bool:raise ValueError('follow_gripper must be boolean')
+        pickup=body.get('pickup',False)
+        if type(pickup) is not bool:raise ValueError('pickup must be boolean')
+        pickup_reference=None
+        if pickup:
+            positions=arm.get('reference_positions') or arm.get('positions')
+            if (not isinstance(positions,dict) or set(positions)!=set(joints)
+                    or any(type(v) not in (int,float) or not math.isfinite(v) for v in positions.values())):
+                raise ValueError('Measured follower pickup pose is unavailable')
+            jaw=arm.get('reference_gripper')
+            if jaw is None:jaw=arm.get('gripper',arm.get('gripper_percent'))
+            if type(jaw) not in (int,float) or not math.isfinite(jaw):raise ValueError('Measured follower jaw is unavailable')
+            pickup_reference={'positions':dict(positions),'gripper':max(0.,min(100.,jaw)),
+                              'joint_tolerance_rad':.12,'gripper_tolerance_percent':10.}
         reference=body.get('gripper_reference')
         if type(reference) in (int,float) and math.isfinite(reference):
             if not 0<=reference<=100:raise ValueError('gripper_reference must be percent in [0,100]')
@@ -168,6 +201,7 @@ class LeaderHostRegistry:
         active={'run_id':run_id,'device_id':device['id'],'arm_id':arm_id,'operator_session_id':principal,
                 'runtime_boot_id':arm['runtime_boot_id'],'controller_session':arm['controller_session'],
                 'operation_id':'','hz':float(hz),'follow_gripper':follow,'gripper_reference':reference,
+                'pickup_reference':pickup_reference,
                 'last_browser':time.monotonic()}
         host.update(active=active,state='STARTING',reason='Opening selected leader and checking calibration',latest_pose=None,last_sample_report=None)
         try:

@@ -433,12 +433,27 @@ export class StationClient {
     this._notifyState(true);
     return result;
   }
-  async hold(armId) {
+  async hold(armId, scope = null) {
     this._requireConnected();
     this._arm(armId);
-    if (this._active?.armId === armId)
+    // Stop producing targets now, but keep the owned connection alive until
+    // conditional Hold is acknowledged. Closing it first lets EOF revoke the
+    // owner before the scoped request arrives, falsely rejecting the handoff.
+    const candidate = this._active?.armId === armId ? this._active : null;
+    const retiring = candidate && (!scope || (
+      candidate.operationId === scope.operation_id &&
+      candidate.session === scope.controller_session &&
+      candidate.principal === scope.operator_session_id)) ? candidate : null;
+    const ownedSocket = scope ? retiring?.ws : null;
+    if (ownedSocket) retiring.ws = null;
+    if (retiring)
       this._stopLocalOperation("stopping", "Hold requested");
-    const result = await this._request("/api/hold", { arm_id: armId });
+    let result;
+    try {
+      result = await this._request("/api/hold", { arm_id: armId, ...(scope || {}) });
+    } finally {
+      ownedSocket?.close();
+    }
     if (!result.success)
       throw new StationError(
         result.message || "Hold not confirmed",

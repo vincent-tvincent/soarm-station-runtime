@@ -38,7 +38,7 @@ class ManualRoutes:
                 if lock.locked():
                     return web.json_response({'message': 'Previous IK calculation is still running'}, status=409)
                 async with lock:
-                    shared = {'level': body.get('level', 2),
+                    shared = {'level': body.get('level', 3),
                               'reference_positions': body.get('reference_positions'),
                               'reference_gripper': body.get('reference_gripper')}
                     if operation == 'analog-step':

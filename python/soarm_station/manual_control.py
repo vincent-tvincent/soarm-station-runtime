@@ -82,7 +82,7 @@ def _semantics(rotation, reference=None):
     return np.array([elevation, roll]), math.atan2(float(z[1]), float(z[0]))
 
 
-def keyboard_rates(keys, level=2, shift=False, yaw_rad=0., position_only=False):
+def keyboard_rates(keys, level=3, shift=False, yaw_rad=0., position_only=False):
     """Map browser KeyboardEvent.code (or letter aliases) to explicit SI rates."""
     if type(level) is not int or not 1 <= level <= 5:
         raise ValueError('level must be an integer in [1,5]')
@@ -288,7 +288,7 @@ class ManualControl:
         return {'available': self.model_error is None, 'reason': self.model_error,
                 'frame_id': self.frame, 'model_base_frame': self.model_base, 'tcp_frame': self.tcp,
                 'model_sha256': self.model_sha256, 'joint_names': list(self.names),
-                'keymap': copy.deepcopy(KEYS), 'default_level': 2, 'max_dt_s': .1,
+                'keymap': copy.deepcopy(KEYS), 'default_level': 3, 'max_dt_s': .1,
                 'speed_levels': [{'level': i+1, 'translation_m_s': s[0], 'orientation_rad_s': s[1], 'gripper_percent_s': s[2]} for i, s in enumerate(SPEEDS)],
                 'position_only': True, 'analog_rates': True, 'poses': poses, 'presets': {name: value['available'] for name, value in poses.items()}, 'wrist_roll_reference_rad': reference,
                 'roll_presets_rad': None if reference is None else {'minus_90': reference-math.pi/2, 'reference': reference, 'plus_90': reference+math.pi/2},
@@ -374,7 +374,7 @@ class ManualControl:
         best = {'position_m': float(np.linalg.norm(pe)), 'orientation_rad': float(np.max(np.abs(ae))) if len(ae) else 0.}
         return (q if best['position_m'] <= p_tol and best['orientation_rad'] <= a_tol else None), best
 
-    def step(self, positions_rad, gripper_percent, *, keys, dt_s, level=2, shift=False, position_only=False, reference_positions=None, reference_gripper=None):
+    def step(self, positions_rad, gripper_percent, *, keys, dt_s, level=3, shift=False, position_only=False, reference_positions=None, reference_gripper=None):
         """Return one incremental target; caller rejects obsolete responses before DIRECT."""
         rates = keyboard_rates(keys, level, shift, self.settings.get('control_frame_yaw_rad', 0.), position_only)
         return self._step_rates(positions_rad, gripper_percent, rates=rates, dt_s=dt_s,
@@ -382,7 +382,7 @@ class ManualControl:
                                reference_gripper=reference_gripper)
 
     def analog_step(self, positions_rad, gripper_percent, *, translation, elevation, roll,
-                    speed_scale, gripper_target=None, dt_s, level=2,
+                    speed_scale, gripper_target=None, dt_s, level=3,
                     reference_positions=None, reference_gripper=None):
         """Integrate normalized analog rates, independently tracking an absolute jaw target.
 

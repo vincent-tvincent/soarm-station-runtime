@@ -1,0 +1,74 @@
+# Copy to local/robot.yaml and replace the USB/camera paths.
+# Model, limits and poses come from the working SO-101 station.
+# Supply your own follower calibration; none is included in this template.
+schema_version: 1
+device_id: my-station
+control_hz: 100
+socket: /tmp/soarm-station/runtime.sock
+frame_dir: /tmp/soarm-station/frames
+lock_dir: /tmp/soarm-station-device-locks
+database: telemetry.sqlite3
+
+arms:
+  - id: arm1
+    label: SO-101 follower
+    backend: so101
+    read_only: false
+    port: /dev/serial/by-id/REPLACE_WITH_FOLLOWER_DEVICE
+    calibration: follower-calibration.json
+    base_frame: arm1/base_link
+    tcp_frame: gripper_frame_link
+    urdf: ../models/so101/so101.urdf
+    joints:
+      - {name: shoulder_pan, min_rad: -1.91986, max_rad: 1.91986, velocity_rad_s: 1.5, goal_tolerance_rad: 0.03}
+      - {name: shoulder_lift, min_rad: -1.8325957145940461, max_rad: 1.74533, velocity_rad_s: 1.5, goal_tolerance_rad: 0.03}
+      - {name: elbow_flex, min_rad: -1.69, max_rad: 1.69, velocity_rad_s: 1.5, goal_tolerance_rad: 0.07}
+      - {name: wrist_flex, min_rad: -1.65806, max_rad: 1.65806, velocity_rad_s: 2.0, goal_tolerance_rad: 0.03}
+      - {name: wrist_roll, min_rad: -2.74385, max_rad: 2.84121, velocity_rad_s: 2.0, goal_tolerance_rad: 0.03}
+    gripper: {name: gripper, unit: percent, velocity_percent_s: 100}
+    manual_control:
+      poses:
+        home:
+          positions:
+            shoulder_pan: 0.0
+            shoulder_lift: -0.8726646259971648
+            elbow_flex: 1.1344640137963142
+            wrist_flex: -0.26179288224559444
+            wrist_roll: -1.5221141732182701
+          gripper: preserve
+        fold:
+          positions:
+            shoulder_pan: -0.012274843090949132
+            shoulder_lift: -1.8289516205514205
+            elbow_flex: 1.662474061130423
+            wrist_flex: 1.3065036114928983
+            wrist_roll: -0.016110731556870737
+          gripper: preserve
+      wrist_roll_reference_rad: 0.0
+      operator_tool_rpy: [0.0, 0.0, 3.141592653589793]
+      solve_budget_ms: 40.0
+
+# Keep only cameras actually present. cameras: [] also supports joint/leader control.
+cameras:
+  - {id: forward, label: Forward, backend: opencv, device: /dev/v4l/by-path/REPLACE_WITH_FORWARD_CAMERA, width: 640, height: 480, fps: 30}
+  - {id: overview, label: Overview, backend: opencv, device: /dev/v4l/by-path/REPLACE_WITH_OVERVIEW_CAMERA, width: 640, height: 480, fps: 30}
+  - {id: wrist, label: Wrist, backend: opencv, device: /dev/v4l/by-path/REPLACE_WITH_WRIST_CAMERA, width: 640, height: 480, fps: 30}
+
+profiles: {}
+transforms: []
+recording: {enabled: false}
+web:
+  host: 0.0.0.0
+  port: 8443
+  cert: tls/cert.pem
+  key: tls/key.pem
+  token_env: SOARM_STATION_TOKEN
+  trusted_network_access: true
+collector: {url: '', token_env: SOARM_STATION_COLLECTOR_TOKEN, ca: ''}
+monitoring:
+  period_s: 10
+  stale_ms: 500
+  drift_rad: 0.15
+  debounce_s: 1
+  storage_limit_mb: 512
+  retention_days: 30

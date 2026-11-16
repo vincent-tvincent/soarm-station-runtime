@@ -43,13 +43,23 @@ Press **Ctrl-C** in the launch terminal and allow cleanup to finish. This stops 
 
 ## Configure and start physical hardware
 
+For the complete Pi/follower and Mac/leader walkthrough, use
+[first-time setup](first-time-setup.md). It reuses official LeRobot calibration
+files and the configured station's model/settings.
+
 Create an ignored host profile:
 
 ```bash
-cp config/mock.yaml local/robot.yaml
+mkdir -p local
+cp -n config/so101-station.example.yaml local/robot.yaml
 ```
 
-Edit it for the target machine. Copying the example leaves its adapters in mock mode. A hardware profile must specify the arm backend, stable serial identity, calibration, named joints and limits; cameras need stable capture identities, formats and rates. Set measured transforms/model assets when needed. Each resource has an explicit unique ID. See the [runtime configuration reference](runtime-reference.md#configuration-and-resource-ids).
+Edit it for the target machine. The example uses the physical `so101` backend
+and contains placeholder device paths. Copy the follower's own calibration to
+`local/follower-calibration.json`, bind the actual serial/camera paths, and review
+the included model, motion settings and named poses. Remove unused camera
+entries. Each resource has an explicit ID; add fixed transforms only when known.
+See the [runtime configuration reference](runtime-reference.md#configuration-and-resource-ids).
 
 After configuring the profile, launch it with:
 

@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import inspect
 import os
 import ssl
 import threading
@@ -221,7 +222,21 @@ class DashboardNode(BaseNode):
         q.expected_controller_session=b['controller_session'];q.enable=bool(b['enable'])
         return web.json_response(asdict(await resolved(self.permission_client.call_async(q))))
     async def hold(self,r):
-        b=await r.json();return web.json_response(asdict(await resolved(self.hold_client.call_async(Hold.Request(arm_id=b['arm_id'])))))
+        b=await r.json()
+        if not isinstance(b,dict) or not isinstance(b.get('arm_id'),str) or not b['arm_id']:
+            raise ValueError('Explicit arm_id required')
+        scope=('controller_session','operator_session_id','operation_id')
+        if any(key in b for key in scope):
+            if not all(key in b for key in scope):raise ValueError('Complete hold ownership scope required')
+            if any(not isinstance(b[key],str) or not 1<=len(b[key])<=128 for key in scope[:2]):
+                raise ValueError('Controller and operator sessions are required')
+            operation=b['operation_id']
+            if operation is not None and (not isinstance(operation,str) or not 1<=len(operation)<=128):
+                raise ValueError('operation_id must identify the owned operation or be null before admission')
+            result=self.leader_registry.hold_callback(b['arm_id'],b['controller_session'],b['operator_session_id'],operation)
+            if inspect.isawaitable(result):result=await result
+            return web.json_response(result if isinstance(result,dict) else {'success':bool(result)})
+        return web.json_response(asdict(await resolved(self.hold_client.call_async(Hold.Request(arm_id=b['arm_id'])))))
     async def submit(self,b,principal,feedback=None,*,persistent_target=False):
         g=goal_from_dict(b,principal,persistent_target=persistent_target);latest={}
         def receive_feedback(m):
@@ -277,7 +292,8 @@ class DashboardNode(BaseNode):
             principal=b['operator_session_id']
             def on_feedback(m):feedback.clear();feedback.update(asdict(m.feedback.status))
             # Browser target intent opts in explicitly. Native leader/operator
-            # clients also use this route, and retain live_sample by default.
+            # clients also use this route; UI producers explicitly request
+            # persistent_target while unmarked external streams retain live_sample.
             # Socket close/error cancels this exact action for either contract.
             i,h=await self.submit(b,principal,on_feedback,persistent_target=semantics=='persistent_target');result=self.goals[i]['future'];last_feedback=0.;last_state=0.
             while not ws.closed and not self.stopping and not result.done():

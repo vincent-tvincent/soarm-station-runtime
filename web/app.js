@@ -12,6 +12,7 @@ import { GraphExplorer } from "./graph.js";
 import { ManualPanel } from "./manual-panel.js";
 import { PolicyManagement } from "./policy-management.js";
 import { fitRect, packEqualCameras } from "./camera-layout.js";
+import { JointIssueCache, motorIssuePresentation } from "./fk-view.js";
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => {
   $(id).textContent = value ?? "—";
@@ -43,8 +44,10 @@ let snapshot = {},
   graph,
   policies,
   connected = false,
+  motorStatusDelayed = false,
   operation = null,
   historyRows = [];
+const motorIssueCache = new JointIssueCache();
 let payloadView = "blocks",
   payloadDraft = null,
   activePayloadRow = null,
@@ -75,6 +78,7 @@ async function safely(fn) {
 }
 function connection(info) {
   const phase = typeof info === "string" ? info : info.state;
+  motorStatusDelayed = phase === 'degraded' || phase === 'disconnected' || phase === 'connecting';
   // Status-poll health is independent of the established connection/control WS.
   connected = typeof info?.connected === "boolean"
     ? info.connected
@@ -98,6 +102,7 @@ function connection(info) {
     arrangeCameras();
     operation = null;
   }
+  renderMotors();
   updateControls();
 }
 function armConfig() {
@@ -254,6 +259,10 @@ $("hold").onclick = () =>
   });
 function renderState(state) {
   snapshot = state || {};
+  motorStatusDelayed = false;
+  for(const [armId,record] of Object.entries(snapshot.motor_status || {}))
+    motorIssueCache.update(armId,snapshot.arms?.[armId]?.controller_session,namedMotors(record.motors || []),
+      {stale:motorStatusIsStale(record)});
   policies?.updateState(snapshot);
   resources = state.resources || resources;
   graph?.setConnected(true);
@@ -377,9 +386,14 @@ function motorList() {
     snapshot.health?.[selectedArm]?.motors ||
     armState().motors ||
     [];
-  return Array.isArray(source)
-    ? source
-    : Object.entries(source).map(([name, m]) => ({ name, ...m }));
+  return namedMotors(source);
+}
+function namedMotors(source) {
+  const rows=Array.isArray(source)?source:Object.entries(source || {}).map(([name,m])=>({name,...m}));
+  return rows.map((motor,i)=>({...motor,name:motor.name || motor.joint_name || motor.motor_name || String(motor.id ?? i)}));
+}
+function motorStatusIsStale(record) {
+  return !connected || motorStatusDelayed || Boolean(record?.error) || ['stale','unavailable'].includes(record?.state);
 }
 function renderMotors() {
   let motors = motorList();
@@ -397,10 +411,16 @@ function renderMotors() {
         position_unit: "percent",
       });
   }
+  motors=namedMotors(motors);
   const motorRecord = snapshot.motor_status?.[selectedArm];
+  const statusStale=motorStatusIsStale(motorRecord);
+  const issues=motorIssueCache.update(selectedArm,armState().controller_session,motors,{stale:statusStale});
+  const presentations=new Map(motors.map(m=>[m.name,motorIssuePresentation(m,issues.states,{stale:statusStale})]));
   text(
     "motor-source",
-    motorRecord?.error
+    !connected || motorStatusDelayed
+      ? motorRecord ? "Status delayed · last received sample" : "Waiting for telemetry"
+      : motorRecord?.error
       ? "Telemetry error · last valid sample"
       : motorRecord
         ? `${motorRecord.state} · health ${number(motorRecord.health_age_ms, 0)} ms old`
@@ -430,7 +450,8 @@ function renderMotors() {
               : torque === false || torque === 0 || torque === "OFF"
                 ? "Off"
                 : "—";
-          return `<tr tabindex="0" data-motor="${esc(name)}" class="${name === selectedMotor ? "selected" : ""}"><td><span class="motor-name" title="${esc(name)}"><span class="motor-id">${esc(m.id ?? m.motor_id ?? "—")}</span>${esc(name)}</span></td><td>${number(value, unit === "rad" ? 3 : 1)}${unit === "rad" ? "" : unit === "percent" ? "%" : ""}</td><td>${label}</td><td>${number(m.temperature_c, 0)}</td><td>${number(m.voltage_v)}</td>${hasCurrent ? `<td>${number(m.current_a, 3)}</td>` : ""}</tr>`;
+          const issue=presentations.get(name);
+          return `<tr tabindex="0" data-motor="${esc(name)}" class="${name === selectedMotor ? "selected" : ""}"><td><span class="motor-name" title="${esc(name)}"><span class="motor-id">${esc(m.id ?? m.motor_id ?? "—")}</span>${esc(name)}</span><span class="motor-issue${issue.active?' is-active':''}" data-issue-state="${esc(issue.state)}" title="${esc(issue.detail)}">${esc(issue.label)}</span></td><td>${number(value, unit === "rad" ? 3 : 1)}${unit === "rad" ? "" : unit === "percent" ? "%" : ""}</td><td>${label}</td><td>${number(m.temperature_c, 0)}</td><td>${number(m.voltage_v)}</td>${hasCurrent ? `<td>${number(m.current_a, 3)}</td>` : ""}</tr>`;
         })
         .join("")
     : '<tr><td colspan="5" class="muted">Select an arm to inspect its motors.</td></tr>';
@@ -453,21 +474,14 @@ function renderMotors() {
   if (m) {
     const unit = m.position_unit || m.unit || "rad",
       goal = m.goal_position ?? m.goal_position_rad ?? m.goal ?? m.target;
-    const faults = m.faults ?? m.fault_status ?? m.fault;
-    const faultText =
-      faults === null || faults === undefined
-        ? "not reported"
-        : Array.isArray(faults)
-          ? faults.join(", ") || "none reported"
-          : String(faults);
     text(
       "motor-detail",
-      `${selectedMotor} · target ${number(goal, 3)} ${unit} · fault ${faultText}`,
+      `${selectedMotor} · target ${number(goal, 3)} ${unit} · ${presentations.get(m.name).detail}`,
     );
   } else
     text(
       "motor-detail",
-      "Positions in radians; gripper in %. Select a motor for its target and reported faults.",
+      "Positions in radians; gripper in %. Select a motor for its target and reported motion issue.",
     );
 }
 function operationChanged(event) {

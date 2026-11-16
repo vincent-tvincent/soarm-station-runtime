@@ -56,15 +56,25 @@ For multiple mock resources, select `config/multi_mock.yaml`. For detailed insta
 
 ## Configure a deployment
 
-Create a host profile under the ignored `local/` directory:
+Already configured and calibrated both arms with LeRobot? Follow the
+[first-time hardware setup guide](docs/first-time-setup.md), based on the
+configured Pi follower, three cameras and Mac leader. It shows where both
+calibration files go, which bindings to edit, and how to start both processes.
+
+Create a physical SO-101 profile under the ignored `local/` directory:
 
 ```bash
-cp config/mock.yaml local/robot.yaml
-# Edit local/robot.yaml for the target devices and application settings.
+mkdir -p local
+cp -n config/so101-station.example.yaml local/robot.yaml
+# Copy your follower calibration and replace the USB/camera paths in robot.yaml.
 ros2 launch soarm_station_system system.launch.py config:="$PWD/local/robot.yaml"
 ```
 
-The copied profile initially uses mock devices. Hardware deployment requires adapter settings, stable device paths, calibration, joint limits and any model or measured transform assets. Each arm and camera has an explicit unique ID. Resource counts come from configuration; no default physical arm is selected. Relative paths resolve against the YAML file's directory.
+The [physical example](config/so101-station.example.yaml) includes the configured
+SO-101 model, motion settings and Home/Fold examples. USB/camera paths are
+placeholders and require your own device bindings. Use `config/mock.yaml` for
+simulation. Each resource has an explicit ID; relative paths resolve against
+the YAML file's directory.
 
 Set the telemetry file location with the profile's top-level `database` field.
 For example, to use an SSD mounted at `/mnt/ssd`:
