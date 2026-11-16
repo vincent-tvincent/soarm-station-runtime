@@ -52,3 +52,23 @@ early-limit and injected-error paths. Descriptor counts stayed fixed and native
 heap stayed around 5 MB after warmup. A separate live ros2graph recording stayed
 at six descriptors, with no deleted trace handles or trace loss, for 791.5 seconds.
 These tests are separate from the production Station deployment check.
+
+## Production deployment — November 15, 2026
+
+Runtime change `d0d364a` was pushed and deployed through Git. The controller was
+already in Hold with permission disabled before the normal service restart.
+Configuration/calibration hashes were unchanged; all six motor torques remained
+ON, and measured joint/goal/gripper deltas were zero. The new worker issued no
+goal writes and returned approximately 100 Hz feedback.
+
+A read-only 90-second verification then measured all 35 topics, 52 services and
+two actions. Three history queries produced exactly three additional events in
+each request-sent/request-received/reply-sent/reply-received channel. The collector
+stayed at seven descriptors at every settled sample, retained no deleted trace
+handles and reported zero event, packet or unmapped-event loss. Its process and
+counter epochs remained stable. The verifier released only its own graph-watch
+lease. Native permission stayed disabled, torque stayed ON, writes stayed zero,
+and measured pose did not change during verification.
+
+This does not claim zero total shutdown writes: the existing shutdown path can
+perform a measured-pose Hold. No task, Home, Fold or policy operation was run.
