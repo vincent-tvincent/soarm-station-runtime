@@ -116,6 +116,54 @@ peers use Station's existing access policy; no private key needs to be copied.
 updated profile.** Its configuration is loaded at startup; dashboard Refresh
 does not reload the local JSON. Station itself does not need a restart.
 
+### Automatic Mac startup
+
+After verifying the profile, install the companion as a per-user login agent:
+
+```bash
+SOARM_STATION_INPUT_PYTHON=/absolute/path/to/lerobot-venv/bin/python \
+  scripts/install-leader-input-macos \
+  --config local/leader-input/input-host.json \
+  --url https://your-station-host:8443 \
+  --ca local/leader-input/station-ca.pem
+```
+
+End any active leader run and stop a manually launched bridge before installing,
+so two processes do not advertise the same host ID. The installer copies a
+source snapshot, the profile, unchanged calibration bytes and the public TLS
+certificate to `~/Library/Application Support/SO-Arm Station/leader-input/`.
+It uses the specified existing Python environment; keep that environment at a
+persistent location. The development checkout can then be moved or removed.
+No ROS, follower calibration, private Station key or additional login token is
+copied. The launch agent starts at Mac login, restarts an exited bridge, and the
+bridge reconnects when Station becomes available. It only advertises devices;
+it never resumes following or opens the leader port without an explicit Start.
+
+The installed profile is `input-host.json` in that directory. Edit it there.
+After editing it, restart **this companion only**, while no leader run is active:
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/org.soarm.station.leader-input"
+launchctl print "gui/$(id -u)/org.soarm.station.leader-input"
+```
+
+Connection/error logs are `bridge.log` with three 1 MiB backups. To update the
+installed source, rerun the installer from the updated checkout, passing the
+**installed** profile and certificate so your edited bindings are retained.
+This is login startup, not a system daemon that operates before Mac login.
+To disable automatic startup without deleting calibration:
+
+```bash
+launchctl bootout "gui/$(id -u)/org.soarm.station.leader-input"
+rm "$HOME/Library/LaunchAgents/org.soarm.station.leader-input.plist"
+```
+
+Station remembers advertised host labels and configured device metadata in
+`input-hosts.json` beside its selected runtime configuration. After a Station
+restart, remembered hosts appear **Offline** until their bridge reconnects.
+That cache does not save poses, runs or control permission, and is never used
+to authorize a command. An offline leader does not prevent other control modes.
+
 ### 4. Select it in the dashboard
 
 Open **Control → Leader arm**, press **Refresh**, select the input computer,

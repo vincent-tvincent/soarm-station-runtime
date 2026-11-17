@@ -70,11 +70,24 @@ class RuntimeNode(BaseNode):
             health.status.append(DiagnosticStatus(name=n+'/motors',hardware_id=n+'/motors',message='cached motor telemetry',
                 values=[KeyValue(key='status',value=json.dumps(motor_snapshot({**s,'arm_id':n},next(a for a in self.config['arms'] if a['id']==n)),allow_nan=False,separators=(',',':')))]))
             self.inference[n].publish(DiagnosticArray(header=health.header,status=[DiagnosticStatus(name=n+'/policy',message=s.get('model_state',s['operation_type']),values=[KeyValue(key='reason',value=s.get('model_reason',''))])]))
+        snapshot_age=max(0.,time.monotonic()-getattr(self,'received_snapshot',0))*1000
+        for camera in self.config['cameras']:
+            identifier=camera['id'];record=self.snapshot.get('cameras',{}).get(identifier,{})
+            status={k:v for k,v in record.items() if k!='path'}
+            status.update(id=identifier,runtime_snapshot_age_ms=snapshot_age)
+            status['age_ms']=min(1e9,max(0.,record.get('age_ms',1e9))+snapshot_age)
+            status['ready']=bool(record.get('ready',False)) and snapshot_age<500
+            if snapshot_age>=500:status.update(state='RUNTIME_UNAVAILABLE',error='Native runtime snapshot is stale')
+            message=status.get('error') or status.get('state','STARTING')
+            level=DiagnosticStatus.OK if status['ready'] and status['age_ms']<500 else DiagnosticStatus.WARN
+            if status.get('state') in ('ERROR','RECOVERING','RECOVERY_BLOCKED','RUNTIME_UNAVAILABLE'):level=DiagnosticStatus.ERROR
+            health.status.append(DiagnosticStatus(name='camera:'+identifier,hardware_id='camera:'+identifier,level=level,message=message,
+                values=[KeyValue(key='status',value=json.dumps(status,allow_nan=False,separators=(',',':')))]))
         self.health.publish(health)
     def publish_cameras(self):
         for c in self.config['cameras']:
             n=c['id'];s=self.snapshot.get('cameras',{}).get(n,{})
-            if not s.get('path') or self.camera_seq.get(n)==s.get('sequence') or s.get('age_ms',1e9)>500:continue
+            if not s.get('path') or s.get('ready') is False or self.camera_seq.get(n)==s.get('sequence') or s.get('age_ms',1e9)>500:continue
             try:data=Path(s['path']).read_bytes()
             except FileNotFoundError:continue
             self.camera_seq[n]=s['sequence'];m=CompressedImage();stamp_ns(m.header.stamp,s['time_ns']);m.header.frame_id=s['frame_id'];m.format='jpeg';m.data=data

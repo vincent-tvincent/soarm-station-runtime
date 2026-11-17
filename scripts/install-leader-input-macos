@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+INPUT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export PYTHONPATH="$INPUT_ROOT/python${PYTHONPATH:+:$PYTHONPATH}"
+exec "${SOARM_STATION_INPUT_PYTHON:-python3}" -m soarm_station.input_host_service "$@"

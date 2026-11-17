@@ -62,3 +62,20 @@ def test_symlink_escape_cannot_place_the_database_back_on_another_filesystem(tmp
         validate_telemetry_storage({'database':str(mount/'redirect/data.sqlite3'),
             'monitoring':{'storage_mount':str(mount)}})
     assert not (outside/'data.sqlite3').exists()
+
+
+@pytest.mark.parametrize('value',['',False,'../drive','uuid/escape',10])
+def test_storage_uuid_rejects_invalid_values(tmp_path,value):
+    with pytest.raises(ValueError,match='storage_uuid'):
+        load(profile(tmp_path,{'storage_mount':'../ssd','storage_uuid':value}))
+
+
+def test_storage_uuid_requires_mount_but_is_not_probed_during_global_load(tmp_path,monkeypatch):
+    monkeypatch.setattr('soarm_station.config.os.path.ismount',lambda path:pytest.fail('Do not inspect storage during global load'))
+    with pytest.raises(ValueError,match='requires storage_mount'):
+        load(profile(tmp_path,{'storage_uuid':'7EFF-9E69'}))
+
+
+def test_optional_storage_uuid_survives_configuration_loading(tmp_path):
+    config=load(profile(tmp_path,{'storage_mount':'../ssd','storage_uuid':'7EFF-9E69'}))
+    assert config['monitoring']['storage_uuid']=='7EFF-9E69'

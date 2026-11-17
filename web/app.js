@@ -29,6 +29,89 @@ const esc = (s) =>
         c
       ],
   );
+// These presentation exports have no bootstrap or control dependencies.
+export function readinessPresentation(readiness, {connected=true, delayed=false}={}) {
+  const labels={ready:'Ready',waiting:'Waiting',fault:'Fault',offline:'Offline',starting:'Starting',unknown:'Unknown'};
+  const reported=readiness && ['ready','degraded','starting'].includes(readiness.state) && Array.isArray(readiness.components);
+  const lastReported=!connected || delayed;
+  const components=(Array.isArray(readiness?.components)?readiness.components:[]).filter(row=>row && typeof row==='object').map((row,index)=>{
+    const state=Object.hasOwn(labels,row.state)?row.state:'unknown';
+    return {id:typeof row.id==='string'&&row.id?row.id:`unidentified:${index}`,
+      label:typeof row.label==='string'&&row.label?row.label:row.id||'Unidentified component',
+      state,stateLabel:labels[state],required:row.required!==false,
+      detail:typeof row.detail==='string'&&row.detail?row.detail:'No detail reported.',lastReported};
+  });
+  const priority=row=>!row.required?3:['fault','offline'].includes(row.state)?0:row.state==='ready'?2:1;
+  components.sort((a,b)=>priority(a)-priority(b));
+  const required=components.filter(row=>row.required && row.state!=='ready');
+  let state=reported?readiness.state:'unknown';
+  if(required.some(row=>['fault','offline'].includes(row.state)))state='degraded';
+  else if(required.length && state!=='starting')state='degraded';
+  else if(state==='ready'&&!components.length)state='unknown';
+  if(lastReported)state=connected?'stale':'offline';
+  const summary={ready:'Ready',degraded:'Needs attention',starting:'Starting',unknown:'Not reported',stale:'Status delayed',offline:'Offline'}[state];
+  const problems=required.map(row=>`${lastReported?'Last reported · ':''}${row.label}: ${row.stateLabel} — ${row.detail}`);
+  const message=state==='ready'?'Required components are ready.':problems.length?problems.join('\n'):
+    state==='degraded'?'Readiness is degraded; required component details are unavailable.':
+    state==='starting'?'Component readiness is still starting.':
+    state==='stale'||state==='offline'?'Waiting for a current component readiness report.':'Component readiness has not been reported.';
+  return {state,summary,components,problems,message,lastReported};
+}
+export function readinessErrorSummary(health,readiness) {
+  const existing=health||{value:'Unknown',active:false,detail:'Health has not been reported.'};
+  const problems=readiness.problems||[];
+  if(problems.length) {
+    const count=existing.active?(Number.parseInt(existing.value,10)||1):0;
+    return {value:count?`${count+problems.length} issues`:`${problems.length} not ready`,active:true,
+      detail:[existing.active?existing.detail:null,...problems].filter(Boolean).join('\n')};
+  }
+  if(readiness.state==='ready')return existing;
+  return {value:existing.active?existing.value:existing.value!=='None'?existing.value:
+    ({starting:'Starting',degraded:'Degraded',offline:'Offline',stale:'Stale'}[readiness.state]||'Unknown'),
+    active:existing.active || readiness.state==='degraded',
+    detail:[existing.active?existing.detail:null,readiness.message].filter(Boolean).join('\n')};
+}
+export function renderReadinessSection(panel,view) {
+  if(!panel)return;
+  const setText=(element,value)=>{if(element.textContent!==value)element.textContent=value;};
+  const create=(tag,className,text)=>{
+    const element=panel.ownerDocument.createElement(tag);element.className=className;
+    if(text!==undefined)element.textContent=text;return element;
+  };
+  let section=panel.querySelector('#component-readiness');
+  if(!section) {
+    section=create('section','component-readiness');section.id='component-readiness';
+    section.setAttribute('aria-labelledby','component-readiness-heading');
+    const heading=create('div','small-heading'),title=create('h3','','Components');title.id='component-readiness-heading';
+    const summary=create('span','readiness-summary'),list=create('dl','component-readiness-list');
+    const empty=create('p','readiness-empty');heading.append(title,summary);section.append(heading,list,empty);
+    section.readinessElements={summary,list,empty,rows:new Map()};
+    const anchor=panel.querySelector('.status-summary');
+    if(anchor)panel.insertBefore(section,anchor.nextSibling);else panel.append(section);
+  }
+  const {summary,list,empty,rows}=section.readinessElements;
+  setText(summary,view.summary);summary.dataset.state=view.state;summary.title=view.message;
+  setText(empty,view.message);empty.hidden=view.components.length>0;list.hidden=!view.components.length;
+  const present=new Set();let index=0;
+  for(const component of view.components) {
+    present.add(component.id);
+    let record=rows.get(component.id);
+    if(!record) {
+      const row=create('div','component-readiness-row'),name=create('dt','readiness-name');
+      const label=create('span',''),optional=create('span','readiness-optional','optional');name.append(label,optional);
+      const state=create('dd','readiness-state'),detail=create('dd','readiness-detail');row.append(name,state,detail);
+      record={row,label,optional,state,detail};rows.set(component.id,record);
+    }
+    record.row.dataset.componentId=component.id;record.row.dataset.state=component.state;
+    record.row.dataset.required=String(component.required);
+    setText(record.label,component.label);record.optional.hidden=component.required;
+    setText(record.state,(component.lastReported?'Last: ':'')+component.stateLabel);
+    setText(record.detail,component.detail);
+    if(list.children[index]!==record.row)list.insertBefore(record.row,list.children[index]||null);
+    index++;
+  }
+  for(const [id,record] of rows)if(!present.has(id)){record.row.remove();rows.delete(id);}
+}
 let snapshot = {},
   resources = {},
   selectedArm = "",
@@ -433,12 +516,15 @@ function renderMotors() {
   const presentations=new Map(motors.map(m=>[m.name,motorIssuePresentation(m,issues.states,{stale:statusStale})]));
   const summary=operationHealthSummary({arm:armState(),motors,issues:issues.states,stale:statusStale,
     connected,recordError:motorRecord?.error,inference:snapshot.inference?.[selectedArm]?.status||[]});
+  const readiness=readinessPresentation(snapshot.readiness,{connected,delayed:motorStatusDelayed});
+  const errors=readinessErrorSummary(summary.errors,readiness);
+  renderReadinessSection($('panel-status'),readiness);
   for(const [name,metric] of [['temperature',summary.temperature],['voltage',summary.voltage]]){
     text('summary-'+name,number(metric.value,name==='voltage'?2:1));
     $('summary-'+name).title=metric.count?`Average of ${metric.count} / ${metric.total} motor readings`:'No fresh motor readings';
   }
-  text('summary-errors',summary.errors.value);$('summary-errors').title=summary.errors.detail;
-  $('summary-errors').classList.toggle('has-issue',summary.errors.active);
+  text('summary-errors',errors.value);$('summary-errors').title=errors.detail;
+  $('summary-errors').classList.toggle('has-issue',errors.active);
   text('summary-torque',summary.torque.value);$('summary-torque').title=summary.torque.detail;
   if(!connected){text('summary-conditioning','—');$('summary-conditioning').title='Disconnected';}
   text(

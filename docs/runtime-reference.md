@@ -23,7 +23,7 @@ The label is optional; omitting it displays the ID. An explicit label must be a 
 
 Relative file paths resolve against the YAML file's directory. Physical configuration is loaded at startup. Model bundles can be bound to named startup entries in `profiles`, or prepared dynamically through [policy management](policy-management.md). Clients select registered runtime IDs rather than arbitrary checkpoint paths in motion requests. Saved profile IDs and the immutable prepared `runtime_profile_id` are distinct.
 
-The runtime's `.venv` uses distribution Python for ROS. `.runtime-venv` contains the pinned native LeRobot/PyTorch environment. A restricted Unix socket separates their Python ABIs. One worker owns motor and camera I/O, with an independent control thread per arm and one capture/encoding path per camera. See [architecture](architecture.md) for the process model.
+The runtime's `.venv` uses distribution Python for ROS. `.runtime-venv` contains the pinned native LeRobot/PyTorch environment. A restricted Unix socket separates their Python ABIs. One worker owns motor I/O and camera supervision, with an independent control thread per arm and one isolated capture/encoding process per camera. See [architecture](architecture.md) and [camera mode validation/recovery](camera-recovery.md).
 
 ## ROS interfaces
 
@@ -163,10 +163,72 @@ The runtime profile's top-level `database` is the single setting for the SQLite
 file. Absolute paths are used directly; relative paths resolve against that
 YAML file's directory. Set `monitoring.storage_mount` for a separately mounted
 data volume, for example `/mnt/ssd`. Telemetry requires the database to be inside
-that mount and verifies that it is mounted before creating directories or
-opening SQLite. An absent data drive cannot silently create replacement history
-on the underlying system disk. This check belongs to telemetry; configuration
-loading for arm and camera processes does not require the data volume.
+that mount and checks it before opening or using SQLite. An unavailable drive
+puts the telemetry node in a reported `waiting` state; the node and its ROS
+services stay running. It retries every five seconds and resumes after the
+intended storage returns. Database/I/O failures report `fault` and use the same
+bounded recovery path. Arm and camera configuration loading remains independent
+of the telemetry volume.
+
+Use a filesystem UUID as well as the mount path when the drive identity matters:
+
+```yaml
+database: /mnt/ssd/soarm-station/telemetry.sqlite3
+monitoring:
+  storage_mount: /mnt/ssd
+  storage_uuid: 7EFF-9E69  # example deployment; use your own filesystem UUID
+  period_s: 10
+  retention_days: 30
+  storage_limit_mb: 512
+```
+
+`storage_uuid` is optional and requires `storage_mount`. Linux verifies the
+UUID's block-device number against the mounted filesystem. An absent UUID,
+different mounted device or read-only mount remains unavailable; no alternative
+database path is selected. The node retains only the latest observations and
+small gap counters while unavailable, without queuing samples or events in RAM.
+When the disk returns, one `TELEMETRY_STORAGE_RECOVERED` event records the skipped
+schedule interval and rejected event-request count. Sampling resumes at the
+configured cadence; missed slots are not backfilled with current measurements.
+
+Storage status is published about once per second on
+`/soarm_station/diagnostics`, under `/soarm_station/telemetry_node/storage`.
+Its values include `storage_state` (`waiting`, `ready`, `fault`),
+`storage_available`, `storage_reason` and `discarded_slots` since this node boot.
+The existing upload-status `error` begins with `TELEMETRY_STORAGE_WAITING:` or
+`TELEMETRY_STORAGE_FAULT:` while storage is unavailable. Previously observed
+counts can remain cached; they are not proof that the absent disk is accessible.
+`RecordEvent` returns `committed:false` with a reason. `QueryHistory` returns
+`available:false`, a reason and empty records; successful queries explicitly
+return `available:true`. The dashboard maps unavailable history to HTTP 503.
+Updating from the earlier QueryHistory interface requires rebuilding both
+`soarm_station_interfaces` and `soarm_station_system`.
+
+#### Protect the underlying directory against forced or lazy unmount races
+
+Mount checks prevent ordinary missing-drive startup from opening a replacement
+database. A held mount descriptor also pins an ordinary mounted filesystem.
+Forced/lazy detachment can still race an absolute-path SQLite open. For a strict
+no-fallback guarantee with an unprivileged Station service, protect the covered
+directory on the system disk as `root:root` mode `0700`:
+
+```bash
+sudo scripts/protect-telemetry-mount --mount /mnt/ssd
+```
+
+The SSD must be mounted when running this one-time Linux administrator helper.
+It creates a private mount namespace and a temporary **nonrecursive** bind of
+the parent directory to expose the covered mountpoint. It verifies the target
+is an unmounted directory on the parent filesystem, distinct from the mounted
+SSD, then changes only that underlying directory. It does not unmount the SSD,
+alter its ownership or permissions, or stop Station. Temporary mounts are
+confined to the helper's namespace; cleanup never recursively traverses a bind
+view. After the SSD disappears, the unprivileged service cannot traverse the
+underlying directory, even if removal races an open or old writable children
+exist there. This administrator step is separate from the application's normal
+waiting/recovery behavior; without it, forced/lazy-unmount race protection is
+not claimed. Deliberately replacing the mounted filesystem still requires
+coordinated administration and the configured UUID check.
 
 For an existing journal, stop its writer before switching paths, use SQLite's
 backup API to include committed WAL content, and verify integrity plus records,

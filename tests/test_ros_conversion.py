@@ -69,7 +69,7 @@ def test_initial_native_integer_samples_publish_as_ros_float64():
     state=dict(runtime_boot_id='boot',controller_session='session',operation_id='',operation_epoch=0,
         phase='IDLE',operation_type='NONE',permission=False,health={'torque':'ON'},positions={'joint':0.},
         age_ms=0,sequence=1,measured_hz=0,gripper=0,error='')
-    node=SimpleNamespace(config={'arms':[{'id':'arm1','joints':[{'name':'joint','goal_tolerance_rad':.03}]}]},snapshot={'arms':{'arm1':state}},received_snapshot=time.monotonic(),
+    node=SimpleNamespace(config={'arms':[{'id':'arm1','joints':[{'name':'joint','goal_tolerance_rad':.03}]}],'cameras':[]},snapshot={'arms':{'arm1':state}},received_snapshot=time.monotonic(),
         get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(to_msg=lambda:Time())),
         status={'arm1':publisher},inference={'arm1':publisher},health=publisher,rejected={})
     RuntimeNode.publish_status(node)

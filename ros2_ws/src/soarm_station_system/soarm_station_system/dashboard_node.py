@@ -30,6 +30,7 @@ from soarm_station.leader_gateway import LeaderHostRegistry,native_start_state
 from soarm_station.policy_manager import PolicyManager
 from soarm_station.policy_http import mount_policy_routes
 from soarm_station.ipc import Client
+from soarm_station.readiness import project_readiness
 
 ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','gamepad-panel.js','gamepad-input.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
 
@@ -89,6 +90,7 @@ class DashboardNode(BaseNode):
     def __init__(self):
         super().__init__('dashboard_node');self.states={};self.inference={};self.joints={};self.images={};self.events=[];self.upload={};self.workflows={};self.decisions=[];self.goals={};self.stopping=False
         self.motor_records={};self.motor_record_errors={};self.public_resources=resources(self.config)
+        self.component_diagnostics={};self.readiness_receipts={}
         self.policy_manager=PolicyManager(self.config,resources=lambda:self.public_resources,bridge=Client(self.config['socket']))
         self.subscription_activity=SubscriptionActivity()
         rpc_provider=RpcTraceClient(rpc_trace_socket(self.config)) if self.config.get('rpc_trace',{}).get('enabled',True) else None
@@ -105,18 +107,38 @@ class DashboardNode(BaseNode):
             return observe_subscription(self.subscription_activity,self.create_subscription,message_type,name,callback,qos)
         for a in self.config['arms']:
             n=a['id'];subscribe(JointState,topic(n,'joint_states'),lambda m,n=n:self.joints.__setitem__(n,asdict(m)),SENSOR)
-            subscribe(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.states.__setitem__(n,asdict(m)),STATE)
+            subscribe(OperationStatus,topic(n,'lerobot/status'),lambda m,n=n:self.receive_state(n,m),STATE)
             subscribe(DiagnosticArray,topic(n,'lerobot/inference_status'),lambda m,n=n:self.inference.__setitem__(n,asdict(m)),STATE)
         for c in self.config['cameras']:
-            subscribe(CompressedImage,'/soarm_station/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.images.__setitem__(n,(bytes(m.data),m.header.stamp.sec*10**9+m.header.stamp.nanosec)),SENSOR)
+            subscribe(CompressedImage,'/soarm_station/camera/'+c['id']+'/image_raw/compressed',lambda m,n=c['id']:self.receive_image(n,m),SENSOR)
         subscribe(Event,'/soarm_station/events',self.event,STATE)
         subscribe(UploadStatus,'/soarm_station/telemetry/upload_status',lambda m:setattr(self,'upload',asdict(m)),STATE)
         subscribe(WorkflowDecision,'/soarm_station/workflow/decision',lambda m:self.decisions.append(asdict(m)) or self.decisions.__delitem__(slice(None,-50)),STATE)
         subscribe(WorkflowStatus,'/soarm_station/workflow/status',lambda m:self.workflows.__setitem__(m.arm_id,asdict(m)),STATE)
         subscribe(DiagnosticArray,'/soarm_station/health',self.motor_health,STATE)
+        subscribe(DiagnosticArray,'/soarm_station/diagnostics',self.component_health,STATE)
         self.graph_observer.start()
         self.loop=asyncio.new_event_loop();self.thread=threading.Thread(target=self.serve,daemon=True);self.thread.start()
     def event(self,m):self.events.append(asdict(m));self.events=self.events[-100:]
+    def receive_state(self,name,message):
+        self.states[name]=asdict(message)
+        self.source_receipt('controller:'+name,message.header.stamp)
+    def source_receipt(self,key,stamp):
+        age=(time.time_ns()-(stamp.sec*10**9+stamp.nanosec))/1e9
+        if age>=0:self.readiness_receipts[key]=time.monotonic()-age
+        else:self.readiness_receipts.pop(key,None)
+    def receive_image(self,name,message):
+        stamp=message.header.stamp.sec*10**9+message.header.stamp.nanosec
+        self.images[name]=(bytes(message.data),stamp)
+        # Readiness is about new source frames, not repeated cached publications.
+        self.source_receipt('image:'+name,message.header.stamp)
+    def component_health(self,message):
+        expected={'camera:'+c['id'] for c in self.config['cameras']}|{'/soarm_station/telemetry_node/storage'}
+        for status in message.status:
+            if status.name not in expected:continue
+            self.component_diagnostics[status.name]={'message':status.message,
+                'values':{v.key:v.value for v in status.values}}
+            self.source_receipt('diagnostic:'+status.name,message.header.stamp)
     def serve(self):
         asyncio.set_event_loop(self.loop)
         try:self.loop.run_until_complete(self.start_web());self.loop.run_forever()
@@ -164,7 +186,8 @@ class DashboardNode(BaseNode):
         # reply before the ROS cache sees its next status publication. Cleanup
         # also verifies native hold completion and never queries the policy store.
         self.leader_registry=LeaderHostRegistry(lambda:{'arms':dict(self.states),'resources':self.public_resources},
-            conditional_hold,start_state_provider=leader_start_state)
+            conditional_hold,start_state_provider=leader_start_state,
+            cache_path=Path(self.config['_path']).parent/'input-hosts.json' if self.config.get('_path') else None)
         self.leader_registry.register_routes(app)
         if getattr(self,'policy_manager',None) is not None:
             mount_policy_routes(app,self.policy_manager)
@@ -173,6 +196,7 @@ class DashboardNode(BaseNode):
         return app
     async def index(self,r):return web.Response(text=(Path(os.environ['SOARM_STATION_ROOT'])/'web/index.html').read_text(),content_type='text/html')
     def motor_health(self,message):
+        self.component_health(message)
         expected={a['id']+'/motors':a for a in self.config['arms']}
         for status in message.status:
             arm=expected.get(status.name)
@@ -214,11 +238,14 @@ class DashboardNode(BaseNode):
             return web.json_response({'schema_version':1,'accepted':False,'reason':str(exc)},status=400)
         return web.json_response(result,headers={'Cache-Control':'no-store'})
     def state(self):return {'schema_version':1,'resources':self.resource_view(),
+        'readiness':project_readiness(self.config,dict(self.states),dict(self.readiness_receipts),dict(self.component_diagnostics),
+            self.leader_registry.snapshot()['hosts'] if hasattr(self,'leader_registry') else [],time.monotonic()),
         'motor_status':render_motors(self.config,dict(self.motor_records),dict(self.joints),dict(self.states),time.time_ns(),dict(self.motor_record_errors)),'device_id':self.config['device_id'],'arms':dict(self.states),'inference':dict(self.inference),'joints':dict(self.joints),'cameras':list(self.images),'upload':telemetry_view(self.config,self.upload),'events':list(self.events),'workflows':dict(self.workflows),'decisions':list(self.decisions)}
     async def status(self,r):return web.json_response(await asyncio.to_thread(self.state))
     async def history(self,r):
         q=QueryHistory.Request();q.arm_id=r.query.get('arm','');q.after_sequence=int(r.query.get('after',0));q.page_size=min(500,int(r.query.get('limit',100)))
-        return web.json_response(asdict(await resolved(self.history_client.call_async(q))))
+        value=asdict(await resolved(self.history_client.call_async(q)))
+        return web.json_response(value,status=200 if value.get('available',True) else 503)
     async def permission(self,r):
         b=await r.json();q=SetControlPermission.Request();q.request_id=uuid.uuid4().hex;q.arm_id=b['arm_id'];q.operator_session_id=b.get('operator_session_id','browser')
         q.expected_controller_session=b['controller_session'];q.enable=bool(b['enable'])

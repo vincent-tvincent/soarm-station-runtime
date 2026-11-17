@@ -6,7 +6,11 @@ native host opens its selected leader and uses the existing DIRECT stream.
 import asyncio
 import copy
 import inspect
+import json
+import logging
 import math
+import os
+from pathlib import Path
 import time
 import uuid
 
@@ -25,14 +29,40 @@ def native_start_state(snapshot,resources,elapsed_ms=0.):
 
 
 class LeaderHostRegistry:
-    def __init__(self, state_provider, hold_callback, lease_s=None,start_state_provider=None):
+    def __init__(self, state_provider, hold_callback, lease_s=None,start_state_provider=None,cache_path=None):
         self.state_provider, self.hold_callback = state_provider, hold_callback
         self.start_state_provider=start_state_provider
         self.hosts={};self.closed=False;self.watch_task=None
+        self.cache_path=Path(cache_path) if cache_path else None;self.cached_inventory=None
+        if self.cache_path and self.cache_path.exists():
+            try:
+                if self.cache_path.stat().st_size>1048576:raise ValueError('Input host cache is too large')
+                rows=json.loads(self.cache_path.read_text())
+                if not isinstance(rows,list) or len(rows)>64:raise ValueError('Invalid input host cache')
+                for row in rows:
+                    inventory=self._inventory(row)
+                    self.hosts[inventory['id']]={**inventory,'ws':None,'active':None,'state':'OFFLINE',
+                        'last_seen':None,'reason':'Remembered input host; waiting for reconnection'}
+            except (OSError,ValueError,KeyError,TypeError):
+                logging.warning('Could not read remembered input hosts; waiting for live advertisements')
+
+    def remember(self):
+        if not self.cache_path:return
+        rows=[{k:h[k] for k in ('id','label','platform','devices')} for h in list(self.hosts.values())]
+        encoded=json.dumps(rows,separators=(',',':'))
+        if encoded==self.cached_inventory:return
+        try:
+            if len(encoded.encode())>1048576:raise ValueError('Input host cache is too large')
+            self.cache_path.parent.mkdir(parents=True,exist_ok=True)
+            temporary=self.cache_path.with_suffix('.tmp')
+            temporary.write_text(encoded);temporary.chmod(0o600);os.replace(temporary,self.cache_path)
+            self.cached_inventory=encoded
+        except (OSError,ValueError):
+            logging.warning('Could not save input host labels; live discovery remains available')
 
     def snapshot(self):
         now=time.monotonic();result=[]
-        for host in self.hosts.values():
+        for host in list(self.hosts.values()):
             active=host.get('active')
             result.append({'id':host['id'],'label':host['label'],'platform':host.get('platform',''),
                 'connected':host.get('ws') is not None and not host['ws'].closed,
@@ -42,7 +72,7 @@ class LeaderHostRegistry:
                 'latest_pose':copy.deepcopy(host.get('latest_pose')),
                 'sample_age_ms':host.get('sample_age_ms'),
                 'report_age_ms':None if not host.get('last_sample_report') else (now-host['last_sample_report'])*1000,
-                'measured_hz':host.get('measured_hz'),'last_seen_age_ms':(now-host['last_seen'])*1000})
+                'measured_hz':host.get('measured_hz'),'last_seen_age_ms':(now-host['last_seen'])*1000 if host['last_seen'] is not None else None})
         return {'schema_version':1,'hosts':result,'browser_lease_ms':None,
                 'lifetime':'explicit_stop_or_input_source_disconnect',
                 'discovery':'connected native input hosts; OS inventory only, no serial probing'}
@@ -257,10 +287,12 @@ class LeaderHostRegistry:
             first=await ws.receive_json(timeout=5)
             if not isinstance(first,dict) or first.get('type')!='hello':raise ValueError('Input host hello required')
             inventory=self._inventory(first['host']);previous=self.hosts.get(inventory['id'])
+            if previous is None and len(self.hosts)>=64:raise ValueError('Input host registry is full')
             if previous and previous.get('ws') is not None and not previous['ws'].closed:raise ValueError('Host ID already connected')
             if previous and previous.get('active'):raise ValueError('Previous input-host cleanup has not completed')
             host={**inventory,'ws':ws,'state':'IDLE','active':None,'last_seen':time.monotonic(),'reason':''}
             self.hosts[host['id']]=host
+            self.remember()
             await ws.send_json({'type':'registered','host_id':host['id']})
             async for message in ws:
                 if message.type!=web.WSMsgType.TEXT:continue
@@ -271,6 +303,7 @@ class LeaderHostRegistry:
                     inventory=self._inventory(body['host'])
                     if inventory['id']!=host['id']:raise ValueError('Input host identity changed')
                     host.update(inventory)
+                    self.remember()
                 elif body.get('type') in ('state','stopped'):
                     active=host.get('active')
                     if not active or body.get('run_id')!=active['run_id']:continue

@@ -15,6 +15,16 @@ def sample(stamp):
     return {'device_id':'test','runtime_boot_id':'boot','scheduled_ns':stamp,'arm_id':'arm1','valid':True,'positions':{'joint':.1}}
 
 
+def storage(journal,*,available=True,state='ready',reason=''):
+    from soarm_station.telemetry_storage import StorageUnavailable
+    def call(method,*args,**kwargs):
+        if not available:raise StorageUnavailable(reason)
+        return getattr(journal,method)(*args,**kwargs)
+    counts={'local_committed':0,'remote_committed':0,'queued':0}
+    return types.SimpleNamespace(call=call,poll=lambda:available,
+        status=lambda:{'available':available,'state':state,'reason':reason,'counts':counts,'counts_known':available})
+
+
 def test_first_schedule_initializes_without_inventing_a_cadence_change(tmp_path):
     journal=Journal(tmp_path/'history.sqlite3',preserve_unacked=False,retention_days=30)
     try:
@@ -35,6 +45,7 @@ def test_startup_maintains_before_metadata_and_passes_bounded_local_defaults(mon
         def set_meta(self,key,value):calls.append('set_meta')
         def schedule_info(self):return {'next_ns':None,'period_ns':None,'has_samples':False}
         def configure_schedule(self,period_ns,next_ns,event=None):calls.append('configure');return {'event':event}
+        def counts(self):return {'local_committed':0,'remote_committed':0,'queued':0}
         def close(self):calls.append('close')
     monkeypatch.setattr(module,'Journal',FakeJournal)
     monkeypatch.setattr(module.BaseNode,'__init__',lambda self,name:setattr(self,'config',{'database':'unused','arms':[]}))
@@ -47,11 +58,14 @@ def test_startup_maintains_before_metadata_and_passes_bounded_local_defaults(mon
         assert options=={'limit_mb':512,'retention_days':30,'preserve_unacked':False,'event_limit':10000}
         assert node.period_ns==10_000_000_000 and not node.collector_enabled and node.error==''
     finally:
-        node.stop.set();node.uploader.join(timeout=1);node.journal.close()
+        node.stop.set();node.uploader.join(timeout=1);node.storage.close()
 
 
-def test_missing_required_mount_prevents_journal_construction(tmp_path,monkeypatch):
+def test_missing_mount_keeps_node_alive_and_publishes_unavailable_services(tmp_path,monkeypatch):
     import soarm_station_system.telemetry_node as module
+    from builtin_interfaces.msg import Time
+    from diagnostic_msgs.msg import DiagnosticStatus
+    from soarm_station_interfaces.srv import QueryHistory,RecordEvent
     mount=tmp_path/'ssd'
     config={'database':str(mount/'history/telemetry.sqlite3'),'arms':[],
         'monitoring':{'storage_mount':str(mount)}}
@@ -59,8 +73,29 @@ def test_missing_required_mount_prevents_journal_construction(tmp_path,monkeypat
     monkeypatch.setattr('soarm_station.config.os.path.ismount',lambda path:False)
     def open_journal(*args,**kwargs):pytest.fail('Journal must not open or create fallback directories')
     monkeypatch.setattr(module,'Journal',open_journal)
-    with pytest.raises(OSError,match='storage mount is not mounted'):TelemetryNode()
-    assert not mount.exists()
+    published={}
+    monkeypatch.setattr(TelemetryNode,'create_publisher',lambda self,kind,name,qos:
+        types.SimpleNamespace(publish=lambda message:published.setdefault(name,[]).append(message)))
+    for method in ('create_subscription','create_service','create_timer'):
+        monkeypatch.setattr(TelemetryNode,method,lambda *args,**kwargs:None)
+    monkeypatch.setattr(TelemetryNode,'get_clock',lambda self:types.SimpleNamespace(now=lambda:types.SimpleNamespace(to_msg=lambda:Time())))
+    node=TelemetryNode();node.diagnostics=types.SimpleNamespace(publish=lambda m:published.setdefault('diagnostics',[]).append(m))
+    try:
+        assert node.storage.status()['state']=='waiting'
+        node.sample();node.publish_upload();node.diagnose()
+        assert not mount.exists()
+        upload=published['/soarm_station/telemetry/upload_status'][-1]
+        assert upload.error.startswith('TELEMETRY_STORAGE_WAITING:')
+        diagnostic=published['diagnostics'][-1].status[0]
+        assert diagnostic.level==DiagnosticStatus.WARN and diagnostic.name=='/soarm_station/telemetry_node/storage'
+        assert {pair.key:pair.value for pair in diagnostic.values}['storage_state']=='waiting'
+        history=node.history(QueryHistory.Request(after_sequence=12),QueryHistory.Response())
+        assert history.available is False and history.reason.startswith('TELEMETRY_STORAGE_WAITING:')
+        assert history.records==[] and history.next_sequence==12
+        event=node.record_event(RecordEvent.Request(),RecordEvent.Response())
+        assert not event.committed and event.reason.startswith('TELEMETRY_STORAGE_WAITING:')
+    finally:
+        node.stop.set();node.uploader.join(timeout=1);node.storage.close()
 
 
 def test_legacy_one_second_history_transitions_with_exact_gap_event_and_no_fake_rows(tmp_path):
@@ -122,8 +157,9 @@ def test_same_period_preserves_old_schedule_and_storage_error_is_not_ignored():
 def test_upload_status_keeps_local_and_remote_truth_without_local_only_error(collector_enabled,expected_queue):
     from builtin_interfaces.msg import Time
     published=[];counts={'local_committed':100,'remote_committed':4,'queued':96}
-    owner=types.SimpleNamespace(journal=types.SimpleNamespace(counts=lambda:counts),collector_enabled=collector_enabled,
+    owner=types.SimpleNamespace(storage=storage(types.SimpleNamespace(counts=lambda:counts)),collector_enabled=collector_enabled,
         error='',storage_error='',maintenance_error='',
+        storage_message=lambda:'',
         get_clock=lambda:types.SimpleNamespace(now=lambda:types.SimpleNamespace(to_msg=lambda:Time(sec=1))),
         upload_pub=types.SimpleNamespace(publish=published.append))
     TelemetryNode.publish_upload(owner)
@@ -145,8 +181,9 @@ def test_ten_second_sampling_does_not_fill_old_slots_with_a_current_observation(
     owner=types.SimpleNamespace(config={'device_id':'test','arms':[{'id':'arm1'}],'monitoring':{'stale_ms':500}},
         cache={'arm1':(measured,0.)},states={'arm1':state},health={},period_ns=10_000_000_000,
         next_ns=10_100_000_000,run_id='run',boot='boot',storage_error='',
-        journal=types.SimpleNamespace(append=append),pub=types.SimpleNamespace(publish=published.append),maintain_if_due=lambda wall:None)
-    TelemetryNode.sample(owner)
+        storage=storage(types.SimpleNamespace(append=append)),pub=types.SimpleNamespace(publish=published.append),
+        publish_storage_events=lambda:None,maintain_if_due=lambda wall:None)
+    for _ in range(3):TelemetryNode.sample(owner)
     assert [row['valid'] for row in rows]==[False,False,True]
     assert [row['positions'] for row in rows]==[{}, {}, {'joint':.1}]
     assert all(row['reason']=='MISSING_STALE_OR_SCHEDULE_GAP' for row in rows[:2])
@@ -158,13 +195,38 @@ def test_hourly_maintenance_runs_once_per_due_period_and_reports_errors(monkeypa
     clock=[10.];calls=[]
     monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
     owner=types.SimpleNamespace(maintenance_due=0.,maintenance_error='',maintenance_status=None,
-        journal=types.SimpleNamespace(maintain=lambda stamp:calls.append(stamp) or {'deleted_samples':0}))
+        storage=storage(types.SimpleNamespace(maintain=lambda stamp:calls.append(stamp) or {'deleted_samples':0})))
     TelemetryNode.maintain_if_due(owner,100)
     clock[0]=20.;TelemetryNode.maintain_if_due(owner,200)
     assert calls==[100] and owner.maintenance_due==3610.
     clock[0]=3610.;TelemetryNode.maintain_if_due(owner,300)
     assert calls==[100,300] and owner.maintenance_status=={'deleted_samples':0}
-    def fail(stamp):raise OSError('maintenance unavailable')
-    owner.journal.maintain=fail;clock[0]=7210.
+    from soarm_station.telemetry_storage import StorageUnavailable
+    def fail(*args):raise StorageUnavailable('maintenance unavailable')
+    owner.storage.call=fail;clock[0]=7210.
     TelemetryNode.maintain_if_due(owner,400)
     assert 'maintenance unavailable' in owner.maintenance_error
+
+
+def test_absent_storage_discards_due_slots_arithmetically_without_sample_queue():
+    owner=types.SimpleNamespace(next_ns=0,period_ns=10,config={'arms':[{'id':'a'},{'id':'b'}]},
+        discarded_slots=0,gap_start_ns=None,storage_message=lambda:'TELEMETRY_STORAGE_WAITING: missing')
+    TelemetryNode.discard_due_slots(owner,1_000_000)
+    assert owner.next_ns==1_000_010 and owner.discarded_slots==200002 and owner.gap_start_ns==0
+    assert set(vars(owner))=={'next_ns','period_ns','config','discarded_slots','gap_start_ns','storage_message','storage_error'}
+
+
+def test_outage_before_next_slot_keeps_schedule_and_has_no_discarded_sample():
+    owner=types.SimpleNamespace(next_ns=100,period_ns=10,config={'arms':[{'id':'a'}]},
+        discarded_slots=0,gap_start_ns=None,storage_message=lambda:'TELEMETRY_STORAGE_WAITING: missing')
+    TelemetryNode.discard_due_slots(owner,95)
+    assert owner.next_ns==100 and owner.discarded_slots==0 and owner.gap_start_ns==100
+
+
+def test_camera_diagnostic_cannot_replace_same_named_arm_health():
+    from diagnostic_msgs.msg import DiagnosticArray,DiagnosticStatus,KeyValue
+    owner=types.SimpleNamespace(config={'arms':[{'id':'shared'}]},health={})
+    TelemetryNode.on_health(owner,DiagnosticArray(status=[
+        DiagnosticStatus(name='shared',hardware_id='shared',values=[KeyValue(key='voltage_v',value='12')]),
+        DiagnosticStatus(name='camera:shared',hardware_id='shared',values=[KeyValue(key='state',value='waiting')])]))
+    assert owner.health=={'shared':{'voltage_v':'12'}}

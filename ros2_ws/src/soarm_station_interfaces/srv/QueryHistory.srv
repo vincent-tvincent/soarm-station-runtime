@@ -4,6 +4,8 @@ uint32 page_size
 builtin_interfaces/Time start_time
 builtin_interfaces/Time end_time
 ---
+bool available
+string<=512 reason
 HistoryRecord[<=500] records
 Event[<=100] events
 uint64 next_sequence

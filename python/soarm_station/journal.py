@@ -26,24 +26,29 @@ class Journal:
         self.path=Path(path);self.limit_mb=limit_mb;self.lock=threading.RLock()
         self.retention_days=retention_days;self.preserve_unacked=preserve_unacked;self.event_limit=event_limit
         self.db=sqlite3.connect(path,timeout=2,check_same_thread=False)
-        self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA synchronous=FULL')
-        # Bound SQLite's connection cache and normal WAL reuse, not record age.
-        # A reader can pin WAL frames; quota checks also count that physical WAL.
-        self.db.execute('PRAGMA cache_size=-2048');self.db.execute('PRAGMA mmap_size=0')
-        self.db.execute('PRAGMA wal_autocheckpoint=256');self.db.execute('PRAGMA journal_size_limit=1048576')
-        self.db.executescript("""
-        CREATE TABLE IF NOT EXISTS samples(sequence INTEGER PRIMARY KEY AUTOINCREMENT,device_id TEXT NOT NULL,boot_id TEXT NOT NULL,scheduled_ns INTEGER NOT NULL,arm_id TEXT NOT NULL,payload TEXT NOT NULL,acked INTEGER NOT NULL DEFAULT 0,UNIQUE(device_id,boot_id,sequence));
-        CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY,payload TEXT NOT NULL,recorded_ns INTEGER);
-        CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS pending ON samples(acked,sequence);
-        CREATE INDEX IF NOT EXISTS samples_age ON samples(scheduled_ns,sequence);
-        """)
-        columns={row[1] for row in self.db.execute('PRAGMA table_info(events)')}
-        if 'recorded_ns' not in columns:
-            self.db.execute('ALTER TABLE events ADD COLUMN recorded_ns INTEGER')
-            self._migrate_event_times()
-        self.db.execute('CREATE INDEX IF NOT EXISTS events_age ON events(recorded_ns)')
-        self.db.commit()
+        try:
+            self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA synchronous=FULL')
+            # Bound SQLite's connection cache and normal WAL reuse, not record age.
+            # A reader can pin WAL frames; quota checks also count that physical WAL.
+            self.db.execute('PRAGMA cache_size=-2048');self.db.execute('PRAGMA mmap_size=0')
+            self.db.execute('PRAGMA wal_autocheckpoint=256');self.db.execute('PRAGMA journal_size_limit=1048576')
+            self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS samples(sequence INTEGER PRIMARY KEY AUTOINCREMENT,device_id TEXT NOT NULL,boot_id TEXT NOT NULL,scheduled_ns INTEGER NOT NULL,arm_id TEXT NOT NULL,payload TEXT NOT NULL,acked INTEGER NOT NULL DEFAULT 0,UNIQUE(device_id,boot_id,sequence));
+            CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY,payload TEXT NOT NULL,recorded_ns INTEGER);
+            CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS pending ON samples(acked,sequence);
+            CREATE INDEX IF NOT EXISTS samples_age ON samples(scheduled_ns,sequence);
+            """)
+            columns={row[1] for row in self.db.execute('PRAGMA table_info(events)')}
+            if 'recorded_ns' not in columns:
+                self.db.execute('ALTER TABLE events ADD COLUMN recorded_ns INTEGER')
+                self._migrate_event_times()
+            self.db.execute('CREATE INDEX IF NOT EXISTS events_age ON events(recorded_ns)')
+            self.db.commit()
+        except BaseException:
+            try:self.db.close()
+            except Exception:pass
+            raise
 
     @classmethod
     def _event_time(cls,event,fallback=None):

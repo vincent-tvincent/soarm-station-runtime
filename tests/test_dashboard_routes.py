@@ -65,7 +65,7 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
     monkeypatch.setenv('SOARM_STATION_ROOT',str(tmp_path))
     config={'device_id':'test','web':{'trusted_network_access':False},'arms':[{'id':'arm1','backend':'mock','joints':[{'name':'joint','min_rad':-1.,'max_rad':1.,'velocity_rad_s':1.}]}],'cameras':[],'profiles':{}}
     async def unused(request):raise AssertionError('Actuation route was not requested')
-    owner=types.SimpleNamespace(config=config,public_resources=resources(config),motor_records={},motor_record_errors={},states={},inference={},joints={},images={},upload={},events=[],workflows={},decisions=[])
+    owner=types.SimpleNamespace(config=config,public_resources=resources(config),motor_records={},motor_record_errors={},readiness_receipts={},component_diagnostics={},states={},inference={},joints={},images={},upload={},events=[],workflows={},decisions=[])
     for name in ('permission','hold','torque','stream_input','operate','operation_status','start_workflow','history','image','control','camera_stream'):setattr(owner,name,unused)
     for name in ('index','asset','api_resources','graph_status','graph_sample','graph_watch','resource_view','state','status','camera_stream'):
         setattr(owner,name,types.MethodType(getattr(DashboardNode,name),owner))
@@ -124,7 +124,8 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
 def test_bad_diagnostics_keep_last_valid_motor_cache_with_visible_error():
     from diagnostic_msgs.msg import DiagnosticArray,DiagnosticStatus,KeyValue
     arm={'id':'arm1','backend':'mock','joints':[{'name':'joint','min_rad':-1.,'max_rad':1.,'velocity_rad_s':1.}]}
-    owner=types.SimpleNamespace(config={'arms':[arm]},motor_records={},motor_record_errors={})
+    owner=types.SimpleNamespace(config={'arms':[arm],'cameras':[]},motor_records={},motor_record_errors={},readiness_receipts={},component_diagnostics={})
+    owner.component_health=types.MethodType(DashboardNode.component_health,owner)
     def send(value):
         message=DiagnosticArray(status=[DiagnosticStatus(name='arm1/motors',values=[KeyValue(key='status',value=json.dumps(value))])])
         DashboardNode.motor_health(owner,message)

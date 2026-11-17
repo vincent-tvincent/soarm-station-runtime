@@ -183,6 +183,40 @@ To disable automatic startup, run `systemctl --user disable --now soarm-station.
 
 ## Troubleshooting
 
+### Component readiness and automatic recovery
+
+An active service or a connected browser means the launcher or gateway is up;
+it does not establish device readiness. **Operations → Status → Components**
+reports controller feedback, each camera's capture and delivery, telemetry
+storage, and remembered input hosts. The same data is in `/api/status.readiness`.
+It is monitoring information and does not add motion admission rules.
+
+- Cameras validate decoded dimensions before publishing. A failed or blocked
+  camera is restarted independently; other cameras and arm control continue.
+  Capture can be ready while delivery to the dashboard is waiting. See
+  [camera recovery](camera-recovery.md) for diagnostics and capture retry settings.
+- Telemetry stays alive when its configured storage is unavailable, reports
+  waiting/fault, and retries. There is no RAM backlog or fallback database on
+  the system disk during ordinary storage loss. Recovery records the missing
+  interval as a gap and resumes the configured cadence. See
+  [storage configuration and mountpoint protection](runtime-reference.md).
+- A Mac leader companion can start at login, reconnect and advertise
+  automatically. Its profile/calibration live outside temporary directories.
+  See [companion installation](leader-input.md#automatic-mac-startup).
+- Remembered input hosts are marked offline after a gateway restart until a
+  live bridge reconnects. Offline leader metadata is optional: keyboard,
+  gamepad and other control modes remain independently available.
+
+A new runtime starts with control permission disabled. A reconnect never
+restores an old operation; use a fresh Start / Follow leader command. Calibration,
+joint limits and the selected operating profile are not recreated at startup.
+
+On a Pi using an NVMe HAT, a missing PCIe device cannot be repaired by creating
+a directory or starting SQLite. Check `lsblk`, `findmnt /mnt/ssd` and current
+boot PCIe/NVMe logs. Attach the HAT/SSD with power disconnected, then boot.
+A warm service restart validates software startup only; complete cold-start
+acceptance requires a power-off/on check with the actual devices attached.
+
 | Symptom | Check |
 | --- | --- |
 | Package not found | Build the workspace and source its `install/setup.bash` after the matching ROS setup. |

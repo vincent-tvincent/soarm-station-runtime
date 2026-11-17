@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Protect an SSD's underlying mount directory without unmounting the SSD.
+
+Run once with sudo. Temporary bind mounts exist only in a private mount
+namespace. Only the covered, underlying directory receives root:root/0700.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+
+
+def command(arguments):
+    return subprocess.run(arguments,check=True,capture_output=True,text=True)
+
+
+def identity(path):
+    value=path.stat()
+    return value.st_dev,value.st_ino,value.st_uid,value.st_gid,stat.S_IMODE(value.st_mode)
+
+
+def protect_directory(fd):
+    os.fchown(fd,0,0)
+    os.fchmod(fd,0o700)
+    value=os.fstat(fd)
+    if (value.st_uid,value.st_gid,stat.S_IMODE(value.st_mode))!=(0,0,0o700):
+        raise RuntimeError('Underlying directory permissions were not confirmed')
+
+
+def protect_in_namespace(mount,*,run=command,temp_parent='/run'):
+    if os.readlink('/proc/self/ns/mnt')==os.readlink(f'/proc/{os.getppid()}/ns/mnt'):
+        raise RuntimeError('A private mount namespace is required')
+    if not mount.is_absolute() or mount==Path('/') or mount!=mount.resolve():
+        raise ValueError('Use the absolute, nonsymlink SSD mount path')
+    if not os.path.ismount(mount):raise RuntimeError('The SSD must already be mounted')
+    mounted_identity=identity(mount)
+    run(['mount','--make-rprivate','/'])
+    temporary=Path(tempfile.mkdtemp(prefix='soarm-telemetry-mount-',dir=temp_parent))
+    view=temporary/'parent';view.mkdir(mode=0o700)
+    bound=False
+    try:
+        # Nonrecursive bind deliberately excludes the SSD submount, exposing
+        # its covered directory on the parent's filesystem.
+        run(['mount','--bind','--',str(mount.parent),str(view)]);bound=True
+        underlying=view/mount.name
+        if underlying.is_symlink() or not underlying.is_dir() or os.path.ismount(underlying):
+            raise RuntimeError('Underlying target is not an unmounted directory')
+        fd=os.open(underlying,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        try:
+            value=os.fstat(fd)
+            if not stat.S_ISDIR(value.st_mode) or value.st_dev!=mount.parent.stat().st_dev:
+                raise RuntimeError('Underlying directory is not on the parent filesystem')
+            if (value.st_dev,value.st_ino)==mounted_identity[:2]:
+                raise RuntimeError('Bind view still resolves to the mounted SSD; refusing permission changes')
+            protect_directory(fd)
+        finally:os.close(fd)
+        if identity(mount)!=mounted_identity:
+            raise RuntimeError('Mounted SSD identity/permissions changed during verification')
+        return {'mount':str(mount),'underlying_owner':'root:root','underlying_mode':'0700',
+            'mounted_filesystem_unchanged':True}
+    finally:
+        if bound:
+            run(['umount','--',str(view)])
+        # Never recursively remove a bind view. If umount fails, namespace exit
+        # releases it; leaving an empty /run directory is safer than traversal.
+        view.rmdir();temporary.rmdir()
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mount',required=True,type=Path)
+    parser.add_argument('--_isolated',action='store_true',help=argparse.SUPPRESS)
+    args=parser.parse_args()
+    if sys.platform!='linux':parser.error('This helper requires Linux mount namespaces')
+    if os.geteuid()!=0:parser.error('Run this one-time administrator helper with sudo')
+    if not args._isolated:
+        return subprocess.run(['unshare','--mount','--propagation','private',sys.executable,
+            str(Path(__file__).resolve()),'--_isolated','--mount',str(args.mount)],check=False).returncode
+    def interrupted(*_):raise KeyboardInterrupt()
+    signal.signal(signal.SIGTERM,interrupted);signal.signal(signal.SIGHUP,interrupted)
+    print(json.dumps(protect_in_namespace(args.mount),indent=2))
+    return 0
+
+
+if __name__=='__main__':
+    raise SystemExit(main())

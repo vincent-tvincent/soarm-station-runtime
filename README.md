@@ -84,6 +84,8 @@ Already configured and calibrated both arms with LeRobot? Follow the
 [first-time hardware setup guide](docs/first-time-setup.md), based on the
 configured Pi follower, three cameras and Mac leader. It shows where both
 calibration files go, which bindings to edit, and how to start both processes.
+For automatic Mac input-host startup, see the
+[persistent leader companion](docs/leader-input.md#automatic-mac-startup).
 
 Create a physical SO-101 profile under the ignored `local/` directory:
 

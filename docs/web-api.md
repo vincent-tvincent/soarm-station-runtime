@@ -6,6 +6,17 @@ Use an external LLM/MCP harness, CV pipeline or rule-based application to decide
 
 ## Connection, access and discovery
 
+`GET /api/status` includes `readiness: {state, components}`. Each component has
+`id`, `label`, `state`, `required` and `detail`; component states are `ready`,
+`starting`, `waiting`, `fault` or `offline`. IDs are `controller:<arm>`,
+`camera:<camera>`, `telemetry` and `input:<host>`. This describes monitoring
+readiness, not permission to move. Input hosts are optional. Camera readiness
+requires both native capture and recent source frames received by the dashboard.
+
+`GET /api/history` returns `available` and `reason` alongside records/events.
+Unavailable storage returns HTTP503 with `available: false`; clients should
+show that state and retry later, rather than interpreting it as an empty history.
+
 The configured gateway normally listens on HTTPS port 8443. Trust the installation's CA/certificate. The default access middleware accepts actual loopback and Tailscale socket peers; otherwise supply `Authorization: Bearer <SOARM_STATION_TOKEN>`. `web.trusted_network_access: false` requires the bearer for those peers too. The token is separate from the client-generated `operator_session_id` used for motion ownership.
 
 Browser mutations and WebSockets require a matching `Origin` when one is supplied. There is no permissive CORS proxy. An external server-side agent can connect directly; an embedded browser client should share the gateway origin. Use `soarm_station` as the camera/control WebSocket subprotocol. Headless WebSocket clients can use the bearer header; a browser requiring bearer access can supply `['soarm_station', token]`. Never put credentials in the URL. `/ws/input-host` is the separate native leader-registration protocol, not an ordinary joint-control socket.

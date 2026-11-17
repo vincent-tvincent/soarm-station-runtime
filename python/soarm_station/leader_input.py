@@ -11,6 +11,8 @@ import contextlib
 import dataclasses
 import hashlib
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import math
 import multiprocessing
 import os
@@ -431,8 +433,10 @@ class InputHostBridge:
             if self.active is not None and self.active["run_id"]==run_id:self.active=None
 
     async def run(self):
-        from aiohttp import ClientSession
-        async with ClientSession(headers=self.headers) as self.session:
+        from aiohttp import ClientSession,ClientTimeout
+        # Bound connection establishment only; an established control stream has
+        # no session-duration deadline. Clean closes also back off before retry.
+        async with ClientSession(headers=self.headers,timeout=ClientTimeout(total=None,connect=10,sock_connect=10)) as self.session:
             # A bridge disconnection ends sampling. Reconnect advertises only; no resume.
             while True:
                 try:
@@ -446,7 +450,9 @@ class InputHostBridge:
                             async for message in self.registry:
                                 if message.type.value!=1:continue
                                 body=json.loads(message.data)
-                                if body.get("type")=="start":
+                                if body.get("type")=="registered":
+                                    logging.info('Station connected; device discovery is active')
+                                elif body.get("type")=="start":
                                     if self.active is not None:await self.emit(type="state",run_id=body["run_id"],state="ERROR",reason="Input host is busy");continue
                                     self.active=body;self.task=asyncio.create_task(self.operate(body))
                                 elif body.get("type")=="stop":await self.stop(body.get("run_id"))
@@ -454,9 +460,11 @@ class InputHostBridge:
                                 elif body.get("type")=="refresh":await self.emit(type="inventory",host=self.advertisement())
                         finally:
                             updater.cancel();await self.stop()
+                    logging.info('Station connection closed; reconnecting without resuming control')
+                    await asyncio.sleep(2)
                 except asyncio.CancelledError:await self.stop();raise
                 except Exception as exc:
-                    print("Input-host connection unavailable:",str(exc)[:200],flush=True)
+                    logging.warning("Input-host connection unavailable: %s",str(exc)[:200])
                     await self.stop();await asyncio.sleep(2)
 
 
@@ -466,15 +474,28 @@ def main():
     parser.add_argument("--ca",help="CA certificate for the existing gateway TLS identity")
     parser.add_argument("--config",type=Path,help="Local JSON/YAML leader profiles; omit to advertise unconfigured OS serial devices")
     parser.add_argument("--list",action="store_true",help="Print OS inventory/configuration only; no device opens or network")
-    args=parser.parse_args();config=load_config(args.config)
-    if args.list:print(json.dumps({"host_id":config["host_id"],"devices":discover(config)},indent=2));return
+    parser.add_argument("--log-file",type=Path,help="Rotating companion log (three 1 MiB backups)")
+    args=parser.parse_args()
+    if args.list:
+        config=load_config(args.config)
+        print(json.dumps({"host_id":config["host_id"],"devices":discover(config)},indent=2));return
+    handler=RotatingFileHandler(args.log_file,maxBytes=1048576,backupCount=3) if args.log_file else logging.StreamHandler()
+    logging.basicConfig(level=logging.INFO,handlers=[handler],format='%(asctime)s %(levelname)s %(message)s')
     if not args.url or not args.url.startswith("https://"):parser.error("Use the gateway HTTPS URL; TLS verification is required")
     tls=ssl.create_default_context(cafile=args.ca)
     token=os.environ.get("SOARM_STATION_TOKEN","")
     headers={"Authorization":"Bearer "+token} if token else {}
-    print("Input host:",config["host_id"],"— advertising only; choose a configured leader and press Start in the dashboard",flush=True)
+    try:config=load_config(args.config)
+    except Exception:
+        logging.exception("Input-host profile is unavailable or invalid");raise SystemExit(1)
+    logging.info("Input host: %s — advertising only; choose a configured leader and press Start in the dashboard",config["host_id"])
     try:asyncio.run(InputHostBridge(config,args.url,tls,headers).run())
     except KeyboardInterrupt:pass
+    except Exception:
+        logging.exception('Input host exited unexpectedly');raise SystemExit(1)
 
 
-if __name__=="__main__":main()
+if __name__=="__main__":
+    try:main()
+    except Exception:
+        logging.exception('Input-host startup failed');raise SystemExit(1)

@@ -81,10 +81,8 @@ class Runtime:
     def recover(self):
         from .hardware import make_arm
         while not self.recovery_stop.wait(2.):
-            for n,cam in list(self.cameras.items()):
-                if cam.error and not cam.thread.is_alive():
-                    replacement=Camera(cam.config,self.config['frame_dir'],self.config['lock_dir'])
-                    replacement.sequence=cam.sequence;self.cameras[n]=replacement;replacement.start()
+            # Each stable Camera supervisor replaces only its own capture
+            # process after confirmed exit; no second USB owner is opened here.
             for arm in self.arms.values():
                 if arm.phase=='FAULT' and not arm.thread.is_alive() and not arm.stop.is_set():
                     with arm.lock:

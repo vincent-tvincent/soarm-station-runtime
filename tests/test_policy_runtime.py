@@ -275,6 +275,7 @@ def test_pending_preparation_prevents_duplicate_jobs_and_core_start(managed):
         owner.lock = threading.RLock()
         owner.op = None
         owner.hold_pending = False
+        owner.torque_request = None
         owner.policy_preparation = job["id"]
         owner.permission = True
         owner.principal = "operator"

@@ -479,3 +479,36 @@ def test_follow_leader_does_not_capture_or_enforce_a_pickup_reference(host_confi
         assert result['accepted'] and not held
         assert registry.hosts['test-host']['ws'].sent[0]['pickup_reference'] is None
     asyncio.run(check())
+
+
+def test_clean_registry_close_does_not_spin_or_restore_a_run(monkeypatch):
+    import aiohttp
+    calls=[]
+    class Registry:
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def send_json(self,body):
+            calls.append(body)
+            await asyncio.sleep(0)
+        async def messages(self):
+            if False:yield None
+        def __aiter__(self):return self.messages()
+    class Session:
+        def __init__(self,**kwargs):
+            assert kwargs['timeout'].total is None
+            assert kwargs['timeout'].connect==10
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        def ws_connect(self,*args,**kwargs):return Registry()
+    monkeypatch.setattr(aiohttp,'ClientSession',Session)
+    bridge=InputHostBridge({'host_id':'test','leaders':[]},'https://unit.invalid',None,{})
+    bridge.advertisement=lambda:{'id':'test','devices':[]}
+    async def check():
+        task=asyncio.create_task(bridge.run())
+        await asyncio.sleep(.05)
+        task.cancel()
+        try:await task
+        except asyncio.CancelledError:pass
+        assert len(calls)==1 and calls[0]['type']=='hello'
+        assert bridge.active is None
+    asyncio.run(check())
