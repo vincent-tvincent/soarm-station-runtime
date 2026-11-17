@@ -65,8 +65,10 @@ committed count increased from 212167 to 212171; history was available. Each cam
 capture process used approximately 58 MiB RSS at the subsequent check.
 
 Final logs revealed one further startup defect: the RPC tracer's old ownership
-manifest survived while its LTTng session daemon no longer existed. Cleanup
-rejected the exact `Error: No session daemon is available` response and prevented
-fresh graph tracing. The follow-up correction accepts that exact absence only
-after validating the dead owner/token/directory; unexpected errors remain fatal
-and retain evidence. 38 focused tracer tests passed.
+manifest survived while its LTTng session daemon no longer existed. The final
+correction reads LTTng's structured XML session list before cleanup, and verifies
+absence again after a failed destruction attempt. Unknown errors retain evidence;
+only the recorded dead collector's exact session and directory are eligible.
+53 focused tracer tests passed. A real LTTng probe with a test-owned stale record
+and an absent daemon then launched the full isolated mock graph, reached
+`trace_ready: true`, and removed only its own session during shutdown.

@@ -17,6 +17,7 @@ import threading
 import time
 import traceback
 import uuid
+import xml.etree.ElementTree as ET
 from collections import OrderedDict,deque
 
 from .ipc import receive, send
@@ -263,6 +264,44 @@ class LttngSnapshotSource:
             if not self.created and self.root.exists(): shutil.rmtree(self.root)
 
 
+def _parse_session_list(document,*,daemon_absent=False):
+    """Accept the installed LTTng MI 4.1 list/session shape, never human output."""
+    if len(document.encode())>1048576:raise ValueError('LTTng session list exceeds supported size')
+    root=ET.fromstring(document);namespace='{https://lttng.org/xml/ns/lttng-mi}'
+    tag=lambda name:namespace+name
+    names=root.findall(tag('name'));outputs=root.findall(tag('output'));success=root.findall(tag('success'))
+    if (root.tag!=tag('command') or root.get('schemaVersion')!='4.1'
+            or len(names)!=1 or names[0].text!='list' or len(outputs)!=1 or len(success)>1
+            or any(child.tag not in {tag('name'),tag('output'),tag('success')} for child in root)):
+        raise ValueError('Unrecognized LTTng list command schema')
+    if success and (success[0].text not in ('true','false') or (success[0].text!='true' and not daemon_absent)):
+        raise ValueError('LTTng list command did not report success')
+    output=outputs[0];groups=output.findall(tag('sessions'))
+    if daemon_absent and len(output)==0:return set()
+    if len(groups)!=1 or len(output)!=1:raise ValueError('LTTng list output does not contain sessions')
+    found=set()
+    for session in groups[0]:
+        entries=session.findall(tag('name'))
+        if session.tag!=tag('session') or len(entries)!=1 or not entries[0].text or len(entries[0]):
+            raise ValueError('Invalid LTTng session name record')
+        name=entries[0].text # Preserve exact names, including any whitespace.
+        if name in found:raise ValueError('Duplicate LTTng session name')
+        found.add(name)
+    if daemon_absent and found:raise ValueError('Absent daemon response unexpectedly lists sessions')
+    return found
+
+
+def _listed_sessions():
+    result=subprocess.run(['lttng','--mi','xml','list'],capture_output=True,text=True,timeout=3)
+    absent=result.returncode!=0 and result.stderr.strip()=='Error: No session daemon is available'
+    if absent and not result.stdout.strip():return set()
+    if not absent and (result.returncode or result.stderr.strip()):
+        raise RuntimeError('Cannot enumerate RPC trace sessions: '+(result.stderr.strip() or 'lttng list failed')[:240])
+    try:return _parse_session_list(result.stdout,daemon_absent=absent)
+    except (ET.ParseError,ValueError) as exc:
+        raise RuntimeError('Cannot enumerate RPC trace sessions: '+str(exc)[:240]) from exc
+
+
 def cleanup_stale_owner(manifest):
     """Recover only a recorded, dead collector's exact owned session/directory."""
     if not manifest.exists():return
@@ -281,18 +320,16 @@ def cleanup_stale_owner(manifest):
         owner=json.loads(marker.read_text())
         if owner.get('token')!=token or owner.get('session')!=session:
             raise ValueError('RPC trace temporary-directory ownership mismatch')
-    result=subprocess.run(['lttng','destroy',session],capture_output=True,text=True,timeout=3)
-    if result.returncode:
-        detail=result.stderr.strip()
-        # After a reboot the private manifest can outlive the per-user daemon.
-        # No daemon means no session to destroy. Match the complete known error,
-        # not a substring that could hide permission failures or mixed output.
-        missing_daemon=detail=='Error: No session daemon is available'
-        missing_session=re.fullmatch(
-            rf"Error: Session (?:(?:name|{re.escape(session)}|'{re.escape(session)}') )?(?:not found|does not exist)",
-            detail,re.IGNORECASE) is not None
-        if result.stdout.strip() or not (missing_daemon or missing_session):
-            raise RuntimeError('Cannot clean recorded RPC trace session: '+(detail or 'lttng destroy failed')[:240])
+    # Enumeration is authoritative; destroy's human output varies with daemon
+    # and ~/.lttngrc state. Never infer absence from its warning/error substrings.
+    if session in _listed_sessions():
+        failure=None
+        try:
+            result=subprocess.run(['lttng','destroy',session],capture_output=True,text=True,timeout=3)
+            if result.returncode:failure=result.stderr.strip() or 'lttng destroy failed'
+        except (OSError,subprocess.SubprocessError) as exc:failure=str(exc)
+        if failure is not None and session in _listed_sessions():
+            raise RuntimeError('Cannot clean recorded RPC trace session: '+failure[:240])
     if directory.exists():shutil.rmtree(directory)
     manifest.unlink(missing_ok=True)
 
