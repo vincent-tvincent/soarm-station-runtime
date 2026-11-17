@@ -66,6 +66,14 @@ initialization maps remain available. Startup/shutdown own only this collector's
 LTTng session and temporary files. Missing tooling reports unavailable RPC
 coverage without indefinitely blocking control startup.
 
+After an interrupted shutdown or reboot, startup validates the recorded collector
+PID/start time, exact session token and private-directory marker before removing
+stale tracing resources. If LTTng reports that its session daemon is absent, the
+recorded session is already gone; only that collector's stale files are removed,
+and ordinary session creation starts the daemon again. A live owner, mismatched
+marker, permission failure or unrecognized LTTng error still prevents cleanup and
+preserves the evidence. No unrelated session is destroyed.
+
 Snapshots rotate through two private temporary directories, bounded to 36 MiB
 total, with at most 8 MiB of trace ring buffers (1.5 MiB on the tested four-core
 Pi). No persistent trace archive is created. Packet gaps, lost events, missing

@@ -22,7 +22,7 @@ visible instead of equating HTTP connectivity with a fully ready station.
   metadata, wrong-size frame rejection, storage disappearance/recovery, UUID
   mismatch, obsolete upload acknowledgements, gap accounting and stale-message
   readiness. Interface participants must rebuild for the new QueryHistory fields.
-- Synthetic UI checks at1600×900 and780×1000 confirmed readable component status,
+- Synthetic UI checks at 1600×900 and 780×1000 confirmed readable component status,
   no horizontal overflow, and preserved control buttons and the fixed FK panel.
 
 ## Mac companion
@@ -48,3 +48,25 @@ Complete cold-start acceptance still requires a proper power-off/on cycle with
 SSD/HAT attached beforehand. Service restart testing does not substitute for that
 physical check. No joint limits, calibration, torque commands or motion permission
 were changed by the recovery tests. No speculative DDS transport workaround was added.
+
+## Live Pi activation
+
+Deployment of `e23a642` rebuilt both interface/system packages and restarted an
+idle Station. The only deployment-profile addition was the existing SSD's
+filesystem UUID check. Calibration, all other configuration and measured joint
+positions were unchanged. Feedback returned at 99.99 Hz with zero startup motor
+writes. Torque was OFF before the restart and remained OFF; permission stayed
+disabled and no operation resumed.
+
+All three native cameras reported 640×480 with zero recovery attempts. A 30-second
+read-only browser check received 295/290/294 frames, with maximum gaps below 243 ms,
+one connection per camera, no reconnects and no JavaScript errors. Telemetry
+committed count increased from 212167 to 212171; history was available. Each camera
+capture process used approximately 58 MiB RSS at the subsequent check.
+
+Final logs revealed one further startup defect: the RPC tracer's old ownership
+manifest survived while its LTTng session daemon no longer existed. Cleanup
+rejected the exact `Error: No session daemon is available` response and prevented
+fresh graph tracing. The follow-up correction accepts that exact absence only
+after validating the dead owner/token/directory; unexpected errors remain fatal
+and retain evidence. 38 focused tracer tests passed.

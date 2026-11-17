@@ -282,8 +282,17 @@ def cleanup_stale_owner(manifest):
         if owner.get('token')!=token or owner.get('session')!=session:
             raise ValueError('RPC trace temporary-directory ownership mismatch')
     result=subprocess.run(['lttng','destroy',session],capture_output=True,text=True,timeout=3)
-    if result.returncode and 'not found' not in result.stderr.lower() and 'does not exist' not in result.stderr.lower():
-        raise RuntimeError('Cannot clean recorded RPC trace session')
+    if result.returncode:
+        detail=result.stderr.strip()
+        # After a reboot the private manifest can outlive the per-user daemon.
+        # No daemon means no session to destroy. Match the complete known error,
+        # not a substring that could hide permission failures or mixed output.
+        missing_daemon=detail=='Error: No session daemon is available'
+        missing_session=re.fullmatch(
+            rf"Error: Session (?:(?:name|{re.escape(session)}|'{re.escape(session)}') )?(?:not found|does not exist)",
+            detail,re.IGNORECASE) is not None
+        if result.stdout.strip() or not (missing_daemon or missing_session):
+            raise RuntimeError('Cannot clean recorded RPC trace session: '+(detail or 'lttng destroy failed')[:240])
     if directory.exists():shutil.rmtree(directory)
     manifest.unlink(missing_ok=True)
 
