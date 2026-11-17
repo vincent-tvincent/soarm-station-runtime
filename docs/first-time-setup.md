@@ -222,11 +222,11 @@ for complete field and connection details.
 ## 6. Use the configured system
 
 In **Control → Leader arm**, select **Operator Mac → SO-101 leader** and press
-**Unlock / follow**. The bridge verifies existing motor calibration. The follower
-stays frozen while the live leader overlay updates: align the leader with the
-held follower pose to begin following. **Freeze / Esc** holds the follower.
-After Freeze or Home, unlock and align again; there is no alignment countdown.
-The gripper participates in pickup only when **Gripper follow** is enabled.
+**Follow leader**. The bridge checks the saved calibration, then the follower
+moves toward the live leader pose under the existing speed and joint limits.
+You do not need to match the two poses manually. **Freeze / Esc** holds the
+follower; after Freeze or Home, press Follow leader to approach the current
+leader pose again. Gripper follow can be disabled to keep the jaw held.
 This is the native bridge path; browser virtual-serial forwarding is not implemented.
 
 For ACT/VLA deployment, use Policies to select a model execution profile, its

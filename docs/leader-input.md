@@ -4,7 +4,7 @@ This bridge makes the Control panel's Leader host/device dropdown reflect actual
 devices on a connected Mac or Linux input host. The browser does not discover or
 open USB on its own. An unconfigured serial adapter is visible but cannot be
 started; a configured candidate is checked against live motor calibration only
-after the operator presses **Unlock / follow**. Existing LeRobot calibration files can be
+after the operator presses **Follow leader**. Existing LeRobot calibration files can be
 reused unchanged; an additional input-host profile associates a file with its
 physical USB device.
 
@@ -120,14 +120,16 @@ does not reload the local JSON. Station itself does not need a restart.
 
 Open **Control → Leader arm**, press **Refresh**, select the input computer,
 then select the configured leader. The native bridge must remain running while
-using it. Press **Unlock / follow** to check calibration and start sampling. The follower
-stays held during **ALIGNING**; match the raw calibrated leader pose to the held
-follower to begin following. Body pickup uses 0.12 rad per joint (about 6.9°),
-and 10 percentage points for the jaw when **Gripper follow** is enabled. The
-leader overlay and sampling rate keep updating during alignment. There is no
-alignment countdown. **Freeze / Esc** holds the follower; unlock and align to
-resume. Home first stops following, moves to its configured target, and can
-hand back to the leader through the same unlock-and-align sequence.
+using it. Press **Follow leader** when ready for the follower to move. The
+follower approaches the leader's current pose using its existing joint/gripper
+speed limits, then keeps following fresh leader targets. Manual pose matching
+is not required. Out-of-range leader targets are clipped to the follower's
+configured command limits while the other joints continue following.
+
+**Freeze / Esc** holds the follower. Press Follow leader again to approach the
+leader's current pose and resume. Home first stops following, moves to its
+configured target, and can hand back through the same Follow leader action.
+The **Gripper follow** toggle controls whether the jaw follows or stays held.
 
 If Start reports a calibration mismatch, select the existing file that belongs
 to the attached motors. The bridge does not automatically overwrite motor
@@ -222,7 +224,7 @@ no additional listener or ROS node is created.
 | Method/path | Contract |
 | --- | --- |
 | GET `/api/input-hosts` | `hosts[]` has `id,label,platform,connected,state,reason,devices[],active,latest_pose,sample_age_ms,report_age_ms,measured_hz`. No placeholder host/device is added. |
-| POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100); optional boolean `follow_gripper` (default true), `gripper_reference` in percent, and `pickup` (default false; the dashboard sends true). Pickup captures an authoritative native held/measured reference, never a browser-supplied pose. Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,follow_gripper,heartbeat_interval_ms,browser_lease_ms`. |
+| POST `/api/input-hosts/{id}/start` | Explicit `device_id,arm_id,operator_session_id,runtime_boot_id,controller_session,hz` (50–100); optional boolean `follow_gripper` (default true), `gripper_reference` in percent, and `pickup` (default false; the dashboard sends false for follower-to-leader convergence). Explicit `pickup:true` is a legacy opt-in that requires manually matching the held follower pose. Requires existing permission/fresh follower feedback. Returns `accepted,run_id,state=STARTING,follow_gripper,heartbeat_interval_ms,browser_lease_ms`. |
 | POST `/api/input-hosts/{id}/heartbeat` | `run_id,operator_session_id`, Status check for this run; it does not renew or expire control. A late request returns `accepted:false, code:RUN_ENDED` and the real terminal reason without affecting another run. |
 | POST `/api/input-hosts/{id}/settings` | Matching `run_id,operator_session_id,follow_gripper` boolean. Forwards a same-run setting change; does not enable permission or renew liveness. |
 | POST `/api/input-hosts/{id}/stop` | Same matching run/session fields. Returns `stopped,hold_confirmed,state,reason`; wrong or absent ownership never issues a global hold. |
@@ -245,9 +247,9 @@ can continue while fresh leader input arrives. Source/control-socket loss still
 stops the operation, and reconnect only advertises again.
 
 The **Home** shortcut stops the matching leader run and waits for `stopped`
-and `hold_confirmed` before starting the Home operation. Unlock retires only the panel-owned Home stream, confirms its hold and obtains
-a fresh permission grant before opening the next leader run. Pickup waits for
-alignment with the newly captured held pose before sending movement commands.
+and `hold_confirmed` before starting the Home operation. Follow leader retires only the panel-owned Home stream, confirms its hold and
+obtains a fresh permission grant before opening the next leader run. Fresh leader
+targets are sent immediately; the native rate limiter controls the approach.
 A delayed sample that misses its Pi-issued window is discarded and freshly read
 rather than causing an extra 50-ms bridge abort. Native feedback/source-loss
 handling remains in the controller. Result messages preserve the native terminal

@@ -140,7 +140,7 @@ test('a late leader start is explicitly stopped after cancellation',async()=>{
   assert(calls.some(x=>x[0]==='request'&&x[1].endsWith('/stop')&&x[2].run_id==='late-run'));
 });
 
-test('Leader unlock retires only its own Home stream and refreshes permission before pickup',async()=>{
+test('Follow leader retires only its own Home stream and requests smooth takeover without pickup',async()=>{
   const {panel,client,calls,states}=fixture();panel.mode='leader';states.a.permission=true;
   panel.leaderRun={host:'host',run_id:'first'};
   client.request=async(path,body)=>{
@@ -158,7 +158,7 @@ test('Leader unlock retires only its own Home stream and refreshes permission be
   await panel.start();
   assert.deepEqual(calls.slice(offset).filter(c=>['hold','enable','request'].includes(c[0])).map(c=>c[0]),['hold','enable','request']);
   assert.equal(panel.leaderRun.run_id,'second');assert(!panel.ownsStream);
-  assert(calls.some(c=>c[0]==='request'&&c[1].endsWith('/start')&&c[2].pickup===true));
+  assert(calls.some(c=>c[0]==='request'&&c[1].endsWith('/start')&&c[2].pickup===false));
 });
 
 test('Leader unlock refuses a foreign operation without hold or permission changes',async()=>{
@@ -283,4 +283,15 @@ test('shared FK stays visible while hidden Control cannot accept keyboard or gam
   panel.keyDown({code:'KeyJ'});assert.equal(panel.keys.size,0);
   const count=calls.length;panel.setVisible(false,false);
   assert.equal(panel.poseVisible,false);assert(!calls.slice(count).some(c=>c[0]==='pose'));
+});
+
+
+test('first leader takeover requests follower-to-leader motion without pose matching',async()=>{
+ const {panel,client,calls}=fixture();panel.mode='leader';
+ client.request=async(path,body)=>{calls.push(['request',path,body]);return {accepted:true,run_id:'fresh-follow'};};
+ await panel.start();
+ const request=calls.find(c=>c[0]==='request'&&c[1].endsWith('/start'));
+ assert.equal(request[2].pickup,false);assert.equal(request[2].hz,100);
+ assert.equal(panel.leaderRun.run_id,'fresh-follow');
+ assert(calls.some(c=>c[0]==='note'&&c[1].includes('follower will approach the leader')));
 });

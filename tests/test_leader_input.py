@@ -468,3 +468,14 @@ def test_leader_stop_waits_for_native_hold_completion(host_config):
         assert (await registry._hold_current(active))['success']
         assert reads>=3 and not held
     asyncio.run(check())
+
+
+def test_follow_leader_does_not_capture_or_enforce_a_pickup_reference(host_config):
+    async def check():
+        registry,state,held,body=registry_fixture(host_config)
+        state['arms']['follower'].update(positions={'pan':0.,'lift':0.},gripper=50.)
+        result=json.loads((await registry.start_route(Request({**body,'pickup':False,
+            'pickup_reference':{'positions':{'pan':1.,'lift':1.},'gripper':90.}}))).text)
+        assert result['accepted'] and not held
+        assert registry.hosts['test-host']['ws'].sent[0]['pickup_reference'] is None
+    asyncio.run(check())

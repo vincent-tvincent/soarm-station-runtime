@@ -309,13 +309,17 @@ ROS graph discovery is metadata, not a command proxy. Continuous graph-wide moni
 Check HTTP status and response content type. Policy-management errors are structured JSON (`schema_version`, `code`, `message`, optional `details`); older dashboard routes can return plain-text 400/401/403 errors. A successful HTTP response can still contain `accepted:false`, a failed job, or an operation result with `execution_completed:false`. Preserve edits on 409 revision conflicts and inspect per-job errors before applying/running a model. See [model upload](model-weight-upload.md) and [policy-management schemas](policy-management-api.md).
 
 
-### Continuous leader pickup and scoped handoff
+### Continuous leader takeover and scoped handoff
 
-`POST /api/input-hosts/{host_id}/start` accepts `pickup: true` to wait for raw
-leader/follower alignment before dispatch. The dashboard uses this for
-**Unlock / follow**, including after Home. The reference comes from native
-follower state. `ALIGNING` has no countdown; live poses continue to be reported.
-Omitting `pickup` retains direct convergence for custom API clients.
+The dashboard's **Follow leader** action sends `pickup:false` to
+`POST /api/input-hosts/{host_id}/start`. The follower approaches the leader's
+fresh targets under its existing joint/gripper speed limits. Manual pose
+matching is not required, including after Freeze or Home. This is also the API
+default when `pickup` is omitted.
+
+For clients deliberately needing the old manual pickup behavior, explicit
+`pickup:true` remains an opt-in: it waits for the raw leader pose to match the
+native held reference. The dashboard does not request that mode.
 
 `POST /api/hold` optionally accepts all three ownership fields:
 `controller_session`, `operator_session_id`, and `operation_id` (null for an

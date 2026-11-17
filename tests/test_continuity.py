@@ -47,7 +47,7 @@ def test_healthy_stream_runs_beyond_120_seconds(setup):
 
 def test_large_initial_leader_pose_keeps_stream_alive_and_respects_existing_slew_limits(setup):
     from soarm_station.leader_input import bounded_leader_target
-    arm,clock=setup;begin(arm)
+    arm,clock=setup;begin(arm,persistent_target=True)
     limits={j['name']:{'min_rad':j['min_rad'],'max_rad':j['max_rad']} for j in arm.config['joints']}
     measured={'positions':{name:10. for name in arm.q},'gripper':120.,'gripper_unit':'percent'}
     desired=bounded_leader_target(measured,limits)
@@ -325,3 +325,24 @@ def test_language_stream_wait_does_not_start_native_startup_deadline(setup):
     for _ in range(1400):
         arm.input(frame(arm,kind='HEARTBEAT'));tick(arm,clock,.1)
     assert arm.op and arm.permission and arm.model_state=='WAIT' and arm.model.loads==0
+
+
+def test_follower_converges_to_mismatched_leader_then_retargets_after_freeze(setup):
+    arm,clock=setup
+    for value in (.8,-.6):
+        begin(arm,persistent_target=True)
+        desired={'positions':{name:value for name in arm.q},'gripper':50.}
+        start=dict(arm.commanded_q)
+        assert any(abs(start[name]-value)>.12 for name in start)
+        for index in range(400):
+            previous=dict(arm.commanded_q)
+            arm.input(frame(arm,desired,identifier=str(index)))
+            tick(arm,clock,.01)
+            for joint in arm.config['joints']:
+                name=joint['name']
+                assert abs(arm.commanded_q[name]-previous[name])<=joint['velocity_rad_s']*.01+1e-8
+                assert min(previous[name],value)-1e-8<=arm.commanded_q[name]<=max(previous[name],value)+1e-8
+        assert arm.commanded_q==pytest.approx(desired['positions'])
+        assert arm.q==pytest.approx(desired['positions'])
+        arm._hold('OPERATOR_HOLD');arm._finish_hold()
+        assert not arm.permission and arm.op is None

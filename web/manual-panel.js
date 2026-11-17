@@ -44,7 +44,7 @@ export class ManualPanel {
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
       <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Coarse</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 3 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
       <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
-      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Unlock, align the leader with the held follower, then follow. Freeze or Home pauses following.</p></div>
+      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Follow leader moves the follower smoothly toward the live leader pose within its joint and speed limits. Freeze or Home pauses following.</p></div>
     </div>
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p>`;
     this.poseElement = poseElement || element.appendChild(document.createElement("section"));
@@ -270,7 +270,7 @@ export class ManualPanel {
     this.el("start-manual").innerHTML = this.busy
       ? "Starting…"
       : this.mode === "leader"
-        ? "Unlock / follow"
+        ? "Follow leader"
         : this.mode === "gamepad" ? "Start <kbd>A / ✕</kbd>" : "Start";
     this.el("stop-manual").innerHTML = this.mode === "leader" ? "Freeze <kbd>Esc</kbd>" : this.mode === "gamepad" ? "Stop <kbd>B / ○</kbd>" : "Stop <kbd>Esc</kbd>";
     this.el("home-manual").innerHTML = this.mode === "gamepad" ? "Home <kbd>Y / △</kbd>" : "Home <kbd>N</kbd>";
@@ -494,7 +494,7 @@ export class ManualPanel {
           this.ownsStream = false;
           if (!this.currentIntent(context)) return;
         } else if (this.client.currentOperation || this.stateForArm().operation_id) {
-          throw Error("Another operation owns the arm. Stop it before unlocking the leader.");
+          throw Error("Another operation owns the arm. Stop it before following the leader.");
         }
       }
       if (!this.dirty || this.mode !== "joint") this.resetTargets();
@@ -520,7 +520,7 @@ export class ManualPanel {
             runtime_boot_id: context.boot,
             controller_session: context.session,
             hz: 100,
-            pickup: true,
+            pickup: false,
             follow_gripper: this.followGripper,
             gripper_reference: this.preservedGripper(this.measured()),
           },
@@ -533,7 +533,7 @@ export class ManualPanel {
           return;
         }
         this.leaderRun = run;
-        this.note("Unlocked · align the leader with the frozen follower to begin following.");
+        this.note("Following requested · the follower will approach the leader smoothly within its joint and speed limits.");
       } else {
         await this.client.startManual(context.arm);
         if (!this.currentIntent(context)) {
@@ -572,7 +572,7 @@ export class ManualPanel {
     try {
       if (run) await this.stopLeader(run);
       else if (arm && this.connected) await this.holdArm(arm);
-      this.note(this.mode === "leader" ? "Frozen. Unlock, then align the leader with the held pose to resume." : "Stopped. Support torque is preserved.");
+      this.note(this.mode === "leader" ? "Frozen. Follow leader will move the follower smoothly toward the current leader pose." : "Stopped. Support torque is preserved.");
     } finally {
       this.actionBusy(-1);
     }
