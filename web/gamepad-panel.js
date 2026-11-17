@@ -89,6 +89,13 @@ export class GamepadPanel {
   freezeGripper(opening) {
     const m = this.manual;
     this.sourceEpoch++; this.lastSolveAt = null; this.pendingMotion = null;
+    if (m.descriptor?.native_jog) {
+      // A null jaw-rate command holds the owner’s actual admitted opening.
+      // Never replace the native body reference with an older browser target.
+      this.output = { ...this.output, gripper_target: opening };
+      this.render();
+      return true;
+    }
     const target = { ...copy(m.target), gripper: opening, gripper_unit: 'percent' };
     const reference = { ...copy(m.reference || m.target), gripper: opening, gripper_unit: 'percent' };
     if (m.client.setManualTarget(copy(target)) === false) return false;
@@ -222,7 +229,20 @@ export class GamepadPanel {
     this.el('gamepad-bindings-toggle').textContent=box.hidden?'Show controller bindings':'Hide controller bindings';
     this.el('gamepad-bindings-toggle').setAttribute('aria-expanded',String(!box.hidden));
   }
+  nativeIntent() {
+    if (!this.isFocused()) return null;
+    // Sample at transmission as well as display cadence. A delayed paint
+    // cannot keep a released control or a disconnected device driving.
+    this.poll();
+    const o=this.output;
+    if (!this.manual.isOwnStream() || this.manual.busy || this.needsNeutral || !o?.valid || o.resume_required) return null;
+    const target = this.engine.gripperState === 'following' ? o.gripper_target : null;
+    if (!activeRate(o) && target === null) return null;
+    return {translation:o.translation, elevation:o.elevation, roll:o.roll, position_only:false,
+            level:this.manual.level, gripper_rate:0, gripper_target:target};
+  }
   async solve() {
+    if (this.manual.descriptor?.native_jog) return;
     const m=this.manual,o=this.output;
     if (!o?.valid || o.resume_required || !m.isOwnStream() || !m.client.currentOperation?.ready || m.mode!=='gamepad' || m.busy || this.solving || !m.target) return;
     const measured=m.measured(); if (!measured || !m.stateForArm().feedback_valid) return;

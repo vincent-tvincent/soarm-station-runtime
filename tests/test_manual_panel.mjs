@@ -357,3 +357,16 @@ test('first leader takeover requests follower-to-leader motion without pose matc
  assert.equal(panel.leaderRun.run_id,'fresh-follow');
  assert(calls.some(c=>c[0]==='note'&&c[1].includes('follower will approach the leader')));
 });
+
+
+test('keyboard native jog samples current keys, including reversal and release, without a calculation POST',async()=>{
+  const {panel,calls}=fixture();
+  panel.ownsStream=true;
+  panel.client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',ready:true};
+  panel.descriptor={native_jog:true};
+  panel.keys.add('KeyH');panel.keys.add('KeyS');
+  assert.deepEqual(panel.jogIntent().translation,[0,1,0]);assert.equal(panel.jogIntent().roll,1);
+  await panel.tick();assert.equal(calls.filter(v=>v[0]==='request').length,0);
+  panel.keys.clear();panel.keys.add('KeyL');assert.deepEqual(panel.jogIntent().translation,[0,-1,0]);
+  panel.keys.clear();assert.equal(panel.jogIntent(),null);
+});

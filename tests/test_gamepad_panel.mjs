@@ -416,3 +416,16 @@ for (const action of ['stop', 'home', 'blur', 'mode']) {
     if (action === 'home') assert.equal(f.calls.homes, 1);
   });
 }
+
+
+test('native gamepad uses live stick rates and holds the native jaw through lock and pickup', async t => {
+  const f=fixture(t);f.manual.descriptor.native_jog=true;
+  f.poll(raw({axes:[0,-.54,0,0], lt:.85}));await flush();
+  assert.equal(f.calls.requests.length,0);
+  let intent=f.panel.nativeIntent();
+  assert.ok(Math.abs(intent.translation[0]-.5)<1e-9);assert.ok(intent.gripper_target<20);
+  f.poll(raw({axes:[0,-.54,0,0],buttons:[2]}));
+  intent=f.panel.nativeIntent();assert.equal(intent.gripper_target,null);
+  assert.ok(intent.translation[0]>0);assert.equal(f.calls.targets.length,0);
+  f.focus(false);assert.equal(f.panel.nativeIntent(),null);
+});

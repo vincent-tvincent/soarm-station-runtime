@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 "msg/OperationSpec.msg"
 "msg/InlineSequence.msg"
 "msg/InputSpec.msg"
+"msg/ManualJog.msg"
 "msg/OperationInput.msg"
 "msg/OperationFeedback.msg"
 "msg/OperationStatus.msg"

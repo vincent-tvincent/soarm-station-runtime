@@ -15,6 +15,8 @@ def uid(): return uuid.uuid4().hex
 
 class ArmController:
     def __init__(self,config,system,boot,cameras):
+        self.jog_model = None
+        self.jog_prepare_lock = threading.Lock()
         self.config=config; self.system=system; self.boot=boot; self.cameras=cameras
         self.id=config['id']; self.session=uid(); self.epoch=0
         self.lock=threading.RLock(); self.stop=threading.Event()
@@ -342,13 +344,30 @@ class ArmController:
             if not self.windows or max(self.windows.values())-t<.15:
                 self.windows[uid()]=t+.25
             window=max(self.windows,key=self.windows.get)
-            return {'phase':self.phase,'stream_ready':True,'arm_id':self.id,'runtime_boot_id':self.boot,
+            jog_feedback = {}
+            if 'jog' in self.op and self.commanded_q is not None:
+                jog_feedback = dict(jog_status=self.stats.get('jog_status', 'IDLE'),
+                                    jog_step_fraction=float(self.stats.get('jog_step_fraction', 0.)),
+                                    jog_joint_names=list(self.commanded_q),
+                                    jog_positions_rad=list(map(float,self.commanded_q.values())),
+                                    jog_gripper_percent=float(self.commanded_gripper))
+            return {**jog_feedback, 'phase':self.phase,'stream_ready':True,'arm_id':self.id,'runtime_boot_id':self.boot,
                     'controller_session':self.session,'operation_id':self.op['operation_id'],
                     'operation_epoch':self.epoch,'window_id':window,'window_valid_for_ms':int((self.windows[window]-t)*1000),
                     'last_accepted_input_id':self.last_input,'last_applied_input_id':self.last_applied,
                     'intent_generation':self.generation,'last_sequence':self.last_sequence,
                     'last_accepted_semantic_revision':self.semantic_revision,
                     'reason':self.last_input_error or self.stats.get('pause_reason','')}
+    def prepare_jog(self):
+        # Load outside the motor lock. A model is used only by this arm's tick.
+        with self.jog_prepare_lock:
+            if self.jog_model is None:
+                from .manual_control import ManualControl
+                model = ManualControl(self.config)
+                model.prepare_jog()
+                self.jog_model = model
+        return True
+
     def input(self,frame):
         with self.lock:
             self.last_frame_sequence=frame.get('sequence')
@@ -382,7 +401,12 @@ class ArmController:
                     if self.semantic_record!=(identifier,fingerprint):raise ValueError('SEMANTIC_REVISION_CONFLICT')
                     duplicate=True
             if not duplicate:
-                if kind=='DIRECT':
+                jog = None
+                if 'jog' in body:
+                    if not self._persistent_teleop() or self.jog_model is None:
+                        raise ValueError('Manual jog requires prepared kinematics and an owned DIRECT stream')
+                    jog = self.jog_model.jog_rates(body['jog'])
+                elif kind=='DIRECT':
                     q,g=self._target(body)
                     # begin() already seeds the admitted reference from the
                     # current measured/held pose. _limit() handles convergence;
@@ -390,7 +414,23 @@ class ArmController:
                 elif kind=='TRAJECTORY':path=self._trajectory(body['points'],self._reference())
                 else:instruction=self._instruction(self.system['profiles'][self.op['profile_id']],body.get('instruction',''))
                 # Commit only after the entire new semantic intent validates.
-                if kind=='DIRECT':self.target=(q,g);self.op['last_direct']=t
+                if kind=='DIRECT':
+                    self.op['last_direct']=t
+                    if jog is None:
+                        self.op.pop('jog', None)
+                        self.op.pop('jog_anchor', None)
+                        self.target=(q,g)
+                    else:
+                        from .jog_kinematics import JogAnchor
+                        rates, _, _ = jog
+                        neutral = not (any(rates['translation_m_s']) or rates['elevation_rad_s'] or rates['roll_rad_s'])
+                        if neutral or 'jog_anchor' not in self.op or t >= self.op.get('jog_until',0):
+                            self.op['jog_anchor'] = JogAnchor()
+                        self.op['jog'] = jog
+                        # Each packet authorizes velocity only through its existing
+                        # server-issued window. On loss we retain the last position.
+                        self.op['jog_until'] = self.windows[frame['window_id']]
+                        self.target = None
                 elif kind=='TRAJECTORY':
                     self.path=path;self.op['start']=t;self.op['endpoint_reached']=False
                     self.op['requires_gripper_settle']=any('gripper' in point for point in body['points'])
@@ -433,6 +473,25 @@ class ArmController:
                 self.path=self._trajectory(future.result());op['start']=t;self.phase='READY'
             except Exception as exc:self._hold('INVALID_PLAN: '+str(exc));return
         target=self.target
+        if 'jog' in op:
+            q = self.commanded_q if self.commanded_q is not None else self.q
+            g = self.commanded_gripper if self.commanded_gripper is not None else self.gripper
+            target = (q, g)
+            if t < op['jog_until']:
+                rates, position_only, jaw_target = op['jog']
+                try:
+                    step = self.jog_model._step_rates(
+                        self.q, self.gripper, rates=rates, dt_s=dt, position_only=position_only,
+                        reference_positions=q, reference_gripper=g, gripper_target=jaw_target,
+                        anchor=op['jog_anchor'], include_geometry=False)
+                    target = (step['target']['positions'], step['target']['gripper'])
+                    self.stats['jog_status'] = step['status']
+                    self.stats['jog_step_fraction'] = step['step_fraction']
+                except (RuntimeError,ValueError,ArithmeticError) as exc:
+                    self.stats['jog_status'] = 'BLOCKED'
+                    self.last_input_error = 'Manual jog: '+str(exc)[:220]
+            else:
+                self.stats.update(jog_status='WAITING_FOR_INPUT', jog_step_fraction=0.)
         if self.path:
             elapsed=t-op['start']; previous=self.path[0]
             if elapsed>=self.path[-1][0]: target=self.path[-1][1:]

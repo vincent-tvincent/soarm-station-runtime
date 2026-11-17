@@ -15,3 +15,4 @@ ModelTaskStep model_task
 trajectory_msgs/JointTrajectory joint_trajectory
 CartesianTarget cartesian_target
 DirectJointStep direct_target
+ManualJog manual_jog

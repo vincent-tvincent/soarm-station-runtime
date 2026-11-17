@@ -1347,12 +1347,18 @@ export class StationClient {
     );
     return opened.promise;
   }
+  setJogSource(readIntent) {
+    if (this._active?.transport === "websocket") this._active.readJog = readIntent;
+  }
+  get usingJog() { return Boolean(this._active?.jogging); }
+
   setManualTarget(target) {
     const op = this._active;
     // Controls can be edited before opening manual mode; this does not select an arm or send data.
     if (!op || op.transport !== "websocket" || op.ending) return false;
     // User-held browser intent, not a cached remote-leader sample.
     op.target = this._directTarget(op.armId, target);
+    op.jogging = false;
     op.targetEdited = true;
     return true;
   }
@@ -1366,10 +1372,17 @@ export class StationClient {
           if (!op.targetEdited) op.target = clone(target);
         }
         const id = this.env.uuid();
+        // Sample current input at send time so release and reversal supersede
+        // the old direction even when no HTTP calculation has completed.
+        const jog = op.pickedUp && op.readJog ? op.readJog() : null;
+        if (this._active !== op || op.ending) return;
+        const useJog = Boolean(jog || op.jogging);
+        const neutral = {translation:[0,0,0], elevation:0, roll:0, level:1,
+                         position_only:false, gripper_rate:0, gripper_target:null};
         const frame = this._frame(op, "COMMAND", {
-          payload_kind: "DIRECT_JOINT_TARGET",
+          payload_kind: useJog ? "MANUAL_JOG" : "DIRECT_JOINT_TARGET",
           input_id: id,
-          body: clone(target),
+          body: useJog ? (jog || neutral) : clone(target),
         });
         if (frame) {
           if (!op.pickedUp) {
@@ -1378,6 +1391,7 @@ export class StationClient {
               op.pickupIds.delete(op.pickupIds.values().next().value);
           }
           op.ws.send(JSON.stringify(frame));
+          op.jogging = useJog;
         }
       } catch (error) {
         if(error.code==='NOT_READY')this._operationDelay(op,'Waiting for fresh measured pickup; control connection remains open.');

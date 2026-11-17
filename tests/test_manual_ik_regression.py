@@ -33,36 +33,42 @@ def jog(calculator,key='KeyH'):
 
 
 class CapturedLateralRegressionTests(unittest.TestCase):
-    def test_captured_positive_y_converges_from_admitted_reference_without_relaxation(self):
-        calculator=model();start=np.array(calculator.fk(REFERENCE,GRIPPER)['position_m'])
-        attempts=[];solve=calculator._solve
-        def observe(*args,**kwargs):
-            attempts.append(float((args[1][1]-start[1])/(.04/30)))
-            return solve(*args,**kwargs)
-        calculator._solve=observe
-        result=jog(calculator)
-        self.assertEqual(result['status'],'OK')
-        self.assertAlmostEqual(result['step_fraction'],.125)
-        self.assertLess(attempts[0],1.,'oversized branch-crossing step should be reduced before iterations')
-        delta=np.array(result['geometry']['position_m'])-start
-        self.assertGreater(delta[1],.00016)
-        self.assertLess(np.linalg.norm(delta-np.array([0.,.04/30*.125,0.])),.000004)
-        self.assertLessEqual(result['residuals']['orientation_rad'],.00001)
-        self.assertEqual(result['target']['positions']['wrist_roll'],REFERENCE['wrist_roll'])
-        self.assertEqual(result['target']['gripper'],GRIPPER)
-        for joint in calculator.config['joints']:
-            name=joint['name'];value=result['target']['positions'][name]
-            self.assertLessEqual(abs(value-REFERENCE[name]),joint['velocity_rad_s']/30+1e-10)
-            self.assertTrue(joint['min_rad']<=value<=joint['max_rad'])
-        # The admitted/measured TCPs differ by centimeters; a successful test
-        # cannot be achieved by quietly reseeding from the measured pose.
-        self.assertGreater(result['geometry']['position_m'][2],.05)
+    def test_captured_reference_progress_with_frozen_wrist_and_finite_joint_velocity(self):
+        calculator=model()
+        start=np.array(calculator.fk(REFERENCE,GRIPPER)['position_m'])
+        for key,sign in [('KeyH',1),('KeyL',-1)]:
+            with self.subTest(key=key):
+                result=jog(calculator,key)
+                delta=np.array(result['geometry']['position_m'])-start
+                self.assertGreater(delta[1]*sign,.001)
+                self.assertLess(np.linalg.norm(delta[[0,2]]),.00015)
+                self.assertLess(result['residuals']['orientation_rad'],.0005)
+                self.assertEqual(result['target']['gripper'],GRIPPER)
+                self.assertEqual(result['target']['positions']['wrist_roll'],REFERENCE['wrist_roll'])
+                for joint in calculator.config['joints']:
+                    name=joint['name']
+                    self.assertLessEqual(abs(result['target']['positions'][name]-REFERENCE[name]),joint['velocity_rad_s']/30+1e-8)
 
-    def test_feasible_negative_y_retains_full_step(self):
-        calculator=model();start=np.array(calculator.fk(REFERENCE,GRIPPER)['position_m'])
-        result=jog(calculator,'KeyL')
-        self.assertEqual(result['status'],'OK');self.assertEqual(result['step_fraction'],1.)
-        np.testing.assert_allclose(np.array(result['geometry']['position_m'])-start,[0.,-.04/30,0.],atol=.000004)
+    def test_outward_hold_tapers_without_elbow_chatter_and_reverses_immediately(self):
+        from soarm_station.manual_control import keyboard_rates
+        from soarm_station.jog_kinematics import JogAnchor
+        m=model();q=dict(REFERENCE);anchor=JogAnchor();poses=[];elbows=[]
+        def advance(key):
+            return m._step_rates(q,GRIPPER,rates=keyboard_rates([key],level=2),dt_s=.01,
+                                 position_only=False,anchor=anchor)['target']['positions']
+        for _ in range(100):
+            q=advance('KeyH')
+            poses.append(m.fk(q,GRIPPER)['position_m'])
+            elbows.append(q['elbow_flex'])
+        d=np.diff(elbows)
+        self.assertFalse(np.any(d[1:]*d[:-1] < -1e-12))
+        start=np.array(m.fk(REFERENCE,GRIPPER)['position_m']);travel=np.asarray(poses)-start
+        self.assertGreater(travel[-1,1],.003)
+        self.assertLess(np.max(np.linalg.norm(travel[:,[0,2]],axis=1)),.0005)
+        np.testing.assert_array_less(-1e-7,np.diff(travel[:,1]))
+        back=advance('KeyL')
+        self.assertLess(m.fk(back,GRIPPER)['position_m'][1],poses[-1][1]-.0002)
+        self.assertAlmostEqual(m.fk(q,GRIPPER)['elevation_rad'],m.fk(REFERENCE,GRIPPER)['elevation_rad'],delta=.0002)
 
     def test_slow_or_jumping_clock_cannot_change_ik_acceptance(self):
         expected=jog(model())
@@ -71,11 +77,11 @@ class CapturedLateralRegressionTests(unittest.TestCase):
         self.assertEqual(actual,expected)
 
     def test_extra_computation_latency_above_legacy_budget_preserves_solution(self):
-        calculator=model();expected=jog(calculator);forward=calculator._forward
+        calculator=model();expected=jog(calculator);advance=calculator.jog_backend.advance
         def slow(*args):
-            time.sleep(.002)
-            return forward(*args)
-        calculator._forward=slow
+            time.sleep(.05)
+            return advance(*args)
+        calculator.jog_backend.advance=slow
         started=time.monotonic();actual=jog(calculator)
         self.assertGreater(time.monotonic()-started,.04)
         self.assertEqual(actual,expected)

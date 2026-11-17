@@ -224,6 +224,16 @@ Use 1–16 endpoints with `frame_id` exactly matching the configured arm base fr
 
 YOLO/CV detections must first be converted from pixels/depth into the declared robot frame using actual calibration. Alternatively, incremental teleoperation can call `/api/manual/{arm_id}/step`, then send its returned joint target through the existing DIRECT stream. Manual FK/step/preset/roll endpoints only calculate; receiving a successful calculation does not command the arm.
 
+### Continuous manual Cartesian jogging
+
+Check `GET /api/manual/{arm_id}/describe` for `native_jog`. On an owned persistent DIRECT WebSocket, use the normal fresh COMMAND envelope with `payload_kind: "MANUAL_JOG"` and this body:
+
+```json
+{"translation":[0.0,0.5,0.0],"elevation":0.0,"roll":0.0,"level":2,"position_only":false,"gripper_rate":0.0,"gripper_target":null}
+```
+
+Each component is normalized to −1…1. Profile 2 gives this example a requested +Y speed of 20 mm/s. Use a null jaw target and zero jaw rate to retain the admitted opening. Send all-zero rates on release. The Pi advances jog rates only through the packet's admitted window. The session can remain open at rest. A subsequent DIRECT joint command replaces the jog, while socket closure retires the owned operation. The FK and single-step HTTP routes remain calculation-only.
+
 ### MODEL: ACT or language-conditioned policy
 
 For a managed profile, prepare its saved revision through `/api/v1/policy-profiles/{id}/prepare` and wait for its job. Select the intended arm's **matching ready profile revision** from `applied_by_arm` in `/api/v1/policy-runtime`; use its `runtime_profile_id` as the operation's `profile_id`. The saved human-readable profile ID and immutable runtime ID are different. Startup-configured policy IDs advertised for that arm by `/api/resources` can also be used directly; they do not require this management preparation flow.

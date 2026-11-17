@@ -102,3 +102,16 @@ def test_cartesian_json_rejects_mixed_stream_and_malformed_inputs(patch):
         {'frame_id':'base','position':[.1,.2,.3],'duration_s':1.}]}
     data.update(patch)
     with pytest.raises(ValueError):goal_from_dict(data,'owner')
+
+
+def test_manual_jog_roundtrip_preserves_distinct_rate_and_hold_semantics():
+    intent={'translation':[0.,-.5,.2], 'roll':.25, 'elevation':0., 'position_only':False,
+            'level':3,'gripper_rate':0.,'gripper_target':None}
+    wire={'arm_id':'arm1','frame_kind':'COMMAND','payload_kind':'MANUAL_JOG',
+          'window_id':'window','sequence':3,'input_id':'input','body':intent}
+    for target in [None,0.,62.]:
+        intent['gripper_target']=target
+        decoded=frame_to_dict(stream_from_dict(wire,'operator'))
+        assert decoded['body']['jog']==intent and decoded['window_id']=='window'
+    for patch in [{'translation':[0.,float('nan'),0.]},{'level':True},{'gripper_rate':1.,'gripper_target':20.}]:
+        with pytest.raises(ValueError):stream_from_dict({**wire,'body':{**intent,**patch}},'operator')

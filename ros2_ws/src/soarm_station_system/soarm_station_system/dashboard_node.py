@@ -170,7 +170,7 @@ class DashboardNode(BaseNode):
         app.router.add_get('/api/graph',self.graph_status);app.router.add_get('/api/v1/ros/graph',self.graph_status)
         app.router.add_post('/api/graph/sample',self.graph_sample);app.router.add_post('/api/v1/ros/sample',self.graph_sample)
         app.router.add_post('/api/v1/ros/watch',self.graph_watch)
-        ManualRoutes(self.config).mount(app)
+        ManualRoutes(self.config, native_socket=self.config.get('socket')).mount(app)
         async def conditional_hold(arm,session,principal,operation_id=None):
             def call():
                 client=Client(self.config['socket'])
@@ -393,14 +393,22 @@ class DashboardNode(BaseNode):
                         if d.get('frame_kind') not in ('COMMAND','HEARTBEAT','END'):raise ValueError('Unknown frame kind')
                         if d['frame_kind']=='COMMAND':
                             if not isinstance(d.get('input_id'),str) or not 1<=len(d['input_id'])<=64:raise ValueError('Input ID required')
-                            if d.get('payload_kind','DIRECT_JOINT_TARGET')!='DIRECT_JOINT_TARGET':raise ValueError('Remote control requires a joint target')
-                            body=d.get('body');positions=body.get('positions') if isinstance(body,dict) else None
-                            if not isinstance(positions,dict) or not 1<=len(positions)<=64:raise ValueError('Named joint target required')
-                            if any(not isinstance(name,str) or not 1<=len(name)<=64 or type(value) not in (int,float) or not math.isfinite(value) for name,value in positions.items()):
-                                raise ValueError('Joint targets must be named finite numbers')
-                            gripper=body.get('gripper')
-                            if type(gripper) not in (int,float) or not math.isfinite(gripper) or not 0<=gripper<=100 or body.get('gripper_unit','percent')!='percent':
-                                raise ValueError('Gripper requires percent in [0,100]')
+                            kind=d.get('payload_kind','DIRECT_JOINT_TARGET')
+                            if kind=='MANUAL_JOG':
+                                if semantics!='persistent_target' or control_owner is None:
+                                    raise ValueError('Jog requires an owned manual stream')
+                                if not isinstance(d.get('body'),dict):
+                                    raise ValueError('Manual jog body required')
+                            elif kind=='DIRECT_JOINT_TARGET':
+                                body=d.get('body');positions=body.get('positions') if isinstance(body,dict) else None
+                                if not isinstance(positions,dict) or not 1<=len(positions)<=64:raise ValueError('Named joint target required')
+                                if any(not isinstance(name,str) or not 1<=len(name)<=64 or type(value) not in (int,float) or not math.isfinite(value) for name,value in positions.items()):
+                                    raise ValueError('Joint targets must be named finite numbers')
+                                gripper=body.get('gripper')
+                                if type(gripper) not in (int,float) or not math.isfinite(gripper) or not 0<=gripper<=100 or body.get('gripper_unit','percent')!='percent':
+                                    raise ValueError('Gripper requires percent in [0,100]')
+                            else:
+                                raise ValueError('Unknown remote control command')
                         elif d.get('body'):raise ValueError('Non-command frame contains body')
                         converted=stream_from_dict(d,principal)
                     except (ValueError,TypeError,KeyError,OverflowError,AssertionError) as exc:

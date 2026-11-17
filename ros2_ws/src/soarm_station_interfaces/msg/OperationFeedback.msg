@@ -13,3 +13,8 @@ uint64 intent_generation
 uint64 last_accepted_semantic_revision
 uint64 last_sequence
 string<=512 reason
+string<=32 jog_status
+float64 jog_step_fraction
+string<=64[<=64] jog_joint_names
+float64[<=64] jog_positions_rad
+float64 jog_gripper_percent

@@ -71,6 +71,10 @@ class Runtime:
         self.config=c;self.boot=uid()
         self.cameras={x['id']:Camera(x,c['frame_dir'],c['lock_dir']) for x in c['cameras']}
         self.arms={x['id']:ArmController(x,c,self.boot,self.cameras) for x in c['arms']}
+        from .manual_control import ManualControl
+        # External calculation clients cannot perturb a live jog's solver state.
+        self.manual_models = {a['id']:ManualControl(a) for a in c['arms']}
+        self.manual_locks = {arm_id:threading.Lock() for arm_id in self.manual_models}
         self.policy_runtime=PolicyRuntime(self)
         self.recovery_stop=threading.Event()
         self.recovery=threading.Thread(target=self.recover,daemon=True)
@@ -121,6 +125,15 @@ class Runtime:
             'arms':{n:a.snapshot() for n,a in self.arms.items()},'cameras':{n:a.snapshot() for n,a in self.cameras.items()}}
         if r.get('arm_id') not in self.arms: raise ValueError('Unknown arm resource')
         a=self.arms[r['arm_id']]
+        if op=='manual_prepare':
+            return a.prepare_jog()
+        if op=='manual_calculate':
+            model = self.manual_models[a.id]
+            calculation = {'step':model.step,'analog-step':model.analog_step}.get(r.get('operation'))
+            if calculation is None:
+                raise ValueError('Unknown manual calculation')
+            with self.manual_locks[a.id]:
+                return calculation(**r['arguments'])
         if op=='permission': return a.set_permission(r['enable'],r['principal'],r['controller_session'])
         if op=='set_torque': return a.set_torque(r['enabled'],r['expected_controller_session'])
         if op=='begin': return self.policy_runtime.begin(a,r['request'])

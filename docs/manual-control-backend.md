@@ -1,10 +1,10 @@
 # Manual FK, keyboard IK and named targets
 
-November 13, 2026. Implemented as a **device-free target calculator**, not a second controller. Offline tests are evidence for model math and request semantics; they do not establish physical clearance, tracking accuracy or Pi timing. No hardware/service action is performed by this module.
+Manual Cartesian jogging uses LeRobot 0.7.0 and Placo in the native Python 3.12 worker. The live DIRECT operation owns its arm and integrates manual input at the configured control frequency. FK, model diagnostics, named targets and the public calculation endpoints keep their existing interface.
 
 ## Integration API
 
-Import `ManualControl` from `soarm_station.manual_control` and construct one instance per explicit configured arm. It needs Python + NumPy only; it can run in the ROS Python 3.14 process using `asyncio.to_thread`. It does not import ROS, Torch, Placo, LeRobot or serial modules. Model arrays are private; calls use local solver state. Recreate the calculator when model/configuration revisions change.
+Construct one `ManualControl` per configured arm. FK and display geometry run with NumPy. Calling `prepare_jog()` loads the arm's persistent LeRobot model. The production dashboard prepares it when it describes an arm and advertises `native_jog: true` on success. Standalone callers can use the native virtual environment and call `step()` or `analog_step()` directly.
 
 ```python
 calculator = ManualControl(arm_config)
@@ -27,7 +27,7 @@ calculator.roll_preset('minus_90', positions_rad, gripper_percent)
 {"status":"OK","reason":"","target":{"positions":{"joint":0.1},"gripper":37,"gripper_unit":"percent"},"geometry":{},"residuals":{"position_m":0.00001,"orientation_rad":0.0001},"step_fraction":1,"dt_s":0.033,"level":2}
 ```
 
-Statuses: `OK`, `IDLE`, `BLOCKED`, or `PARTIAL` (jaw input can progress while body IK is blocked). Failed IK retains the supplied reference and reports failure; it never promotes a best-effort numerical pose to success. Input/schema/configuration errors raise `ValueError`; missing capabilities/presets raise its subclass `ManualUnavailable`. Preset/roll responses contain `status`, `name`, `target`, and nullable `geometry` when no model is configured.
+Statuses: `OK`, `IDLE`, `BLOCKED`, or `PARTIAL` (jaw input can progress while body IK is blocked). Each jog is a differential movement request. Actual progress, position residual and angular residual describe the returned target. A blocked body holds its reference. Input/schema/configuration errors raise `ValueError`; missing capabilities/presets raise its subclass `ManualUnavailable`. Preset/roll responses contain `status`, `name`, `target`, and nullable `geometry` when no model is configured.
 
 FK geometry is JSON-safe:
 
@@ -64,9 +64,13 @@ The caller handles one-shot keys and position-only toggle (Tab); `step` receives
 
 Position-only ignores orientation keys/constraints. Ordinary XYZ/elevation jogging freezes the wrist-roll motor unless G/S is active, avoiding an extra independent roll constraint on the five-axis arm. G/S solves position, elevation and tool roll with free azimuth. R/T/E instead select an absolute **motor wrist-roll** target and preserve the other joints; repeated presses do not accumulate angles.
 
-The solver uses URDF rotational-chain FK, analytic translational Jacobians, damped least-squares within a velocity × dt trust region and checked final residuals. It does not intersect that local step region with absolute YAML or URDF joint angles. A local orientation chart avoids a reference-axis singularity; full six-dimensional pose is not imposed. A joint-displacement/Jacobian prediction reduces the initial increment when a near-straight Newton estimate crosses a singular branch, while motion away from that branch can retain its full step. This is only an initial-step hint, never a reachability verdict or an added motion constraint. Nonlinear correction stops on accepted residuals or no improving bounded update. Further step halving ends at the existing 1 µm position / 10 µrad angular numerical-resolution floors, replacing the fixed 1/64 search cutoff. A 96-iteration per-candidate arithmetic guard is a final fallback; the last iterate is still checked for convergence. There is no wall-clock success/failure cutoff: legacy `solve_budget_ms` is accepted but ignored. CPU scheduling must not turn an otherwise converged target into BLOCKED. The one-pending-request UI and operation/key generation checks remain responsible for dropping obsolete results; motor dispatch remains independent. No collision/path safety claim is made by these lines/spheres.
+LeRobot's `RobotKinematics` supplies the model, frame task and Placo solver. Each tick starts from the native owner's admitted joint reference. A sliding target follows the requested translation with a transverse correction toward the line through the gesture's start pose. A masked orientation task maintains elevation and allows free azimuth. During roll input it also requests tool-axis spin. Position-only removes the orientation weight. The jaw remains independent.
 
-Use one pending solve per browser. Compute `dt_s` from actual elapsed held-input time when producing the next request; it is capped at 100 ms and never accumulated into catch-up requests. At 60 ms round-trip, fixed 1/30-s increments would unnecessarily halve the requested speed. Pass the latest **admitted/applied** reference when available rather than repeatedly integrating from lagged measured joints. Do not accumulate unresolved Cartesian targets. Keep request operation/session/generation identity in the UI and drop responses after key release, mode/arm change, stop, Home, or disconnect. The calculator does not validate network identity and does not refresh any input window.
+Placo enforces the configured joint velocities for the time step. Station disables model angle inequalities so the servo retains absolute-angle authority. Near a weak task direction, a trial that approaches or crosses a singular branch is recomputed from the same seed with joint regularization. Both solves use LeRobot's existing Placo solver and the same time allowance. The reported fraction reflects forward progress along the requested motion. Exact reach limits still exist.
+
+Live keyboard and gamepad input use the existing owned DIRECT WebSocket and typed ROS command stream. A `MANUAL_JOG` packet specifies normalized translation, elevation, roll, profile, position-only and a jaw rate or absolute opening. The native control tick integrates the most recent admitted intent while its server-issued input window is fresh. On expiry it holds the last joint reference. Receiving neutral changes the next tick to hold. A new DIRECT joint target replaces the jog, including for Home and Fold. Feedback reports jog status, progress and the admitted body and jaw reference.
+
+The calculation-only HTTP endpoints retain their existing request and response shapes. They use a separate solver instance in native Python via local IPC. An external calculation cannot alter a live gesture's anchor or Placo task state.
 
 ## Body-angle authority and display metadata
 
@@ -88,14 +92,6 @@ constraints. FK residual checks, finite values, joint mapping, normalized
 quaternions, angular chart math and velocity integration remain. The URDF still
 supplies joint axes, origins, types and TCP geometry; changing a revolute joint
 to continuous is not required. The jaw remains a separate 0–100% quantity.
-
-## Minimal existing-runtime hooks
-
-1. Instantiate from already-loaded explicit `arm_config`; expose read-only computation endpoints through the authenticated dashboard (`describe`, `fk`, `step`, `preset`/`roll`). Offload solve work with `asyncio.to_thread`; bound the caller's pending work and response sizes.
-2. FK takes fresh cached measured positions. The UI overlays independently sourced motor health; all current faults/unknowns retain their actual provenance.
-3. Starting manual control still opens the existing DIRECT+STREAM operation with its existing permission, READY, sequence and admission-window identity checks. Feed approved calculator targets into that same client; no new writer/ROS action/driver or permission bypass.
-4. Before publishing a returned target, recheck current browser operation identity/generation. The runtime still performs current-state, named-unit, finite-value and health checks; YAML angle extents do not admit or reject targets. Calculator success is not actuation permission.
-5. Home/Fold/roll targets are explicit user requests sent through the same admitted DIRECT stream/limiter, not a new serial path. Mode switches/Stop/Home invalidate pending keyboard solves and clear held keys. Do not replay targets after reconnect.
 
 ## Explicit Home reference configuration
 
@@ -121,25 +117,9 @@ Omitted/null `gripper` also preserves the supplied measured percentage. A finite
 
 Recorded Fold degrees: shoulder pan `-0.7032967033`, shoulder lift `-104.7912087912`, elbow flex `95.2527472527`, wrist flex `74.8571428571`, wrist roll `-0.9230769231`. The saved calibration hash is `c816f1bbaa8122bb40475699f5a74724fbe8cce65634f02d14b5e8e0e4265814`, matching this deployment. This preset import does not execute Fold or constitute a new physical path validation.
 
-## Offline verification
+## Verification
 
-```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python -m unittest discover -s tests -p test_manual_control.py -v
-```
-
-Offline tests cover an independently calculated two-link FK chain/fixed TCP, SO-101 geometry and separate jaw, every motion-key sign, speed/Shift/diagonal semantics, XYZ and elevation/roll residuals, per-step velocity, finite poses outside old angle extents, reference integration with lagged measured state, no catch-up, blocked IK, explicit missing data/model, and configured absolute Home/Fold/roll behavior. Local verification uses macOS Python with NumPy 2.2.6; target-Pi and physical acceptance remain separate.
-
-## Manual panel concurrency verification
-
-`web/manual-panel.js` uses separate intent generation and held-key epochs. Start/Home/roll are single-flight user intents; Stop remains available while one is pending. Cancellation invalidates delayed responses and retires late grants/runs rather than sending a target. Key release invalidates a solve without canceling an explicit Home/Start. Normal jogging updates its accepted reference, uses measured pose separately, and keeps at most one pending request.
-
-Run `node --test tests/test_manual_panel.mjs` for 17 hardware-free cases covering delayed permission/Start/Home/roll/leader replies, mode/arm/disconnect cancellation, late uncertain permission cleanup, current reference advancement, no parallel solves, and Home reseeding. These tests instantiate behavioral methods with an injectable minimal client; they do not simulate browser rendering or physical motion.
-
-## Positive-Y convergence correction — November15
-
-A read-only snapshot on baseline `67e8fcf` reproduced H/+Y returning BLOCKED while L/−Y worked. The admitted reference was near straight (about 1.27° between the relevant links); its TCP differed from measured feedback by centimeters. An independently solved 1/8 increment satisfied the unchanged position and 10 µrad elevation criteria, but the original full candidate consumed almost all of the 40 ms deadline before that fallback ran. This was computation-budget starvation, not proof that all positive-Y movement was physically impossible.
-
-The correction preserves the admitted reference, locked wrist rule, configured velocity bounds and residual tolerances. Absolute body-angle gating was subsequently removed in favor of servo authority. It removes elapsed-time rejection and selects a smaller first candidate near a singular branch. Captured-case regression asserts +Y progress, full-step −Y preservation, keyboard/analog equivalence, and unchanged results under a jumping clock or deliberately slowed FK. No measured-pose reseeding, automatic position-only fallback or tolerance relaxation is used. Run `python -m unittest discover -s tests -p test_manual_ik_regression.py -v`. These are isolated model calculations, not physical motion validation.
+Run `scripts/test` on the Pi to exercise math and the simulated native controller with the LeRobot interpreter, then the gateway and ROS tests with the ROS interpreter. Run `node --test tests/*.mjs` for browser input, lifecycle and transport coverage. The saved near-extension case in `tests/test_manual_ik_regression.py` checks held lateral movement, elbow reversals, transverse error, elevation, joint velocities and immediate direction reversal. `tests/test_native_jog.py` exercises uneven packet arrivals, neutral, an expired input window and replacement by an absolute goal using a simulated clock and plant.
 
 ## Analog manual input
 

@@ -1380,3 +1380,29 @@ test('failed torque requests preserve last measured state and propagate actual r
  await assert.rejects(f.client.setTorque('arm1',false),/Readback failed/);
  assert.equal(f.client.state.arms.arm1.measured_torque,before);
 });
+
+
+test("native jog releases to a zero rate and a named goal supersedes jog without replay", async () => {
+  const f = fixture();
+  await f.client.connect(TOKEN);
+  const opened = f.client.startManual("arm1");
+  const ws = f.sockets[0]; ws.open(); await opened;
+  ws.message({type:"grant", grant:f.grant(null)});
+  await f.clock.advance(20);
+  const pickup = ws.sent.filter(m=>m.frame_kind==="COMMAND").at(-1);
+  ws.message({type:"grant", grant:f.grant(null,{last_accepted_input_id:pickup.input_id})});
+  const jog = {translation:[0,1,0], elevation:0, roll:0, gripper_target:null, gripper_rate:0, level:2, position_only:false};
+  let intent = jog;
+  f.client.setJogSource(()=>intent);
+  await f.clock.advance(20);
+  assert.deepEqual(ws.sent.at(-1).body,jog);
+  assert.equal(ws.sent.at(-1).payload_kind,"MANUAL_JOG");
+  intent=null;
+  await f.clock.advance(20);
+  assert.equal(ws.sent.at(-1).payload_kind,"MANUAL_JOG");
+  assert.deepEqual(ws.sent.at(-1).body.translation,[0,0,0]);
+  f.client.setManualTarget({positions:{shoulder_pan:0,elbow_flex:.1},gripper:40});
+  await f.clock.advance(20);
+  assert.equal(ws.sent.at(-1).payload_kind,"DIRECT_JOINT_TARGET");
+  await f.client.disconnect();
+});

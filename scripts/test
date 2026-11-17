@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# These tests execute real LeRobot/Placo IK in its supported Python ABI.
+native_tests=(tests/test_manual_{control,http,analog,ik_regression,jacobian}.py tests/test_native_jog.py)
+declare -A native_only
+for file in "${native_tests[@]}"; do native_only["$file"]=1; done
+ros_tests=()
+for file in tests/test_*.py; do
+  if [[ -z "${native_only[$file]:-}" ]]; then ros_tests+=("$file"); fi
+done
+PYTHONPATH="$PWD/python" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/uv run --no-project \
+  --python "$PWD/.runtime-venv/bin/python" --with pytest==9.0.2 python -m pytest -q "${native_tests[@]}"
 set +u
 source /opt/ros/${ROS_DISTRO:-lyrical}/setup.bash
 if [[ -f ros2_ws/install/setup.bash ]]; then source ros2_ws/install/setup.bash; fi
 set -u
 export PYTHONPATH="$PWD/python${PYTHONPATH:+:$PYTHONPATH}"
-.venv/bin/python -m pytest -q tests
+.venv/bin/python -m pytest -q "${ros_tests[@]}"

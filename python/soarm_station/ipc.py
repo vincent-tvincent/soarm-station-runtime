@@ -21,12 +21,12 @@ def send(sock,value):
     if len(b)>MAX_BYTES: raise ValueError('IPC response too large')
     sock.sendall(struct.pack('!I',len(b))+b)
 class Client:
-    def __init__(self,path): self.path=path;self.sock=None;self.lock=threading.Lock()
+    def __init__(self,path,timeout_s=2): self.path=path;self.timeout_s=timeout_s;self.sock=None;self.lock=threading.Lock()
     def call(self,op,**kwargs):
         with self.lock:
             try:
                 if self.sock is None:
-                    self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(2);self.sock.connect(self.path)
+                    self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(self.timeout_s);self.sock.connect(self.path)
                 send(self.sock,{'op':op,**kwargs});r=receive(self.sock)
                 if not r['ok']:
                     if r.get('code'):raise PolicyError(r['code'],r['error'],r.get('status',400),r.get('details'))

@@ -221,6 +221,19 @@ export class ManualPanel {
     this.updateControls();
   }
   updateOperation(event) {
+    const fb = event.feedback;
+    if (fb?.jog_status && this.client.usingJog && this.isOwnStream() &&
+        fb.arm_id === this.arm && fb.jog_joint_names?.length === fb.jog_positions_rad?.length) {
+      this.reference = {positions:Object.fromEntries(fb.jog_joint_names.map((n,i)=>[n,fb.jog_positions_rad[i]])),
+                        gripper:fb.jog_gripper_percent, gripper_unit:"percent"};
+      this.target = copy(this.reference);
+      if (this.visible && (this.mode === "ik" || this.mode === "gamepad")) {
+        this.note(fb.jog_status === "BLOCKED" ? "No further motion in this direction."
+          : fb.jog_status === "WAITING_FOR_INPUT" ? "Holding position · waiting for fresh input."
+          : fb.jog_status === "IDLE" ? "Jog ready." : "Jog active.");
+      }
+    }
+
     if (
       ["result", "closed"].includes(event.event) ||
       [
@@ -572,6 +585,7 @@ export class ManualPanel {
         }
         this.ownsStream = true;
         this.client.setManualTarget(staged);
+        this.installJogSource();
         this.target = copy(staged);
         this.reference = copy(staged);
         this.lastSolveAt = null;
@@ -608,6 +622,8 @@ export class ManualPanel {
     }
   }
   preservedGripper(measured) {
+    if (this.isOwnStream() && this.client.usingJog && Number.isFinite(this.reference?.gripper)) return this.reference.gripper;
+
     const record = this.snapshot?.motor_status?.[this.arm];
     const row = record?.motors?.find(
       (m) =>
@@ -722,6 +738,7 @@ export class ManualPanel {
     }
     if (!this.currentIntent(context)) return;
     this.client.setManualTarget(copy(target));
+    this.installJogSource();
     this.target = copy(target);
     this.reference = copy(target);
     this.lastSolveAt = null;
@@ -819,7 +836,21 @@ export class ManualPanel {
       );
     }
   }
+  installJogSource() {
+    if (this.descriptor?.native_jog && ["ik","gamepad"].includes(this.mode))
+      this.client.setJogSource(() => this.jogIntent());
+  }
+  jogIntent() {
+    if (!this.visible || document.hidden || this.busy || !this.isOwnStream() || !this.stateForArm().feedback_valid) return null;
+    if (this.mode === "gamepad") return this.gamepad.nativeIntent();
+    if (this.mode !== "ik" || !this.keys.size) return null;
+    const axis = ([,neg,,pos]) => Number(this.keys.has(pos)) - Number(this.keys.has(neg));
+    return {translation: AXES.slice(0,3).map(axis), elevation:axis(AXES[3]), roll:axis(AXES[4]),
+            level:this.shift?5:this.level, position_only:!!this.positionOnly,
+            gripper_rate:axis(AXES[5]), gripper_target:null};
+  }
   async tick() {
+    if (this.descriptor?.native_jog) return;
     if (
       !this.visible ||
       document.hidden ||

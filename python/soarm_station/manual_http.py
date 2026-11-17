@@ -2,10 +2,12 @@
 import asyncio
 from aiohttp import web
 from .manual_control import ManualControl
+from .ipc import Client
 
 class ManualRoutes:
-    def __init__(self, config):
+    def __init__(self, config, native_socket=None):
         self.arms = {arm['id']: arm for arm in config.get('arms', [])}
+        self.clients = {arm: Client(native_socket, timeout_s=15) for arm in self.arms} if native_socket else {}
         self.models = {}
         self.step_locks = {}
 
@@ -20,8 +22,15 @@ class ManualRoutes:
         arm, operation = request.match_info['arm'], request.match_info['operation']
         try:
             model = self.model(arm)
+            native = self.clients.get(arm)
             if operation == 'describe' and request.method == 'GET':
                 description = model.describe()
+                if native is not None and description['available']:
+                    try:
+                        ready = await asyncio.to_thread(native.call, 'manual_prepare', arm_id=arm)
+                        description['native_jog'] = bool(ready)
+                    except (ValueError, OSError, EOFError) as exc:
+                        description.update(available=False, native_jog=False, reason=str(exc))
                 return web.json_response({'schema_version': 1, 'available': True, **description})
             body = await request.json()
             if not isinstance(body, dict):
@@ -41,15 +50,20 @@ class ManualRoutes:
                     shared = {'level': body.get('level', 3),
                               'reference_positions': body.get('reference_positions'),
                               'reference_gripper': body.get('reference_gripper')}
+                    args = dict(shared)
                     if operation == 'analog-step':
-                        result = await asyncio.to_thread(model.analog_step, positions, gripper,
-                            translation=body['translation'], elevation=body['elevation'], roll=body['roll'],
-                            speed_scale=body['speed_scale'], gripper_target=body.get('gripper_target'),
-                            dt_s=body['dt_s'], **shared)
+                        args.update(translation=body['translation'], elevation=body['elevation'], roll=body['roll'],
+                                    speed_scale=body['speed_scale'], gripper_target=body.get('gripper_target'), dt_s=body['dt_s'])
+                        calculate = model.analog_step
                     else:
-                        result = await asyncio.to_thread(model.step, positions, gripper,
-                            keys=body.get('keys', []), dt_s=body.get('dt_s', 1/30),
-                            shift=body.get('shift', False), position_only=body.get('position_only', False), **shared)
+                        args.update(keys=body.get('keys', []), dt_s=body.get('dt_s', 1/30),
+                                    shift=body.get('shift', False), position_only=body.get('position_only', False))
+                        calculate = model.step
+                    if native is None:
+                        result = await asyncio.to_thread(calculate, positions, gripper, **args)
+                    else:
+                        result = await asyncio.to_thread(native.call, 'manual_calculate', arm_id=arm,
+                                                         operation=operation, arguments=dict(args, positions_rad=positions, gripper_percent=gripper))
             elif operation == 'preset':
                 result = await asyncio.to_thread(model.preset, body['name'], positions, body.get('reference_gripper',gripper),
                                                  preserve_wrist=body.get('preserve_wrist', False))
@@ -64,6 +78,11 @@ class ManualRoutes:
             return web.json_response({'message': str(exc)}, status=400)
 
     def mount(self, app):
+        if self.clients:
+            async def cleanup(_app):
+                for client in self.clients.values():
+                    client.close()
+            app.on_cleanup.append(cleanup)
         app.router.add_get('/api/manual/{arm}/{operation:describe}', self.handle)
         app.router.add_post('/api/manual/{arm}/{operation:fk|step|analog-step|preset|roll}', self.handle)
         return self

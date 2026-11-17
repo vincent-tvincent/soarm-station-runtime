@@ -110,25 +110,11 @@ returns through pickup. The last target can still finish settling during a pause
 Device disconnect or invalid samples stop the owned source. Reconnecting and
 held buttons cannot automatically start a new operation. Source selection,
 Stop, Home, mode/arm changes and focus loss invalidate obsolete responses.
-Each input path has at most one calculation pending. Same-direction analog
-variation does not continually restart the solve, but release/reversal discards
-incompatible results; old jaw results cannot overshoot the newest opening.
-
-There is no unchanged-input inactivity timer. A steady stick and an unchanged
-`Gamepad.timestamp` remain valid held input. Existing network, feedback and
-device-fault behavior is unchanged.
+The browser samples the selected device when sending input and during display refresh. The native worker integrates the latest admitted rate at its control tick. A steady held stick continues through repeated fresh packets. Neutral and expired input windows hold the admitted position. The operation lifetime is independent of stick activity.
 
 ## Implementation and verification
 
-- [gamepad-input.js](../web/gamepad-input.js): pure standard-mapping interpreter,
-  analog values, press edges, selected trigger, lock and pickup.
-- [gamepad-panel.js](../web/gamepad-panel.js): discovery, view, source transitions
-  and one pending calculation; no direct motor access.
-- [manual-panel.js](../web/manual-panel.js): existing Start/Stop/Home ownership.
-- [manual backend](manual-control-backend.md): calculation-only
-  `POST /api/manual/{arm}/analog-step`. The gamepad sends normalized axes with
-  `speed_scale: 1`; the API retains its existing speed-scale argument for other
-  callers. Returned targets use the existing persistent-target DIRECT stream.
+The gamepad interpreter supplies normalized motion and jaw intent. The live browser sends `MANUAL_JOG` over the owned DIRECT stream. The arm's LeRobot/Placo model generates joint targets in the native worker. `POST /api/manual/{arm}/analog-step` is also available to programs requesting an individual calculation. See the [manual backend](manual-control-backend.md) for the math and transport contracts.
 
 Run `node --test tests/test_gamepad_input.mjs tests/test_gamepad_panel.mjs tests/test_manual_panel.mjs`.
 The source tests cover handoff races, input scaling, profile changes, source/focus

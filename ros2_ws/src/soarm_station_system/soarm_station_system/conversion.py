@@ -73,6 +73,11 @@ def frame_to_dict(m):
     body={}
     if m.frame_kind=='COMMAND':
         if m.payload_kind=='DIRECT_JOINT_TARGET':body=direct_body(m.direct_target)
+        elif m.payload_kind=='MANUAL_JOG':
+            j=m.manual_jog
+            body={'jog':{'translation':list(j.translation),'elevation':j.elevation,'roll':j.roll,
+                         'level':j.level,'position_only':j.position_only,'gripper_rate':j.gripper_rate,
+                         'gripper_target':j.gripper_target if j.has_gripper_target else None}}
         elif m.payload_kind=='JOINT_TRAJECTORY':body={'points':trajectory_points(m.joint_trajectory)}
         elif m.payload_kind=='MODEL_TASK':body={'instruction':m.model_task.instruction}
         else:raise ValueError('Unsupported payload')
@@ -160,6 +165,25 @@ def stream_from_dict(d,principal):
         if m.payload_kind=='DIRECT_JOINT_TARGET':
             m.direct_target.positions_rad=position_values(b['positions']);m.direct_target.joint_names=list(b['positions'])
             m.direct_target.gripper_target.unit=b.get('gripper_unit','percent');m.direct_target.gripper_target.value=real_number(b['gripper'],'gripper percentage')
+        elif m.payload_kind=='MANUAL_JOG':
+            import math
+            axes=b.get('translation')
+            if not isinstance(axes,list) or len(axes)!=3:
+                raise ValueError('Three normalized translation components required')
+            values=[*axes,b.get('elevation'),b.get('roll'),b.get('gripper_rate')]
+            if any(type(v) not in (float,int) or not math.isfinite(v) or abs(v)>1 for v in values):
+                raise ValueError('Manual jog axes must be finite values in [-1,1]')
+            if type(b.get('level')) is not int or not 1<=b['level']<=5 or type(b.get('position_only')) is not bool:
+                raise ValueError('Invalid jog profile or position_only flag')
+            target=b.get('gripper_target')
+            if target is not None and (type(target) not in (int,float) or not 0<=target<=100 or b['gripper_rate']):
+                raise ValueError('Invalid absolute jog gripper command')
+            j=m.manual_jog
+            j.translation=[float(v) for v in axes]
+            j.elevation=float(b['elevation']);j.roll=float(b['roll'])
+            j.level=b['level'];j.position_only=b['position_only'];j.gripper_rate=float(b['gripper_rate'])
+            j.has_gripper_target=target is not None
+            j.gripper_target=float(target) if target is not None else 0.
         elif m.payload_kind=='MODEL_TASK':m.model_task.instruction=b['instruction']
         elif m.payload_kind=='JOINT_TRAJECTORY':
             from trajectory_msgs.msg import JointTrajectoryPoint
