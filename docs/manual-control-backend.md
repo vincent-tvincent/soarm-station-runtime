@@ -17,7 +17,7 @@ calculator.preset('home', positions_rad, gripper_percent, preserve_wrist=False)
 calculator.roll_preset('minus_90', positions_rad, gripper_percent)
 ```
 
-`positions_rad` is the exact full configured body-joint dictionary. The gripper is a separate finite percentage: 0 closed, 100 open. Do not fill a missing observation with zero/50 or infer a jaw angle from that percentage. FK can display finite observations outside command bounds; generated targets must remain inside the **configured** joint bounds. This calculator does not silently replace those bounds with different URDF bounds. Deployment configuration must already reflect the selected calibrated model/domain.
+`positions_rad` is the exact full configured body-joint dictionary. The gripper is a separate finite percentage: 0 closed, 100 open. Do not fill a missing observation with zero/50 or infer a jaw angle from that percentage. Finite body angles are accepted for observations, IK seeds and generated targets without a YAML/URDF absolute-angle gate. The servo position registers are the angle authority. Calibration still defines the coordinate conversion; no calibration file or normalization convention is rewritten.
 
 `describe()` returns `available`, `reason`, `frame_id`, `model_base_frame`, `tcp_frame`, `model_sha256`, `joint_names`, `keymap`, `speed_levels`, `default_level:3`, `max_dt_s:0.1`, `position_only`, `poses:{home:{available,reason?},fold:{available,reason?}}`, a derived `presets:{home:bool,fold:bool}`, `wrist_roll_reference_rad`, and `roll_presets_rad`. Missing URDF makes FK/IK unavailable; missing named poses do not disable ordinary FK/IK. Geometry is explicitly not a collision check.
 
@@ -64,16 +64,37 @@ The caller handles one-shot keys and position-only toggle (Tab); `step` receives
 
 Position-only ignores orientation keys/constraints. Ordinary XYZ/elevation jogging freezes the wrist-roll motor unless G/S is active, avoiding an extra independent roll constraint on the five-axis arm. G/S solves position, elevation and tool roll with free azimuth. R/T/E instead select an absolute **motor wrist-roll** target and preserve the other joints; repeated presses do not accumulate angles.
 
-The solver uses URDF rotational-chain FK, analytic translational Jacobians, bounded damped least-squares and checked final residuals. A local orientation chart avoids a reference-axis singularity; full six-dimensional pose is not imposed. A joint-displacement/Jacobian prediction reduces the initial increment when a near-straight Newton estimate crosses a singular branch, while motion away from that branch can retain its full step. This is only an initial-step hint, never a reachability verdict or an added motion constraint. Nonlinear correction stops on accepted residuals or no improving bounded update. Further step halving ends at the existing 1 µm position / 10 µrad angular numerical-resolution floors, replacing the fixed 1/64 search cutoff. A 96-iteration per-candidate arithmetic guard is a final fallback; the last iterate is still checked for convergence. There is no wall-clock success/failure cutoff: legacy `solve_budget_ms` is accepted but ignored. CPU scheduling must not turn an otherwise converged target into BLOCKED. The one-pending-request UI and operation/key generation checks remain responsible for dropping obsolete results; motor dispatch remains independent. No collision/path safety claim is made by these lines/spheres.
+The solver uses URDF rotational-chain FK, analytic translational Jacobians, damped least-squares within a velocity × dt trust region and checked final residuals. It does not intersect that local step region with absolute YAML or URDF joint angles. A local orientation chart avoids a reference-axis singularity; full six-dimensional pose is not imposed. A joint-displacement/Jacobian prediction reduces the initial increment when a near-straight Newton estimate crosses a singular branch, while motion away from that branch can retain its full step. This is only an initial-step hint, never a reachability verdict or an added motion constraint. Nonlinear correction stops on accepted residuals or no improving bounded update. Further step halving ends at the existing 1 µm position / 10 µrad angular numerical-resolution floors, replacing the fixed 1/64 search cutoff. A 96-iteration per-candidate arithmetic guard is a final fallback; the last iterate is still checked for convergence. There is no wall-clock success/failure cutoff: legacy `solve_budget_ms` is accepted but ignored. CPU scheduling must not turn an otherwise converged target into BLOCKED. The one-pending-request UI and operation/key generation checks remain responsible for dropping obsolete results; motor dispatch remains independent. No collision/path safety claim is made by these lines/spheres.
 
 Use one pending solve per browser. Compute `dt_s` from actual elapsed held-input time when producing the next request; it is capped at 100 ms and never accumulated into catch-up requests. At 60 ms round-trip, fixed 1/30-s increments would unnecessarily halve the requested speed. Pass the latest **admitted/applied** reference when available rather than repeatedly integrating from lagged measured joints. Do not accumulate unresolved Cartesian targets. Keep request operation/session/generation identity in the UI and drop responses after key release, mode/arm change, stop, Home, or disconnect. The calculator does not validate network identity and does not refresh any input window.
+
+## Body-angle authority and display metadata
+
+`min_rad`/`max_rad` are optional legacy display/model metadata. They do not
+restrict manual seeds, Home/Fold/roll poses or generated joint targets.
+`display_min_rad`/`display_max_rad` can supply an explicit UI extent. Missing or
+unusable display extents fall back to ±π; a display range is never a command
+admission rule. The descriptor reports `application_angle_limits:false`.
+
+For SO-101 dashboard resources, readable calibration takes precedence: its raw
+minimum/maximum map to radians with `(raw - (min + max)/2) * 2π / 4095`, matching
+LeRobot DEGREES normalization. Resources retain `min`/`max` for UI compatibility
+and mark them `range_enforced:false`; `range_source` identifies calibration,
+configured display metadata or the default. This reads the calibration file,
+not the bus; the native owner separately checks calibration against EEPROM.
+
+The Cartesian LeRobot/Placo adapter explicitly disables Placo joint-limit
+constraints. FK residual checks, finite values, joint mapping, normalized
+quaternions, angular chart math and velocity integration remain. The URDF still
+supplies joint axes, origins, types and TCP geometry; changing a revolute joint
+to continuous is not required. The jaw remains a separate 0–100% quantity.
 
 ## Minimal existing-runtime hooks
 
 1. Instantiate from already-loaded explicit `arm_config`; expose read-only computation endpoints through the authenticated dashboard (`describe`, `fk`, `step`, `preset`/`roll`). Offload solve work with `asyncio.to_thread`; bound the caller's pending work and response sizes.
 2. FK takes fresh cached measured positions. The UI overlays independently sourced motor health; all current faults/unknowns retain their actual provenance.
-3. Starting manual control still opens the existing DIRECT+STREAM operation with its existing permission, READY, pickup, sequence, window and input-expiry behavior. Feed approved calculator targets into that same client; no new writer/ROS action/driver or permission bypass.
-4. Before publishing a returned target, recheck current browser operation identity/generation. The runtime still performs current-state/unit/limit/health checks. Calculator success is not actuation permission.
+3. Starting manual control still opens the existing DIRECT+STREAM operation with its existing permission, READY, sequence and admission-window identity checks. Feed approved calculator targets into that same client; no new writer/ROS action/driver or permission bypass.
+4. Before publishing a returned target, recheck current browser operation identity/generation. The runtime still performs current-state, named-unit, finite-value and health checks; YAML angle extents do not admit or reject targets. Calculator success is not actuation permission.
 5. Home/Fold/roll targets are explicit user requests sent through the same admitted DIRECT stream/limiter, not a new serial path. Mode switches/Stop/Home invalidate pending keyboard solves and clear held keys. Do not replay targets after reconnect.
 
 ## Explicit Home reference configuration
@@ -96,7 +117,7 @@ manual_control:
   operator_tool_rpy: [0.0, 0.0, 3.141592653589793]
 ```
 
-Omitted/null `gripper` also preserves the supplied measured percentage. A finite explicit percentage is supported. The named-pose template includes the operator-observed Fold from August 5, 2026, with its original joint values converted to radians and jaw preservation. On November 15 the user approved extending the shoulder lower bound and rounding it down to **−105°** (`-1.8325957145940461 rad`); the vendored URDF matches that bound. The selected arm's `shoulder_lift.min_rad` must match when installing this preset. Other joint limits and the recorded Fold target are unchanged. Unknown pose names and incomplete/out-of-range configured poses still reject; there is no all-zero fallback.
+Omitted/null `gripper` also preserves the supplied measured percentage. A finite explicit percentage is supported. The named-pose template includes the operator-observed Fold from August 5, 2026, with its original joint values converted to radians and jaw preservation. On November 15 the user approved extending the shoulder lower bound and rounding it down to **−105°** (`-1.8325957145940461 rad`); the vendored URDF matches that bound. That historical lower-bound adjustment is now display/model metadata; installing the preset does not require matching a software angle threshold. The recorded Fold target is unchanged. Unknown pose names, incomplete named poses and nonfinite values still reject; there is no all-zero fallback.
 
 Recorded Fold degrees: shoulder pan `-0.7032967033`, shoulder lift `-104.7912087912`, elbow flex `95.2527472527`, wrist flex `74.8571428571`, wrist roll `-0.9230769231`. The saved calibration hash is `c816f1bbaa8122bb40475699f5a74724fbe8cce65634f02d14b5e8e0e4265814`, matching this deployment. This preset import does not execute Fold or constitute a new physical path validation.
 
@@ -106,7 +127,7 @@ Recorded Fold degrees: shoulder pan `-0.7032967033`, shoulder lift `-104.7912087
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python python -m unittest discover -s tests -p test_manual_control.py -v
 ```
 
-Nine tests cover an independently calculated two-link FK chain/fixed TCP, SO-101 geometry and separate jaw, every motion-key sign, speed/Shift/diagonal semantics, XYZ and elevation/roll residuals, bounded joint travel, reference integration with lagged measured state, no catch-up, blocked IK, explicit missing data/model, and configured absolute Home/Fold/roll behavior. Local verification uses macOS Python with NumPy 2.2.6; target-Pi and physical acceptance remain separate.
+Offline tests cover an independently calculated two-link FK chain/fixed TCP, SO-101 geometry and separate jaw, every motion-key sign, speed/Shift/diagonal semantics, XYZ and elevation/roll residuals, per-step velocity, finite poses outside old angle extents, reference integration with lagged measured state, no catch-up, blocked IK, explicit missing data/model, and configured absolute Home/Fold/roll behavior. Local verification uses macOS Python with NumPy 2.2.6; target-Pi and physical acceptance remain separate.
 
 ## Manual panel concurrency verification
 
@@ -118,7 +139,7 @@ Run `node --test tests/test_manual_panel.mjs` for 17 hardware-free cases coverin
 
 A read-only snapshot on baseline `67e8fcf` reproduced H/+Y returning BLOCKED while L/−Y worked. The admitted reference was near straight (about 1.27° between the relevant links); its TCP differed from measured feedback by centimeters. An independently solved 1/8 increment satisfied the unchanged position and 10 µrad elevation criteria, but the original full candidate consumed almost all of the 40 ms deadline before that fallback ran. This was computation-budget starvation, not proof that all positive-Y movement was physically impossible.
 
-The correction preserves the admitted reference, locked wrist rule, configured joint/velocity bounds and residual tolerances. It removes elapsed-time rejection and selects a smaller first candidate near a singular branch. Captured-case regression asserts +Y progress, full-step −Y preservation, keyboard/analog equivalence, and unchanged results under a jumping clock or deliberately slowed FK. No measured-pose reseeding, automatic position-only fallback or tolerance relaxation is used. Run `python -m unittest discover -s tests -p test_manual_ik_regression.py -v`. These are isolated model calculations, not physical motion validation.
+The correction preserves the admitted reference, locked wrist rule, configured velocity bounds and residual tolerances. Absolute body-angle gating was subsequently removed in favor of servo authority. It removes elapsed-time rejection and selects a smaller first candidate near a singular branch. Captured-case regression asserts +Y progress, full-step −Y preservation, keyboard/analog equivalence, and unchanged results under a jumping clock or deliberately slowed FK. No measured-pose reseeding, automatic position-only fallback or tolerance relaxation is used. Run `python -m unittest discover -s tests -p test_manual_ik_regression.py -v`. These are isolated model calculations, not physical motion validation.
 
 ## Analog manual input
 

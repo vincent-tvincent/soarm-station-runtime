@@ -1,6 +1,13 @@
 from soarm_station_interfaces.action import ExecuteOperation
 from soarm_station_interfaces.msg import OperationInput,DirectJointStep
 from .common import duration_s
+def real_number(value,label):
+    import math
+    if type(value) not in (int,float) or not math.isfinite(value):raise ValueError('Finite numeric '+label+' required')
+    return float(value)
+def position_values(value,names=None):
+    if not isinstance(value,dict):raise ValueError('Named joint positions required')
+    return [real_number(value[name],'joint position') for name in (names if names is not None else value)]
 def direct_body(m):
     if len(m.joint_names)!=len(m.positions_rad):raise ValueError('Joint array length mismatch')
     if len(set(m.joint_names))!=len(m.joint_names):raise ValueError('Duplicate joint names')
@@ -101,8 +108,8 @@ def goal_from_dict(d,principal,*,persistent_target=False):
         if d['operation_type']=='DIRECT':
             previous=0
             for p in d['points']:
-                m=DirectJointStep();m.input_id=p.get('input_id','');m.joint_names=list(p['positions']);m.positions_rad=list(p['positions'].values())
-                m.gripper_target.unit='percent';m.gripper_target.value=float(p.get('gripper',50))
+                m=DirectJointStep();m.input_id=p.get('input_id','');m.positions_rad=position_values(p['positions']);m.joint_names=list(p['positions'])
+                m.gripper_target.unit='percent';m.gripper_target.value=real_number(p.get('gripper',50),'gripper percentage')
                 m.duration_ms=int((p['time_s']-previous)*1000);previous=p['time_s'];g.input.inline_sequence.direct_steps.append(m)
         elif d['operation_type']=='MODEL':
             from soarm_station_interfaces.msg import ModelTaskStep
@@ -137,7 +144,7 @@ def goal_from_dict(d,principal,*,persistent_target=False):
             if not 1<=len(d.get('points',[]))<=256:raise ValueError('Expected 1..256 trajectory points')
             g.input.inline_sequence.joint_trajectory.joint_names=list(d['points'][0]['positions'])
             for p in d['points']:
-                m=JointTrajectoryPoint();m.positions=[p['positions'][n] for n in g.input.inline_sequence.joint_trajectory.joint_names]
+                m=JointTrajectoryPoint();m.positions=position_values(p['positions'],g.input.inline_sequence.joint_trajectory.joint_names)
                 m.time_from_start.sec=int(p['time_s']);m.time_from_start.nanosec=int(p['time_s']%1*1e9)
                 g.input.inline_sequence.joint_trajectory.points.append(m)
     return g
@@ -151,15 +158,15 @@ def stream_from_dict(d,principal):
         if m.payload_kind in ('MODEL_TASK','JOINT_TRAJECTORY') and (type(d.get('semantic_revision'))!=int or not 0<d['semantic_revision']<2**64):
             raise ValueError('SEMANTIC_REVISION_REQUIRED: upgrade sparse producer')
         if m.payload_kind=='DIRECT_JOINT_TARGET':
-            m.direct_target.joint_names=list(b['positions']);m.direct_target.positions_rad=[float(x) for x in b['positions'].values()]
-            m.direct_target.gripper_target.unit=b.get('gripper_unit','percent');m.direct_target.gripper_target.value=float(b['gripper'])
+            m.direct_target.positions_rad=position_values(b['positions']);m.direct_target.joint_names=list(b['positions'])
+            m.direct_target.gripper_target.unit=b.get('gripper_unit','percent');m.direct_target.gripper_target.value=real_number(b['gripper'],'gripper percentage')
         elif m.payload_kind=='MODEL_TASK':m.model_task.instruction=b['instruction']
         elif m.payload_kind=='JOINT_TRAJECTORY':
             from trajectory_msgs.msg import JointTrajectoryPoint
             if not 1<=len(b.get('points',[]))<=256:raise ValueError('Expected 1..256 trajectory points')
             m.joint_trajectory.joint_names=list(b['points'][0]['positions'])
             for point in b['points']:
-                p=JointTrajectoryPoint();p.positions=[float(point['positions'][n]) for n in m.joint_trajectory.joint_names]
+                p=JointTrajectoryPoint();p.positions=position_values(point['positions'],m.joint_trajectory.joint_names)
                 p.time_from_start.sec=int(point['time_s']);p.time_from_start.nanosec=int(point['time_s']%1*1e9);m.joint_trajectory.points.append(p)
         else:raise ValueError('Unsupported stream payload')
     else:m.payload_kind='NONE'

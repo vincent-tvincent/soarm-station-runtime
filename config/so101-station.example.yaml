@@ -20,11 +20,11 @@ arms:
     tcp_frame: gripper_frame_link
     urdf: ../models/so101/so101.urdf
     joints:
-      - {name: shoulder_pan, min_rad: -1.91986, max_rad: 1.91986, velocity_rad_s: 1.5, goal_tolerance_rad: 0.03}
-      - {name: shoulder_lift, min_rad: -1.8325957145940461, max_rad: 1.74533, velocity_rad_s: 1.5, goal_tolerance_rad: 0.03}
-      - {name: elbow_flex, min_rad: -1.69, max_rad: 1.69, velocity_rad_s: 1.5, goal_tolerance_rad: 0.07}
-      - {name: wrist_flex, min_rad: -1.65806, max_rad: 1.65806, velocity_rad_s: 2.0, goal_tolerance_rad: 0.03}
-      - {name: wrist_roll, min_rad: -2.74385, max_rad: 2.84121, velocity_rad_s: 2.0, goal_tolerance_rad: 0.03}
+      - {name: shoulder_pan, display_min_rad: -1.91986, display_max_rad: 1.91986, velocity_rad_s: 1.5, goal_tolerance_rad: 0.03}
+      - {name: shoulder_lift, display_min_rad: -1.8325957145940461, display_max_rad: 1.74533, velocity_rad_s: 1.5, goal_tolerance_rad: 0.03}
+      - {name: elbow_flex, display_min_rad: -1.69, display_max_rad: 1.69, velocity_rad_s: 1.5, goal_tolerance_rad: 0.07}
+      - {name: wrist_flex, display_min_rad: -1.65806, display_max_rad: 1.65806, velocity_rad_s: 2.0, goal_tolerance_rad: 0.03}
+      - {name: wrist_roll, display_min_rad: -2.74385, display_max_rad: 2.84121, velocity_rad_s: 2.0, goal_tolerance_rad: 0.03}
     gripper: {name: gripper, unit: percent, velocity_percent_s: 100}
     manual_control:
       poses:

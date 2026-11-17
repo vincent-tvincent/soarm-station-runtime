@@ -7,6 +7,9 @@ def plan_cartesian(config,targets,start,gripper):
     if not config.get('urdf'):raise ValueError('Cartesian control requires a registered URDF/TCP')
     names=[j['name'] for j in config['joints']];mapping=config.get('urdf_joint_names',names)
     solver=RobotKinematics(config['urdf'],target_frame_name=config.get('tcp_frame','gripper_frame_link'),joint_names=mapping)
+    # The servo's configured position limits are authoritative. URDF limits
+    # describe the model, and must not silently constrain this solver as well.
+    solver.solver.enable_joint_limits(False)
     q=np.asarray([start[n] for n in names]);result=[];elapsed=0.;deadline=time.monotonic()+config.get('ik_timeout_s',2.)
     for t in targets:
         if t['frame_id']!=config['base_frame']:raise ValueError('Cartesian frame mismatch')
@@ -25,7 +28,6 @@ def plan_cartesian(config,targets,start,gripper):
             if time.monotonic()>deadline:raise TimeoutError('No IK solution within budget')
             candidate=np.deg2rad(solver.inverse_kinematics(np.rad2deg(q),pose,orientation_weight=0. if mode=='POSITION_ONLY' else 1.,max_iters=8))
             if not np.all(np.isfinite(candidate)):raise ValueError('Nonfinite IK result')
-            if any(not j['min_rad']<=candidate[i]<=j['max_rad'] for i,j in enumerate(config['joints'])):raise ValueError('IK result outside configured domain')
             actual=solver.forward_kinematics(np.rad2deg(candidate))
             p_error=np.linalg.norm(actual[:3,3]-pose[:3,3])
             angle=math.acos(float(np.clip((np.trace(actual[:3,:3].T@pose[:3,:3])-1)/2,-1,1)))

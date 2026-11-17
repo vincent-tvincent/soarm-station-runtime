@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GamepadPanel } from '../web/gamepad-panel.js';
 import { ManualPanel } from '../web/manual-panel.js';
+import { StationError } from '../web/transport.js';
 
 const copy = value => structuredClone(value);
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -383,6 +384,21 @@ test('discovery, reconnect and held Start cannot auto-start; idle active session
   f.emit('gamepaddisconnected', { gamepad: { index: 0 } }); f.poll(null); await flush(); assert.equal(f.calls.stops, 1);
   f.poll(raw({ rt: 1, buttons: [0] })); f.poll(raw()); await flush();
   assert.equal(f.calls.starts, 1); assert.equal(f.manual.own, false);
+});
+
+for(const error of [new StationError('Timeout','TIMEOUT'),new StationError('Network','NETWORK_ERROR'),
+  new StationError('Unavailable','HTTP_ERROR',503),new StationError('Busy','HTTP_ERROR',409),
+  new StationError('Not ready','NOT_READY'),new StationError('Unconfirmed','ACK_TIMEOUT')])
+test(`temporary ${error.code}/${error.status} does not suspend gamepad control and the next solve uses fresh input`,async t=>{
+  const f=fixture(t,{pad:raw({axes:[0,-.5,0,0]})});let attempt=0;
+  f.handler(async()=>{if(++attempt===1)throw error;return{status:'OK',step_fraction:1,target:{positions:{joint:.8},gripper:50}};});
+  const epoch=f.panel.sourceEpoch;await f.panel.solve();
+  assert.equal(f.panel.sourceEpoch,epoch);assert.equal(f.panel.needsNeutral,false);assert.equal(f.panel.solving,false);
+  assert.equal(f.calls.stops,0);assert.equal(f.calls.targets.length,0);assert.equal(f.calls.errors.length,0);
+  f.advance(20);f.poll(raw({axes:[0,-.8,0,0]}));await flush();
+  assert.equal(f.calls.requests.length,2);assert.notDeepEqual(f.calls.requests[0].body.translation,f.calls.requests[1].body.translation);
+  assert.equal(f.calls.targets.length,1);assert.equal(f.calls.targets[0].positions.joint,.8);
+  assert.equal(f.calls.starts,0);assert.equal(f.manual.own,true);
 });
 
 for (const action of ['stop', 'home', 'blur', 'mode']) {

@@ -37,7 +37,8 @@ def test_direct_latest_and_partial_rejected(arm):
 def test_heartbeat_does_not_keep_old_pose(arm):
     g=grant(arm);arm.input(command(arm,g,target(arm)));arm.op['last_direct']=now()-.26
     arm.input(command(arm,g,{},seq=2,kind='HEARTBEAT'));arm._tick(now(),.01)
-    assert arm.op is None and arm.error=='DIRECT_INPUT_EXPIRED'
+    assert arm.op is not None and arm.permission and arm.target is None
+    assert arm.stats['dispatch_paused'] and arm.stats['pause_reason']=='AWAITING_FRESH_INPUT'
 def test_old_window_is_not_renewed_by_receipt(arm):
     g=grant(arm);arm.windows[g['window_id']]=now()-.001
     with pytest.raises(ValueError,match='Expired'):arm.input(command(arm,g,target(arm)))
@@ -55,12 +56,14 @@ def test_first_direct_target_converges_from_existing_reference_without_pose_alig
     for j in arm.config['joints']:
         assert 0<arm.backend.q[j['name']]<=j['velocity_rad_s']*.01+1e-9
     assert arm.backend.gripper==pytest.approx(51.)
-def test_nan_and_unknown_units(arm):
-    for v in (float('nan'),float('inf'),100):
+def test_nan_types_and_unknown_units(arm):
+    for v in (float('nan'),float('inf'),True,'1',None):
         t=target(arm);t['positions'][next(iter(arm.q))]=v
         with pytest.raises(ValueError):arm._target(t)
     t=target(arm);t['gripper_unit']='radian'
     with pytest.raises(ValueError):arm._target(t)
+    t=target(arm);t['positions'][next(iter(arm.q))]=100.
+    assert arm._target(t)[0]==t['positions']
 def test_trajectory_timing_velocity(arm):
     with pytest.raises(ValueError):grant(arm,'TRAJECTORY','INLINE',points=[{**target(arm,1),'time_s':.001}])
     arm.permission=True

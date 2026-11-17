@@ -46,11 +46,10 @@ def test_healthy_stream_runs_beyond_120_seconds(setup):
 
 
 def test_large_initial_leader_pose_keeps_stream_alive_and_respects_existing_slew_limits(setup):
-    from soarm_station.leader_input import bounded_leader_target
+    from soarm_station.leader_input import leader_target
     arm,clock=setup;begin(arm,persistent_target=True)
-    limits={j['name']:{'min_rad':j['min_rad'],'max_rad':j['max_rad']} for j in arm.config['joints']}
     measured={'positions':{name:10. for name in arm.q},'gripper':120.,'gripper_unit':'percent'}
-    desired=bounded_leader_target(measured,limits)
+    desired=leader_target(measured,[j['name'] for j in arm.config['joints']])
     for i in range(220):
         previous=dict(arm.commanded_q);jaw=arm.commanded_gripper
         arm.input(frame(arm,desired,identifier=str(i)))
@@ -114,9 +113,9 @@ def test_explicit_duration_and_optional_profile_ceiling_are_honored(setup):
         tick(arm,clock,.1)
     assert arm.op is None and not arm.permission
 
-def test_profile_ceiling_without_request_is_honored(setup):
+def test_autonomous_profile_ceiling_without_request_is_honored(setup):
     arm,clock=setup;arm.limits['max_stream_duration_s']=2.
-    begin(arm);assert arm.op['deadline']==pytest.approx(clock()+2.)
+    begin(arm,'TRAJECTORY');assert arm.op['deadline']==pytest.approx(clock()+2.)
 
 def test_inline_path_longer_than_120_seconds_is_valid_within_profile(setup):
     arm,clock=setup;begin(arm,'TRAJECTORY','INLINE',points=[point(arm,.1,180.)])
@@ -175,16 +174,18 @@ def test_legacy_sparse_frame_rejects_before_mutation_but_direct_is_unchanged(set
     arm.input(frame(arm,{'positions':dict(arm.q),'gripper':50.},identifier='legacy-direct'))
     assert arm.last_input=='legacy-direct'
 
-def test_rate_bound_is_not_overridden_by_measured_lead_projection(setup):
+def test_tracking_lag_never_freezes_or_times_out_velocity_slew(setup):
     arm,clock=setup;begin(arm)
     arm.commanded_q={n:.1219 for n in arm.q}
     for j in arm.config['joints']:j['velocity_rad_s']=.1;j['tracking_timeout_s']=.5
     previous=dict(arm.commanded_q)
-    assert arm._limit({n:.4 for n in arm.q},50.,clock(),.01) is None
+    q,_=arm._limit({n:.4 for n in arm.q},50.,clock(),.01)
+    assert all(q[n]==pytest.approx(previous[n]+.001) for n in q)
     assert arm.commanded_q==previous
     clock.advance(.6)
-    assert arm._limit({n:.4 for n in arm.q},50.,clock(),.01) is None
-    assert not arm.permission and arm.error=='TRACKING_ENVELOPE_LOST'
+    q,_=arm._limit({n:.4 for n in arm.q},50.,clock(),.01)
+    assert all(q[n]==pytest.approx(previous[n]+.001) for n in q)
+    assert arm.permission and arm.op and arm.error==''
 
 def test_non_language_model_allows_empty_task_and_reuses_resident_session(setup):
     arm,clock=setup
@@ -216,10 +217,10 @@ def test_continuous_gripper_contact_keeps_grasp_and_bounded_goal(setup):
     for i in range(300):
         arm.input(frame(arm,{'positions':dict(arm.q),'gripper':100.},identifier='grasp-'+str(i)))
         tick(arm,clock,.01,follow=False)
-        assert arm.commanded_gripper<=15.00001
+        assert 0<=arm.commanded_gripper<=100
     assert arm.op and arm.permission and arm.target[1]==100.
-    assert arm.commanded_gripper==pytest.approx(15.)
-    assert arm.stats['tracking_state']=='LEAD_LIMITED'
+    assert arm.commanded_gripper==pytest.approx(100.)
+    assert arm.stats['tracking_state']=='TRACKING_LAG'
 
 def test_midrange_contact_compliance_does_not_freeze_body_and_release_is_rate_bounded(setup):
     arm,clock=setup;begin(arm)
@@ -228,7 +229,7 @@ def test_midrange_contact_compliance_does_not_freeze_body_and_release_is_rate_bo
     target=dict(arm.q);target['shoulder_pan']=.05
     arm.input(frame(arm,{'positions':target,'gripper':0.},identifier='grasp'))
     tick(arm,clock,.01,follow=False)
-    assert arm.commanded_q['shoulder_pan']>0. and arm.commanded_gripper==35.
+    assert arm.commanded_q['shoulder_pan']>0. and arm.commanded_gripper==34.
     assert arm.permission and arm.op
     previous=arm.commanded_gripper
     arm.input(frame(arm,{'positions':target,'gripper':80.},identifier='release'))

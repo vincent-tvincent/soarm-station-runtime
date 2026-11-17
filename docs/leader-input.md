@@ -170,9 +170,9 @@ Open **Control → Leader arm**, press **Refresh**, select the input computer,
 then select the configured leader. The native bridge must remain running while
 using it. Press **Follow leader** when ready for the follower to move. The
 follower approaches the leader's current pose using its existing joint/gripper
-speed limits, then keeps following fresh leader targets. Manual pose matching
-is not required. Out-of-range leader targets are clipped to the follower's
-configured command limits while the other joints continue following.
+speed settings, then keeps following fresh leader targets. Manual pose matching
+is not required. Calibrated finite body angles are forwarded unchanged; YAML
+and URDF display ranges do not clip them. Servo position limits are authoritative.
 
 **Freeze / Esc** holds the follower. Press Follow leader again to approach the
 leader's current pose and resume. Home first stops following, moves to its
@@ -196,9 +196,10 @@ inventory/status and receives explicit start/stop messages. Selected leader inpu
 uses the existing `/ws/control` contract and original Pi-issued windows; each
 sample is read after a window arrives. The bridge never calls permission-enable,
 never calibrates/configures motors, never opens follower/camera devices, and
-never resumes a stopped operation after reconnect. Follower joint bounds, velocity limits and actual input-source freshness remain
-authoritative in the production runtime. Leader targets are clipped to those
-existing bounds so an out-of-range axis does not reject the entire stream.
+never resumes a stopped operation after reconnect. Body targets preserve the
+calibrated leader angles, while the jaw remains normalized to 0–100%. The native
+runtime retains velocity integration and source/operation identity checks; no
+YAML absolute-angle range is applied by the bridge.
 
 The gateway's existing trusted-loopback/Tailscale access middleware applies.
 Trusted peers do not need a new login token. TLS is still verified using the
@@ -225,6 +226,20 @@ against the host configuration file. The five body values are read using the
 degree normalization and explicitly converted to ROS radians; the separate jaw
 value remains percent. The mapping must exactly match the selected follower's
 joint names. Calibration is compared, never rewritten.
+
+Start messages provide `joint_names`; they no longer transmit YAML
+`joint_limits`. Update and restart the native bridge alongside this gateway
+revision. For an installed Mac companion, reinstall its source snapshot with
+`scripts/install-leader-input-macos`; updating a separate checkout alone does
+not update that installed copy. Legacy `bounded_leader_target` callers remain
+compatible by name, but its body-angle values are no longer clipped.
+
+An established control WebSocket can return `input_rejected` for one invalid
+or expired frame. The bridge keeps the run, reports the bounded reason, and
+continues with a new sample and sequence under the current grant. It does not
+replay the rejected pose. `error`, terminal results and actual socket/source
+closure still end their owned run.
+
 
 The sampler runs in one child. A native connection/driver error or Stop
 terminates that child if necessary, releasing its OS handles. It shares the
@@ -312,7 +327,7 @@ body poses continue from fresh leader samples. Before the first sent command,
 use a valid supplied `gripper_reference`, otherwise the current follower
 `gripper_percent` from control feedback. Missing feedback never becomes a
 fabricated 50% or 0% target. Enabling follow resumes fresh calibrated leader jaw
-samples through the existing runtime motion bounds and velocity limits. It does
+samples through the existing runtime velocity integration. It does
 not reset the operation or change coordinates. `hosts[].active.follow_gripper`
 is the desired setting; `active.gripper_reference` reports the most recent
 observed sent jaw target. `latest_pose` remains the real leader pose, even when

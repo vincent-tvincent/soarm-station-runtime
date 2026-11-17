@@ -56,7 +56,7 @@ WebSockets. Changing a layout does not open USB devices or restart capture. A dr
 camera WebSocket reconnects automatically with bounded backoff. Video recovery
 does not reopen the control socket, grant permission or resume a stopped operation.
 
-Manual controls use named joint bounds and measured pickup. **Start manual stream**
+Manual controls use named joint targets and measured pickup. Display extents do not reject numeric targets; slider ranges expand to include entered/measured angles. **Start manual stream**
 requests permission when needed, then starts the stream in one explicit click.
 No separate Enable click is required for manual mode. Without edited targets,
 the controls refresh from the current measured pose when starting. Payload supports

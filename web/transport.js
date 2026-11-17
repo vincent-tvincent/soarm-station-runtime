@@ -11,6 +11,11 @@ export class StationError extends Error {
     this.status = status;
   }
 }
+export function isTransientTransportError(error) {
+  if(['TIMEOUT','NETWORK_ERROR'].includes(error?.code))return true;
+  if(error?.code==='HTTP_ERROR')return error.status===408 || error.status===429 || error.status>=500;
+  return false;
+}
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const finite = (value, label) => {
@@ -102,6 +107,7 @@ export class StationClient {
     this._lastStateEmit = -Infinity;
     this._requests = new Set();
     this._ownedArms = new Set();
+    this._ownedGrants = new Map();
     this._cameras = new Map();
   }
 
@@ -135,6 +141,7 @@ export class StationClient {
   }
   _publicOperation(op) {
     return {
+      localId: op.localId || null,
       state: op.state,
       type: op.type,
       mode: op.mode,
@@ -234,7 +241,7 @@ export class StationClient {
         cache: "no-store",
         redirect: "error",
         credentials: "same-origin",
-        keepalive: path === '/api/hold',
+        keepalive: path === '/api/hold' || /^\/api\/operations\/[^/]+\/cancel$/.test(path),
       });
       if (!response.ok) {
         const raw = await response.text();
@@ -253,6 +260,9 @@ export class StationClient {
     } catch (error) {
       if (timedOut)
         throw new StationError("Station request timed out", "TIMEOUT");
+      if(!(error instanceof StationError) && error?.name!=='SyntaxError')
+        throw new StationError(error?.name==='AbortError'?'Station request canceled':'Station connection interrupted',
+          error?.name==='AbortError'?'CANCELED':'NETWORK_ERROR');
       throw error;
     } finally {
       this.env.clearTimeout(timer);
@@ -300,8 +310,9 @@ export class StationClient {
   }
   async disconnect() {
     const token = this.#token;
-    const arms = new Set(this._ownedArms);
-    if (this._active) arms.add(this._active.armId);
+    const active=this._active,grants=new Map(this._ownedGrants);
+    if(active)grants.set(active.armId,{arm_id:active.armId,controller_session:active.session,
+      operator_session_id:active.principal,operation_id:null});
     ++this._generation;
     this.connected = false;
     this.#token = "";
@@ -314,18 +325,20 @@ export class StationClient {
     this._stopLocalOperation("disconnected", "Connection closed");
     for (const id of [...this._cameras.keys()]) this.closeCamera(id);
     this._ownedArms.clear();
+    this._ownedGrants.clear();
     this._connection("disconnected");
-    if (arms.size) {
+    if(active?.transport==='http')await this._cancelHttpOperation(active,token);
+    if (grants.size) {
       const results = await Promise.allSettled(
-        [...arms].map((arm_id) =>
-          this._request("/api/hold", { arm_id }, token),
+        [...grants.values()].map(scope =>
+          this._request("/api/hold", scope, token),
         ),
       );
       for (const result of results)
         if (result.status === "rejected")
           this._error(
             new StationError(
-              "Disconnected; hold could not be confirmed",
+              "Disconnected; owned idle permission cleanup could not be confirmed",
               "HOLD_UNCONFIRMED",
             ),
           );
@@ -370,8 +383,12 @@ export class StationClient {
   }
   _applyState(state) {
     this.state = state;
-    for (const id of this._ownedArms)
-      if (state.arms?.[id]?.permission === false) this._ownedArms.delete(id);
+    for (const [id,scope] of this._ownedGrants) {
+      const current=state.arms?.[id];
+      if(current?.permission===false || (current?.controller_session && current.controller_session!==scope.controller_session)) {
+        this._ownedArms.delete(id);this._ownedGrants.delete(id);
+      }
+    }
     const op = this._active;
     const arm = op && state.arms?.[op.armId];
     if (
@@ -379,6 +396,7 @@ export class StationClient {
       (arm.runtime_boot_id !== op.boot || arm.controller_session !== op.session)
     ) {
       this._ownedArms.delete(op.armId);
+      this._ownedGrants.delete(op.armId);
       this._stopLocalOperation(
         "interrupted",
         "Runtime/session changed; start a new operation explicitly",
@@ -406,17 +424,21 @@ export class StationClient {
     const arm = this._arm(armId),
       token = this.#token,
       generation = this._generation;
+    const boot=arm.runtime_boot_id,scope=Object.freeze({arm_id:armId,controller_session:arm.controller_session,
+      operator_session_id:this.operatorSessionId,operation_id:null});
     const result = await this._request("/api/permission", {
       arm_id: armId,
-      controller_session: arm.controller_session,
-      operator_session_id: this.operatorSessionId,
+      controller_session: scope.controller_session,
+      operator_session_id: scope.operator_session_id,
       enable: true,
     });
-    if (generation !== this._generation) {
+    if (generation !== this._generation || this.operatorSessionId!==scope.operator_session_id ||
+      this.state.arms?.[armId]?.controller_session!==scope.controller_session ||
+      this.state.arms?.[armId]?.runtime_boot_id!==boot) {
       // A rejected grant acquired nothing; do not stop another controller.
       if (result.accepted)
-        await this._request("/api/hold", { arm_id: armId }, token).catch(
-          () => {},
+        await this._request("/api/hold", scope, token).catch(
+          () => this._error(new StationError('Late owned idle permission cleanup could not be confirmed','HOLD_UNCONFIRMED')),
         );
       throw new StationError(
         "Permission response belongs to a closed connection",
@@ -429,9 +451,36 @@ export class StationClient {
         "PERMISSION_REJECTED",
       );
     this._ownedArms.add(armId);
-    this.state.arms[armId] = { ...arm, permission: Boolean(result.permission) };
+    this._ownedGrants.set(armId,scope);
+    this.state.arms[armId] = { ...this.state.arms[armId], permission: Boolean(result.permission) };
     this._notifyState(true);
     return result;
+  }
+  ownsPermission(armId) {
+    const scope=this._ownedGrants.get(armId),arm=this.state.arms?.[armId];
+    return Boolean(this.connected && this._ownedArms.has(armId) && scope && arm?.permission===true &&
+      scope.controller_session===arm.controller_session && scope.operator_session_id===this.operatorSessionId);
+  }
+  async releaseIdlePermission(armId,scope) {
+    this._requireConnected();
+    const captured=this._ownedGrants.get(armId),generation=this._generation;
+    const body={arm_id:armId,controller_session:scope.controller_session,
+      operator_session_id:scope.operator_session_id,operation_id:null};
+    const result=await this._request('/api/hold',body);
+    if(result.success && generation===this._generation && this._ownedGrants.get(armId)===captured &&
+      this._active?.armId!==armId && this.operatorSessionId===body.operator_session_id &&
+      this.state.arms?.[armId]?.controller_session===body.controller_session) {
+      this._ownedArms.delete(armId);this._ownedGrants.delete(armId);
+      this.state.arms[armId].permission=false;this._notifyState(true);
+    }
+    return result;
+  }
+  async retireOperation(localId) {
+    const operation=this._active,token=this.#token;
+    if(!localId || operation?.localId!==localId)return false;
+    this._stopLocalOperation('stopping','Retiring the canceled local operation');
+    if(operation.transport==='http')return this._cancelHttpOperation(operation,token);
+    return true;
   }
   async hold(armId, scope = null) {
     this._requireConnected();
@@ -460,6 +509,7 @@ export class StationClient {
         "HOLD_UNCONFIRMED",
       );
     this._ownedArms.delete(armId);
+    this._ownedGrants.delete(armId);
     if (this.state.arms?.[armId]) this.state.arms[armId].permission = false;
     this._notifyState(true);
     return result;
@@ -477,7 +527,7 @@ export class StationClient {
     if(!result.success)throw new StationError(result.message||'Torque change failed','TORQUE_REJECTED');
     this.state.arms[armId]={...this.state.arms[armId],measured_torque:result.measured_torque,
       ...(!enabled?{permission:false}:{})};
-    if(!enabled)this._ownedArms.delete(armId);
+    if(!enabled){this._ownedArms.delete(armId);this._ownedGrants.delete(armId);}
     this._notifyState(true);
     return result;
   }
@@ -797,6 +847,7 @@ export class StationClient {
         "BUSY",
       );
     const op = {
+      localId:this.env.uuid(),
       armId,
       type,
       mode,
@@ -880,13 +931,14 @@ export class StationClient {
     }
     const op = this._reserve(armId, type, mode, "http"),
       token = this.#token;
+    op.requestId=this.env.uuid();
     op.initialPayload = initialPayload;
     const body = {
       arm_id: armId,
       runtime_boot_id: op.boot,
       controller_session: op.session,
       operator_session_id: op.principal,
-      request_id: this.env.uuid(),
+      request_id: op.requestId,
       operation_type: type,
       mode,
       ...(profileId ? { profile_id: profileId } : {}),
@@ -896,15 +948,15 @@ export class StationClient {
     try {
       const response = await this._request("/api/operate", body);
       if (this._active !== op || op.generation !== this._generation) {
-        await this._request("/api/hold", { arm_id: armId }, token).catch(noop);
+        await this._cancelHttpOperation(op,token);
         throw new StationError(
           "Operation response belongs to a closed session",
           "CANCELED",
         );
       }
-      if (!response.request_id)
+      if (response.request_id!==op.requestId)
         throw new StationError(
-          "Gateway returned no operation request ID",
+          "Gateway returned a different operation request ID",
           "INVALID_RESPONSE",
         );
       op.requestId = response.request_id;
@@ -941,8 +993,8 @@ export class StationClient {
       this._acceptFeedback(op, value.feedback || {}, started);
     } catch (error) {
       if (this._active === op) {
-        this._failOperation(op, error);
-        return;
+        if(isTransientTransportError(error))this._operationDelay(op,'Operation status delayed; retrying this request ID.');
+        else {this._failOperation(op, error);return;}
       }
     }
     if (this._active === op)
@@ -970,6 +1022,8 @@ export class StationClient {
       );
       return;
     }
+    op.transportNotice=null;
+    if(feedback.last_accepted_input_id && feedback.last_accepted_input_id!==op.acceptedInputId)op.lastInputRejection=null;
     op.operationId = feedback.operation_id;
     op.epoch = feedback.operation_epoch;
     op.sequence = Math.max(op.sequence, Number(feedback.last_sequence) || 0);
@@ -977,7 +1031,7 @@ export class StationClient {
     op.acceptedInputId = feedback.last_accepted_input_id || "";
     if (
       feedback.stream_ready &&
-      ["READY", "ACTIVE"].includes(feedback.phase) &&
+      ["READY", "ACTIVE", "PAUSED"].includes(feedback.phase) &&
       feedback.window_id
     ) {
       // These are local receipt/round-trip bounds only. The Pi remains the expiry authority.
@@ -1113,14 +1167,10 @@ export class StationClient {
     if (this._active !== op || op.ending) return;
     const now = this.env.now();
     if (op.pending && now >= op.pending.deadline) {
-      this._failOperation(
-        op,
-        new StationError(
-          "Input acknowledgment timed out; hold requested instead of retaining an uncertain task",
-          "ACK_TIMEOUT",
-        ),
-      );
-      return;
+      const pending=op.pending;op.pending=null;
+      const error=new StationError('Input acknowledgment is unconfirmed; operation remains active while status is checked.','ACK_TIMEOUT');
+      pending.reject(error);this._error(error);
+      this._operationEvent(op,'input-unconfirmed',{detail:error.message});
     }
     if (!op.postBusy && op.grant) {
       let frame;
@@ -1144,7 +1194,10 @@ export class StationClient {
         try {
           await this._request("/api/stream", frame);
         } catch (error) {
-          if (this._active === op) this._failOperation(op, error);
+          if (this._active === op) {
+            if(isTransientTransportError(error))this._operationDelay(op,'Stream delivery delayed; checking scoped operation status.');
+            else this._failOperation(op,error);
+          }
         } finally {
           op.postBusy = false;
         }
@@ -1234,6 +1287,13 @@ export class StationClient {
           if (data.state) this.state.arms[armId] = data.state;
           if (data.joints) this.state.joints[armId] = data.joints;
           this._applyState(this.state);
+        } else if(data.type==='input_rejected') {
+          const reason=typeof data.reason==='string'?data.reason.slice(0,512):'Input rejected';
+          if(op.lastInputRejection!==reason) {
+            op.lastInputRejection=reason;
+            this._operationEvent(op,'input-rejected',{detail:reason,
+              ...(Number.isSafeInteger(data.sequence)?{sequence:data.sequence}:{})});
+          }
         } else if (data.type === "result")
           this._finishOperation(op, data.result);
         else if (data.type === "error")
@@ -1320,8 +1380,8 @@ export class StationClient {
           op.ws.send(JSON.stringify(frame));
         }
       } catch (error) {
-        this._failOperation(op, error);
-        return;
+        if(error.code==='NOT_READY')this._operationDelay(op,'Waiting for fresh measured pickup; control connection remains open.');
+        else {this._failOperation(op,error);return;}
       }
     }
     // Schedule from now: a delayed tab never emits a catch-up burst.
@@ -1422,22 +1482,27 @@ export class StationClient {
       op.pending = null;
     }
     op.finished.reject(error);
+    this._ownedArms.delete(op.armId);
     this._clearOperation(op);
-    if (this.connected)
-      this._request("/api/hold", { arm_id: op.armId })
-        .then((result) => {
-          if (!result.success)
-            throw new StationError(
-              result.message || "Hold rejected",
-              "HOLD_UNCONFIRMED",
-            );
-          this._ownedArms.delete(op.armId);
-        })
-        .catch(() =>
-          this._error(
-            new StationError("Hold could not be confirmed", "HOLD_UNCONFIRMED"),
-          ),
-        );
+    // Closing a control WS already closes its exact native ownership binding.
+    // HTTP failures retire only their request ID, never the whole arm.
+    if(op.transport==='http')void this._cancelHttpOperation(op);
+  }
+  _operationDelay(op,detail) {
+    if(this._active!==op || op.transportNotice===detail)return;
+    op.transportNotice=detail;this._operationEvent(op,'transport-delayed',{detail});
+  }
+  async _cancelHttpOperation(op,token=this.#token) {
+    try {
+      if(!op.requestId)throw new StationError('Operation request identity is unavailable','CANCEL_UNCONFIRMED');
+      const result=await this._request(`/api/operations/${encodeURIComponent(op.requestId)}/cancel`,
+        {operator_session_id:op.principal},token);
+      if(result.accepted!==true)throw new StationError(result.reason||'Scoped operation cancellation was not accepted','CANCEL_UNCONFIRMED');
+      return true;
+    } catch(error) {
+      this._error(new StationError('Scoped operation cancellation could not be confirmed: '+error.message,'CANCEL_UNCONFIRMED'));
+      return false;
+    }
   }
 
   _socketProtocols() {

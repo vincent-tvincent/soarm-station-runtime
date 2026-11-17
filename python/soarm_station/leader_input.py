@@ -114,20 +114,23 @@ def select_gripper_command(sample, follow, last_sent, initial_reference, followe
     raise ValueError('Follower gripper reference unavailable; no default jaw target is generated')
 
 
-def bounded_leader_target(measured,limits):
-    """Keep all axes live when the leader travels beyond the follower's range."""
+def leader_target(measured,joint_names):
+    """Preserve calibrated body angles; normalize only the jaw percentage."""
     values=measured.get('positions',{})
-    if not limits or set(values)!=set(limits):raise ValueError('Complete follower joint limits are required')
+    if not joint_names or set(values)!=set(joint_names):raise ValueError('Complete follower joint names are required')
     target=copy.deepcopy(measured)
     for name,value in values.items():
-        low,high=limits[name]['min_rad'],limits[name]['max_rad']
-        if any(type(v) not in (int,float) or not math.isfinite(v) for v in (value,low,high)) or low>=high:
-            raise ValueError('Invalid leader sample or follower limits: '+name)
-        target['positions'][name]=max(low,min(high,value))
+        if type(value) not in (int,float) or not math.isfinite(value):
+            raise ValueError('Invalid calibrated leader angle: '+name)
     gripper=measured.get('gripper')
     if type(gripper) not in (int,float) or not math.isfinite(gripper):raise ValueError('Invalid leader gripper sample')
     target['gripper']=max(0.,min(100.,gripper))
     return target
+
+
+def bounded_leader_target(measured,limits):
+    """Compatibility name: legacy limit values no longer constrain body angles."""
+    return leader_target(measured,list(limits) if limits else None)
 
 
 async def sample_until_control_ends(sampler,receiver):
@@ -361,9 +364,21 @@ class InputHostBridge:
                         if body["type"]=="grant":
                             first_grant=latest["grant"] is None
                             latest.update(grant=body["grant"],received=time.monotonic())
+                            rejected=latest.get('input_rejection')
+                            if rejected:
+                                accepted=body['grant'].get('last_sequence')
+                                if ((type(rejected.get('sequence')) is int and type(accepted) is int and accepted>=rejected['sequence'])
+                                    or body['grant'].get('last_accepted_input_id') not in (None,'',rejected.get('accepted_before'))):
+                                    latest.pop('input_rejection',None)
                             if first_grant:
                                 await self.emit(type="state",run_id=run_id,state="READY",reason="Follower ready; following from its current reference",operation_id=body["grant"].get("operation_id"))
                         elif body["type"]=="state":latest.update(state=body.get("state"),feedback_received=time.monotonic())
+                        elif body["type"]=="input_rejected":
+                            # Per-frame rejection does not end ownership. The
+                            # producer reads a fresh sample under its next grant.
+                            latest['input_rejection']={'reason':str(body.get('reason','Input rejected'))[:512],
+                                'sequence':body.get('sequence'),
+                                'accepted_before':(latest.get('grant') or {}).get('last_accepted_input_id')}
                         elif body["type"]=="error":raise RuntimeError(body["reason"])
                         elif body["type"]=="result":
                             result=body.get('result') or {}
@@ -398,7 +413,7 @@ class InputHostBridge:
                         # Read the current setting after the asynchronous native read.
                         # Only the outgoing jaw target changes; retain the real leader
                         # sample for the pose overlay and continue all body joints.
-                        body=bounded_leader_target(sample['body'],request.get('joint_limits'))
+                        body=leader_target(sample['body'],request['joint_names'])
                         follow=request.get('follow_gripper',True)
                         body['gripper']=select_gripper_command(body.get('gripper'),follow,last_sent_gripper,
                             pickup_reference['gripper'] if pickup_reference else request.get('gripper_reference'),latest['state'])
@@ -410,7 +425,7 @@ class InputHostBridge:
                                 "input_id":uuid.uuid4().hex,"body":body})
                             last_sent_gripper=body['gripper']
                         if tick-last_report>=.1:
-                            reason=latest["grant"].get("reason","")
+                            reason=(latest.get('input_rejection') or {}).get('reason') or latest["grant"].get("reason","")
                             running=(latest["state"] or {}).get("phase")=="ACTIVE" and (latest["state"] or {}).get("operation_id")==grant.get("operation_id")
                             await self.emit(type="state",run_id=run_id,state="ALIGNING" if not picked_up else "RUNNING" if running else "READY",
                                 reason="Align the leader with the held follower pose; there is no time limit" if not picked_up else reason or ("" if running else "Following from current follower reference"),operation_id=grant.get("operation_id"),pose=sample["body"],

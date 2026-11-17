@@ -55,7 +55,7 @@ class WorkflowNode(BaseNode):
             condition='FEEDBACK_UNAVAILABLE' if stale else ''
             if not stale:
                 q=np.asarray(cached[0].position)
-                if state.phase in ('ACTIVE','READY','PREPARING') or n not in self.references:self.references[n]=q
+                if state.phase in ('ACTIVE','READY','PREPARING','PAUSED') or n not in self.references:self.references[n]=q
                 elif np.max(np.abs(q-self.references[n]))>cfg.get('drift_rad',.15):condition='UNEXPECTED_POSE_CHANGE'
             if condition:
                 key=(n,condition);self.pending.setdefault(key,t)

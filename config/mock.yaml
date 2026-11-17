@@ -10,11 +10,11 @@ arms:
     backend: mock
     base_frame: arm1_base
     joints:
-      - {name: shoulder_pan, min_rad: -2.8, max_rad: 2.8, velocity_rad_s: 1.5}
-      - {name: shoulder_lift, min_rad: -1.8, max_rad: 1.8, velocity_rad_s: 1.5}
-      - {name: elbow_flex, min_rad: -1.8, max_rad: 1.8, velocity_rad_s: 1.5}
-      - {name: wrist_flex, min_rad: -1.8, max_rad: 1.8, velocity_rad_s: 2.0}
-      - {name: wrist_roll, min_rad: -3.14, max_rad: 3.14, velocity_rad_s: 2.0}
+      - {name: shoulder_pan, display_min_rad: -2.8, display_max_rad: 2.8, velocity_rad_s: 1.5}
+      - {name: shoulder_lift, display_min_rad: -1.8, display_max_rad: 1.8, velocity_rad_s: 1.5}
+      - {name: elbow_flex, display_min_rad: -1.8, display_max_rad: 1.8, velocity_rad_s: 1.5}
+      - {name: wrist_flex, display_min_rad: -1.8, display_max_rad: 1.8, velocity_rad_s: 2.0}
+      - {name: wrist_roll, display_min_rad: -3.14, display_max_rad: 3.14, velocity_rad_s: 2.0}
     gripper: {name: gripper, unit: percent, velocity_percent_s: 100}
 cameras:
   - {id: forward, backend: mock, width: 320, height: 240, fps: 30}

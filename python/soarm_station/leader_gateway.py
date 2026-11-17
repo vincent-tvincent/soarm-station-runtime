@@ -204,7 +204,6 @@ class LeaderHostRegistry:
         if not resource:raise ValueError('Follower resource metadata unavailable')
         joints=[j['name'] for j in resource['joints']]
         if set(joints)!=set(device.get('joint_names') or []):raise ValueError('Configured leader mapping does not match follower joints')
-        limits={j['name']:{'min_rad':j['min'],'max_rad':j['max']} for j in resource['joints']}
         hz=body.get('hz',100)
         if type(hz) not in (int,float) or not 50<=hz<=100:raise ValueError('Leader input rate must be 50..100 Hz')
         follow=body.get('follow_gripper',True)
@@ -235,7 +234,7 @@ class LeaderHostRegistry:
                 'last_browser':time.monotonic()}
         host.update(active=active,state='STARTING',reason='Opening selected leader and checking calibration',latest_pose=None,last_sample_report=None)
         try:
-            await host['ws'].send_json({'type':'start',**{k:v for k,v in active.items() if k!='last_browser'},'joint_names':joints,'joint_limits':limits})
+            await host['ws'].send_json({'type':'start',**{k:v for k,v in active.items() if k!='last_browser'},'joint_names':joints})
         except Exception:
             host['active']=None;host['state']='OFFLINE';raise
         return web.json_response({'accepted':True,'run_id':run_id,'state':'STARTING','reason':host['reason'],

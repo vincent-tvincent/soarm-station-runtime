@@ -96,7 +96,7 @@ def project_motor_issues(snapshot,definitions=None,*,arm_config=None,max_feedbac
     if match and by_id(match[1]):positives[by_id(match[1])]=('fault','FEEDBACK_ERROR',source)
     match=re.fullmatch(r'Calibration mismatch:\s*(\S+)',normalized)
     if match and named(match[1]):positives[named(match[1])]=('fault','CALIBRATION_MISMATCH',source)
-    limited=stats.get('limited_actuators')
+    limited=stats.get('lagging_actuators') if stats.get('tracking_state')=='TRACKING_LAG' else stats.get('limited_actuators')
     valid_limited=isinstance(limited,(list,tuple)) and all(isinstance(name,str) for name in limited)
     limited_names={named(name) for name in limited} if valid_limited else set()
     if normalized=='TRACKING_ENVELOPE_LOST' and stats.get('tracking_state')=='REFERENCE_OUTSIDE_ENVELOPE' and valid_limited:
@@ -116,7 +116,7 @@ def project_motor_issues(snapshot,definitions=None,*,arm_config=None,max_feedbac
     settings=(arm_config or {}).get('manual_control',{})
     indicator_s=_number(settings.get('stall_indicator_s',1.)) if isinstance(settings,dict) else None
     runtime_clear=(snapshot.get('error')=='' and phase in ('ACTIVE','IDLE') and valid_limited
-                   and tracking in ('FOLLOWING','LEAD_LIMITED'))
+                   and tracking in ('FOLLOWING','LEAD_LIMITED','TRACKING_LAG'))
     sequence=snapshot.get('sequence')
     result={}
     for name,definition in definitions.items():
@@ -141,7 +141,7 @@ def project_motor_issues(snapshot,definitions=None,*,arm_config=None,max_feedbac
         elif (definition.get('role')=='joint' and phase=='ACTIVE' and row['feedback_fresh']
               and name in limited_names and tolerance is not None and tolerance>0
               and tracking_error is not None and tracking_error>tolerance
-              and tracking=='LEAD_LIMITED' and indicator_s is not None and indicator_s>0
+              and tracking in ('LEAD_LIMITED','TRACKING_LAG') and indicator_s is not None and indicator_s>0
               and _number(progress.get(name)) is not None and progress[name]>=indicator_s):
             row.update(state='stall',active=True,kind='stall',code='TRACKING_NOT_PROGRESSING',source='runtime_progress',
                        reason=f'No measured progress for {progress[name]:.1f} s; tracking error {tracking_error:.3f} rad.')

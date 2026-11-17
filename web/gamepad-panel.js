@@ -1,4 +1,5 @@
 import { GamepadInputEngine } from './gamepad-input.js';
+import { isTransientTransportError } from './transport.js';
 
 const copy = value => structuredClone(value);
 const percent = value => Number.isFinite(value) ? Math.round(value * 100) : 0;
@@ -246,7 +247,7 @@ export class GamepadPanel {
       this.errorMessage='';
     } catch(error) {
       if (sourceEpoch!==this.sourceEpoch || !m.currentIntent(context)) return;
-      if (error.status===409) return;
+      if (error.status===409 || ['NOT_READY','ACK_TIMEOUT'].includes(error.code) || isTransientTransportError(error)) return;
       this.suspend(); this.errorMessage=error.message; m.onError(error);
     } finally { this.solving=false; if (this.pendingMotion === pending) this.pendingMotion = null; }
   }

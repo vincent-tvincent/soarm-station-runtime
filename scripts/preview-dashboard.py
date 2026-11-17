@@ -171,6 +171,10 @@ class Preview:
         return self.response({'success':True,'measured_torque':desired,'message':'Mock torque '+desired+'; no hardware','mock':True})
 
     def submit(self, body):
+        identifier = body.get("request_id") or "mock-request-" + uuid.uuid4().hex[:12]
+        if identifier in self.operations:
+            if self.operations[identifier]["body"] != body:raise ValueError("request_id already identifies a different request")
+            return identifier
         arm = self.arm(body.get("arm_id"))
         if not arm["permission"]:
             raise ValueError("Enable mock control first")
@@ -180,7 +184,6 @@ class Preview:
             raise ValueError("Unsupported operation/input mode")
         if any(not operation["done"] and operation["arm_id"] == body["arm_id"] for operation in self.operations.values()):
             raise ValueError("BUSY")
-        identifier = "mock-request-" + uuid.uuid4().hex[:12]
         operation_id = "mock-operation-" + uuid.uuid4().hex[:12]
         arm.update(phase="READY", operation_type=body["operation_type"], operation_id=operation_id)
         arm["operation_epoch"] += 1
@@ -244,8 +247,11 @@ class Preview:
     async def cancel(self, request):
         operation = self.operations.get(request.match_info["id"])
         if not operation:raise ValueError("Unknown mock request")
-        self.hold_arm(operation["arm_id"])
-        return self.response({"accepted":True,"stopped":True,"mock":True})
+        body=await request.json()
+        if body.get("operator_session_id")!=operation["body"].get("operator_session_id","browser"):
+            raise ValueError("Operation belongs to another operator session")
+        if not operation["done"]:self.hold_arm(operation["arm_id"])
+        return self.response({"accepted":True,"done":True,"stopped":True,"mock":True})
 
     async def history(self, request):
         arm_id=request.query.get("arm", "arm1");limit=min(500,max(0,int(request.query.get("limit",100))))

@@ -1,5 +1,8 @@
 # Continuous-operation revision — November 13, 2026
 
+This is the November 13 implementation record. The later servo-authority and
+nonfatal teleoperation behavior is documented in [the current runtime reference](runtime-reference.md#operations-and-permission).
+
 This dated report uses the package/interface names of its tested revision. For current SO-Arm Station commands, see [startup](startup-and-debug.md) and [name migration](name-migration.md).
 
 The user requested removal/revision of unnecessary actuation safeguards that interrupt smooth continuous operation. The planning chat reviewed the exact deployed baseline `048fdf52906804d82d028eacbd846658f529650e`; the implementation chat remained the sole code writer. No PID, calibration, travel/speed limits, 0.12-rad target-lead bound, source-freshness window, torque-loss protection or support-torque policy was relaxed.

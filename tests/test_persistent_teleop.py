@@ -19,7 +19,7 @@ def test_persistent_teleop_has_no_inherited_input_liveness_total_or_tracking_exp
     for _ in range(8):tick(arm,clock,60.,follow=False)
     assert (arm.session,arm.op['operation_id'],arm.epoch)==identity
     assert arm.permission and arm.phase=='ACTIVE' and not arm.hold_pending
-    assert arm.stats['limited_actuators'] and arm.backend.writes==8
+    assert arm.stats['lagging_actuators'] and not arm.stats['limited_actuators'] and arm.backend.writes==8
     with pytest.raises(ValueError,match='Expired or unknown input window'):
         arm.input({**old,'sequence':2})
     assert arm.op['operation_id']==identity[1] and arm.permission
@@ -49,37 +49,39 @@ def test_stale_feedback_pauses_only_writes_and_resumes_latest_target_without_ref
 
 
 @pytest.mark.parametrize('sign',[-1,1])
-def test_one_lagging_joint_does_not_freeze_others_and_reversal_recovers_by_slew(setup,sign):
+def test_lagging_joints_keep_advancing_and_reverse_by_slew_without_software_envelope(setup,sign):
     arm,clock=setup;begin(arm,persistent_target=True)
     lag='shoulder_lift';healthy='shoulder_pan'
     arm.commanded_q[lag]=sign*.2
     previous=dict(arm.commanded_q)
     arm.input(frame(arm,{'positions':{**arm.q,lag:sign*.8,healthy:.5},'gripper':50.}))
     for _ in range(100):
+        previous=dict(arm.commanded_q)
         arm.q[healthy]=arm.backend.q[healthy]
         tick(arm,clock,.01,follow=False)
-        assert arm.commanded_q[lag]==previous[lag]  # No farther outward while measured pose lags.
+        assert sign*(arm.commanded_q[lag]-previous[lag])>=0
+        assert abs(arm.commanded_q[lag]-previous[lag])<=.015+1e-9
         assert arm.op is not None and arm.permission
     assert arm.commanded_q[healthy]==pytest.approx(.5)
-    assert arm.stats['tracking_state']=='REFERENCE_OUTSIDE_ENVELOPE'
-    assert arm.stats['limited_actuators']==[lag]
+    assert arm.commanded_q[lag]==pytest.approx(sign*.8)
+    assert arm.stats['tracking_state']=='TRACKING_LAG'
+    assert arm.stats['lagging_actuators']==[lag] and not arm.stats['limited_actuators']
     reverse={**arm.q,lag:-sign*.2,healthy:.5}
     arm.input(frame(arm,{'positions':reverse,'gripper':50.},identifier='reverse'))
     speed=next(j['velocity_rad_s'] for j in arm.config['joints'] if j['name']==lag)
-    lead=arm.config.get('max_target_lead_rad',.12)
-    recovery_ticks=math.ceil((.2-lead)/(speed*.01))+2
+    recovery_ticks=math.ceil(.6/(speed*.01))+2
     for _ in range(recovery_ticks):
         before=arm.commanded_q[lag];tick(arm,clock,.01,follow=False)
         assert abs(arm.commanded_q[lag]-before)<=speed*.01+1e-9
         assert sign*(arm.commanded_q[lag]-before)<=0
         assert arm.commanded_q[healthy]==pytest.approx(.5)
-    assert abs(arm.commanded_q[lag])<lead and arm.op is not None
-    assert arm.stats['tracking_state']!='REFERENCE_OUTSIDE_ENVELOPE'
+    assert abs(arm.commanded_q[lag])<.2 and arm.op is not None
+    assert arm.stats['tracking_state']=='TRACKING_LAG'
 
 
 def test_persistent_admission_keeps_existing_valid_reference_instead_of_reanchoring(setup):
     arm,clock=setup;arm.commanded_q={**arm.q,'shoulder_lift':.2};arm.commanded_gripper=50.
-    with pytest.raises(ValueError,match='REFERENCE_OUTSIDE_TRACKING_ENVELOPE'):arm._reference()
+    assert arm._reference()[0]['shoulder_lift']==.2
     begin(arm,persistent_target=True)
     assert arm.commanded_q['shoulder_lift']==.2 and arm.q['shoulder_lift']==0.
 

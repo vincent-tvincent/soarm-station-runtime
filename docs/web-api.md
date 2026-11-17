@@ -6,6 +6,25 @@ Use an external LLM/MCP harness, CV pipeline or rule-based application to decide
 
 ## Connection, access and discovery
 
+For HTTP actions, provide a unique `request_id` (1–64 letters, digits, `_`, `.`,
+`:`, or `-`). POST `/api/operate` returns that same ID while ROS admission may
+still be pending. GET `/api/operations/{id}` reports `done: false` and empty
+feedback until real feedback arrives; receiving an ID does not mean the robot
+has accepted or executed the command. Identical bodies/principals with the same
+retained ID do not execute twice; conflicting reuse returns 409. The gateway
+retains up to 256 recent request records, pruning completed records first.
+Never reuse an ID or automatically replay a command after an uncertain response.
+
+POST `/api/operations/{id}/cancel` with `{"operator_session_id":"..."}` cancels
+only that request's ROS action. Cancellation before admission applies to its
+late goal handle; it never issues an arm-wide Hold. `accepted: true` means the
+scoped cancellation request was recorded, while `done` becomes true on an actual
+result or definite rejection. Cancellation received before a matching POST records a bounded, principal-scoped
+intent and returns `done: false`; a later matching POST is suppressed without
+sending a ROS goal. Unmatched cancellation intents are never silently evicted;
+when their bounded store is full, additional unknown cancellations return HTTP 503.
+Uncertain outcomes remain explicit. The user-facing Hold button remains the explicit arm-wide action.
+
 `GET /api/status` includes `readiness: {state, components}`. Each component has
 `id`, `label`, `state`, `required` and `detail`; component states are `ready`,
 `starting`, `waiting`, `fault` or `offline`. IDs are `controller:<arm>`,
@@ -14,7 +33,7 @@ readiness, not permission to move. Input hosts are optional. Camera readiness
 requires both native capture and recent source frames received by the dashboard.
 
 `GET /api/history` returns `available` and `reason` alongside records/events.
-Unavailable storage returns HTTP503 with `available: false`; clients should
+Unavailable storage returns HTTP 503 with `available: false`; clients should
 show that state and retry later, rather than interpreting it as an empty history.
 
 The configured gateway normally listens on HTTPS port 8443. Trust the installation's CA/certificate. The default access middleware accepts actual loopback and Tailscale socket peers; otherwise supply `Authorization: Bearer <SOARM_STATION_TOKEN>`. `web.trusted_network_access: false` requires the bearer for those peers too. The token is separate from the client-generated `operator_session_id` used for motion ownership.
@@ -251,10 +270,11 @@ Server text messages are:
 
 - `{"type":"grant","grant":{...OperationFeedback...}}`: readiness, identity, current window and acceptance acknowledgments.
 - `{"type":"state","state":{...},"joints":{...}}`: cached status and measured joints.
+- `{"type":"input_rejected","reason":"..."}`: one invalid/obsolete sample was discarded; the established session remains open. Generate fresh input instead of replaying that frame.
 - `{"type":"result","result":{...}}`: terminal result.
 - `{"type":"error","reason":"..."}`: rejected or interrupted connection.
 
-After `stream_ready`, generate fresh targets using the current grant. A command frame is:
+After `stream_ready` (including `PAUSED` grants), generate fresh targets using the current grant. A command frame is:
 
 ```json
 {
@@ -273,7 +293,7 @@ After `stream_ready`, generate fresh targets using the current grant. A command 
 }
 ```
 
-Replace the illustrative one-joint dictionary with the entire discovered body-joint set. Copy `operation_epoch` and all identities from actual feedback; example values are not defaults. The first complete target may differ from the current pose; the controller converges under its existing speed and lead limits. Increase `sequence` for every transmitted frame, not just target changes. Track `last_accepted_input_id` and `last_applied_input_id`; source validity and actual dispatch are distinct.
+Replace the illustrative one-joint dictionary with the entire discovered body-joint set. Copy `operation_epoch` and all identities from actual feedback; example values are not defaults. The first complete target may differ from the current pose; the controller converges with velocity slew; there is no software angle or measured-lead clamp. Increase `sequence` for every transmitted frame, not just target changes. Track `last_accepted_input_id` and `last_applied_input_id`; source validity and actual dispatch are distinct.
 
 The host supplies approximately 250-ms windows. Track their usable lifetime against your own local elapsed time, accounting for response delay; never compare monotonic clocks between hosts or re-stamp a cached sensor sample as fresh. The current native operator requests 50–120 Hz input, while the device dispatch loop remains approximately 100 Hz. Keep latest targets rather than queuing stale poses across latency/reconnect.
 

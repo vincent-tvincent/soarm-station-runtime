@@ -112,11 +112,9 @@ class ManualControl:
         self.names = tuple(j['name'] for j in self.config['joints'])
         if not self.names or len(set(self.names)) != len(self.names):
             raise ValueError('Unique configured body joints required')
-        self.lower = np.array([_finite(j['min_rad'], 'min_rad') for j in self.config['joints']])
-        self.upper = np.array([_finite(j['max_rad'], 'max_rad') for j in self.config['joints']])
         self.velocity = np.array([_finite(j['velocity_rad_s'], 'velocity_rad_s') for j in self.config['joints']])
-        if np.any(self.lower >= self.upper) or np.any(self.velocity <= 0):
-            raise ValueError('Invalid configured joint bounds/velocity')
+        if np.any(self.velocity <= 0):
+            raise ValueError('Invalid configured joint velocity')
         mapping = self.config.get('urdf_joint_names', list(self.names))
         if isinstance(mapping, dict): mapping = [mapping[n] for n in self.names]
         if len(mapping) != len(self.names) or len(set(mapping)) != len(mapping):
@@ -159,8 +157,14 @@ class ManualControl:
                 if np.linalg.norm(axis) < 1e-10: raise ValueError('Zero movable joint axis')
                 axis /= np.linalg.norm(axis)
             limit = element.find('limit')
-            bounds = None if limit is None or limit.get('lower') is None or limit.get('upper') is None else (
-                _finite(float(limit.get('lower')), 'URDF lower limit'), _finite(float(limit.get('upper')), 'URDF upper limit'))
+            # Limits are model/display metadata, used only for the jaw drawing.
+            # Body FK/IK never treats them as actuator admission constraints.
+            bounds = None
+            if limit is not None:
+                try:
+                    low,high=float(limit.get('lower')),float(limit.get('upper'))
+                    if math.isfinite(low) and math.isfinite(high) and low<high:bounds=(low,high)
+                except (TypeError,ValueError):pass
             joint = {'name': name, 'kind': kind, 'parent': parent, 'child': child, 'origin': _origin(element), 'axis': axis, 'mimic': element.find('mimic') is not None, 'bounds': bounds}
             joints[name] = joint; children[child] = joint
         if self.tcp not in links: raise ManualUnavailable('Configured TCP link is absent from URDF')
@@ -186,12 +190,10 @@ class ManualControl:
         self.branch = jaw if jaw and jaw['name'] not in moving else None
         if not self.frame: self.frame = self.model_base
 
-    def _q(self, positions, bounded=False):
+    def _q(self, positions):
         if not isinstance(positions, dict) or set(positions) != set(self.names):
             raise ValueError('Exactly the configured body joint names are required')
         result = np.array([_finite(positions[n], n) for n in self.names])
-        if bounded and (np.any(result < self.lower-1e-10) or np.any(result > self.upper+1e-10)):
-            raise ValueError('Joint target outside configured limits')
         return result
 
     @staticmethod
@@ -215,7 +217,7 @@ class ManualControl:
         return transform, origins, axes, frames
 
     def fk(self, positions_rad, gripper_percent):
-        """Measured positions may be outside target bounds; FK still reports them."""
+        """Report geometry for every finite named body pose."""
         q = self._q(positions_rad); g = self._gripper(gripper_percent)
         pose, origins, axes, frames = self._forward(q)
         semantics, azimuth = _semantics(pose[:3, :3] @ self.operator_rotation)
@@ -314,7 +316,8 @@ class ManualControl:
                 'speed_levels': [{'level': i+1, 'translation_m_s': s[0], 'orientation_rad_s': s[1], 'gripper_percent_s': s[2]} for i, s in enumerate(SPEEDS)],
                 'position_only': True, 'analog_rates': True, 'poses': poses, 'presets': {name: value['available'] for name, value in poses.items()}, 'wrist_roll_reference_rad': reference,
                 'roll_presets_rad': None if reference is None else {'minus_90': reference-math.pi/2, 'reference': reference, 'plus_90': reference+math.pi/2},
-                'geometry_is_collision_check': False}
+                'geometry_is_collision_check': False,'joint_angle_authority':'servo',
+                'application_angle_limits':False}
 
     def _task_jacobian(self, pose, origins, axes, semantics, orientation_rows, free, reference):
         """Derivative of position plus the existing scaled semantic residuals."""
@@ -446,7 +449,7 @@ class ManualControl:
         """Common bounded integration/IK; producer-specific mapping is already complete."""
         self._q(positions_rad)  # Retain measured-state validation even when an admitted reference is supplied.
         self._gripper(gripper_percent)
-        q0 = self._q(reference_positions if reference_positions is not None else positions_rad, bounded=True)
+        q0 = self._q(reference_positions if reference_positions is not None else positions_rad)
         g0 = self._gripper(reference_gripper if reference_gripper is not None else gripper_percent)
         dt = _finite(dt_s, 'dt_s')
         if dt < 0: raise ValueError('dt_s must be nonnegative')
@@ -472,7 +475,8 @@ class ManualControl:
             roll_input = rates['roll_rad_s'] != 0.
             if not roll_input and roll_joint in self.names: free.remove(self.names.index(roll_joint))
             rows = [] if position_only else [0, 1] if roll_input else [0]
-            lower = np.maximum(self.lower, q0-self.velocity*dt); upper = np.minimum(self.upper, q0+self.velocity*dt)
+            # A per-step velocity trust region, never an absolute angle box.
+            lower = q0-self.velocity*dt; upper = q0+self.velocity*dt
             result = None
             fraction = self._starting_fraction(q0, pose, origins, axes, semantics, translation, angles,
                                                rows, free, lower, upper, reference)
@@ -503,7 +507,7 @@ class ManualControl:
         pose = self.settings.get('poses', {}).get(name)
         if not isinstance(pose, dict) or not isinstance(pose.get('positions'), dict):
             raise ManualUnavailable('No configured '+name+' pose')
-        self._q(pose['positions'], bounded=True)
+        self._q(pose['positions'])
         if pose.get('gripper') not in (None, 'preserve'): self._gripper(pose['gripper'])
         return pose
 
@@ -513,7 +517,7 @@ class ManualControl:
         pose = self._pose(name); positions = dict(pose['positions'])
         wrist = self.settings.get('wrist_roll_joint', 'wrist_roll')
         if preserve_wrist and wrist in positions: positions[wrist] = positions_rad[wrist]
-        self._q(positions, bounded=True)
+        self._q(positions)
         if pose.get('gripper') not in (None, 'preserve'): jaw = self._gripper(pose['gripper'])
         target = {'positions': positions, 'gripper': jaw, 'gripper_unit': 'percent'}
         return {'status': 'OK', 'name': name, 'target': target,
@@ -534,6 +538,6 @@ class ManualControl:
         wrist = self.settings.get('wrist_roll_joint', 'wrist_roll')
         if wrist not in positions: raise ManualUnavailable('Configured wrist-roll joint is absent')
         positions[wrist] = self._roll_reference()+offsets[name]
-        self._q(positions, bounded=True); jaw = self._gripper(gripper_percent)
+        self._q(positions); jaw = self._gripper(gripper_percent)
         return {'status': 'OK', 'name': name, 'target': {'positions': positions, 'gripper': jaw, 'gripper_unit': 'percent'},
                 'geometry': self.fk(positions, jaw) if self.model_error is None else None}

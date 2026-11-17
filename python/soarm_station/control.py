@@ -31,12 +31,14 @@ class ArmController:
         self.last_frame_sequence=None;self.last_frame_window_remaining_ms=None;self.rejected_frames=0;self.hold_context={}
         self.limits=config.get('operation_limits',{})
         self.policy_preparation=None;self.model=None;self.model_state='IDLE';self.model_reason=''
-        self.tracking_wait={};self.tracking_anchor={};self.tracking_outside_since=None
+        self.tracking_wait={};self.tracking_anchor={}
         self.stats={'lead_limited_ticks':0,'tracking_wait_ticks':0,'dispatch_paused':False,'pause_reason':''}
         self.completed={}; self.accepted={}; self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='policy-'+self.id)
         self.job=None; self.plan_job=None; self.policy=None; self.policy_name=''; self.tick_times=deque(maxlen=10000)
         self.thread=threading.Thread(target=self.run,daemon=True,name='arm-'+self.id)
     def start(self): self.thread.start()
+    def _direct_stream(self):
+        return bool(self.op and self.op.get('operation_type')=='DIRECT' and self.op.get('mode')=='STREAM')
     def _persistent_teleop(self):
         return bool(self.op and self.op.get('persistent_target') is True
             and self.op.get('operation_type')=='DIRECT' and self.op.get('mode')=='STREAM')
@@ -52,7 +54,7 @@ class ArmController:
                 tick=now(); q,g=self.backend.read(); stamp=time.time_ns()
                 with self.lock:
                     self.q=q; self.gripper=g; self.sample_time=now(); self.sample_ns=stamp; self.sample_sequence+=1
-                    if tick-last_tick>.3 and self.op and not self._persistent_teleop(): self._hold('CONTROL_GAP')
+                    if tick-last_tick>.3 and self.op and not self._direct_stream(): self._hold('CONTROL_GAP')
                     if tick>=next_health:
                         self.health_data=self.backend.health();self.health_time_ns=time.time_ns();next_health=tick+1
                     if self.torque_request is not None:self._process_torque()
@@ -198,25 +200,24 @@ class ArmController:
         confirmed=self.hold_event.wait(1.5)
         return {'success':confirmed and self.phase!='FAULT','message':self.error or reason}
     def _target(self,body):
+        if not isinstance(body,dict):raise ValueError('Joint target must be an object')
         q=body.get('positions',{})
         names={j['name'] for j in self.config['joints']}
-        if set(q)!=names: raise ValueError('Full named joint set required')
+        if not isinstance(q,dict) or set(q)!=names: raise ValueError('Full named joint set required')
         for j in self.config['joints']:
             v=q[j['name']]
-            if not isinstance(v,(int,float)) or not math.isfinite(v) or not j['min_rad']<=v<=j['max_rad']:
-                raise ValueError('Joint outside limits: '+j['name'])
+            if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v):
+                raise ValueError('Joint target must be finite: '+j['name'])
         g=body.get('gripper',self.commanded_gripper if self.commanded_gripper is not None else self.gripper)
-        if not math.isfinite(g) or not 0<=g<=100: raise ValueError('Gripper requires percent in [0,100]')
+        if isinstance(g,bool) or not isinstance(g,(int,float)) or not math.isfinite(g) or not 0<=g<=100:
+            raise ValueError('Gripper requires percent in [0,100]')
         if body.get('gripper_unit','percent')!='percent': raise ValueError('Unknown gripper unit')
         return dict(q),float(g)
-    def _reference(self,allow_outside=False):
+    def _reference(self):
         if not self.q or now()-self.sample_time>.15:raise ValueError('Fresh measured feedback unavailable')
         q=dict(self.commanded_q) if self.commanded_q is not None else dict(self.q)
         g=self.commanded_gripper if self.commanded_gripper is not None else self.gripper
         self._target({'positions':q,'gripper':g})
-        lead=self.config.get('max_target_lead_rad',.12)
-        if not allow_outside and any(abs(q[n]-self.q[n])>lead+.002 for n in q):
-            raise ValueError('REFERENCE_OUTSIDE_TRACKING_ENVELOPE')
         return q,float(g)
     def _trajectory(self,points,reference=None):
         if not points or len(points)>256:raise ValueError('Trajectory requires 1..256 points')
@@ -268,7 +269,7 @@ class ArmController:
             constraints=request.get('constraints',{})
             if constraints.get('required_clearance_m',0)>0 or constraints.get('cartesian_path',False):
                 raise ValueError('No configured collision/path validator')
-            reference=self._reference(allow_outside=persistent)
+            reference=self._reference()
             requested=request.get('duration_s')
             if requested==0:requested=None
             if requested is not None:
@@ -304,7 +305,7 @@ class ArmController:
             elif mode=='STREAM' and request.get('points'):raise ValueError('STREAM cannot contain inline points')
             if mode=='STREAM':
                 ceiling=self.limits.get('max_stream_duration_s')
-                if persistent:
+                if kind=='DIRECT':
                     duration=requested # Connection-owned teleoperation has no inherited total-duration ceiling.
                 else:
                     if ceiling is not None and requested is not None and requested>ceiling:raise ValueError('Explicit stream duration exceeds profile limit')
@@ -318,7 +319,7 @@ class ArmController:
             self.semantic_revision=0;self.semantic_record=None;self.accepted={}
             self.target=None;self.path=path;self.plan_job=None;self.error='';self.phase='READY'
             self.commanded_q,self.commanded_gripper=reference
-            self.tracking_wait={};self.tracking_anchor={};self.tracking_outside_since=None
+            self.tracking_wait={};self.tracking_anchor={}
             self.stats.update(dispatch_paused=False,pause_reason='')
             t=now()
             self.op={**copy.deepcopy(request),'operation_id':uid(),'operation_epoch':self.epoch,'instruction':instruction,
@@ -346,7 +347,8 @@ class ArmController:
                     'operation_epoch':self.epoch,'window_id':window,'window_valid_for_ms':int((self.windows[window]-t)*1000),
                     'last_accepted_input_id':self.last_input,'last_applied_input_id':self.last_applied,
                     'intent_generation':self.generation,'last_sequence':self.last_sequence,
-                    'last_accepted_semantic_revision':self.semantic_revision,'reason':self.last_input_error}
+                    'last_accepted_semantic_revision':self.semantic_revision,
+                    'reason':self.last_input_error or self.stats.get('pause_reason','')}
     def input(self,frame):
         with self.lock:
             self.last_frame_sequence=frame.get('sequence')
@@ -399,20 +401,29 @@ class ArmController:
         if frame_kind=='END':self._hold('STREAM_END',completed=True)
         return {'accepted':True,'input_id':self.last_input,'intent_generation':self.generation,'semantic_revision':self.semantic_revision}
 
+    def _pause_direct(self,reason,*,discard_sample):
+        if discard_sample:self.target=None
+        self.phase='PAUSED'
+        self.tracking_wait.clear();self.tracking_anchor.clear()
+        self.stats.update(dispatch_paused=True,pause_reason=reason,tracking_state='WAITING',
+            limited_actuators=[],lagging_actuators=[])
     def _tick(self,t,dt):
         if not self.op or self.torque_request is not None: return
         op=self.op
         persistent=self._persistent_teleop()
-        if not self.permission or (op['deadline'] is not None and t>op['deadline']) or (not persistent and op['requires_liveness'] and t-op['last_live']>.6):
+        direct=self._direct_stream()
+        if not self.permission or (op['deadline'] is not None and t>op['deadline']) or (not direct and op['requires_liveness'] and t-op['last_live']>.6):
             self._hold('OPERATION_OR_LIVENESS_EXPIRED');return
         if t-self.sample_time>.15:
-            if persistent:
-                self.stats.update(dispatch_paused=True,pause_reason='FEEDBACK_STALE')
+            if direct:
+                self._pause_direct('FEEDBACK_STALE',discard_sample=not persistent)
             else:self._hold('FEEDBACK_EXPIRED')
             return
+        if direct and not persistent:
+            if self.target is None or t-op['last_direct']>op.get('input_timeout_s',.25) or (op['requires_liveness'] and t-op['last_live']>.6):
+                self._pause_direct('AWAITING_FRESH_INPUT',discard_sample=True);return
         self.stats.update(dispatch_paused=False,pause_reason='')
-        if op['mode']=='STREAM' and op['operation_type']=='DIRECT' and not op.get('persistent_target',False) and op['last_direct'] and t-op['last_direct']>op.get('input_timeout_s',.25):
-            self._hold('DIRECT_INPUT_EXPIRED');return
+        if self.phase=='PAUSED':self.phase='READY'
         if self.plan_job is not None:
             if not self.plan_job.done():return
             future=self.plan_job;self.plan_job=None
@@ -456,57 +467,25 @@ class ArmController:
     def _limit(self,target,gripper,t,dt):
         previous=self.commanded_q if self.commanded_q is not None else self.q
         previous_g=self.commanded_gripper if self.commanded_gripper is not None else self.gripper
-        lead=self.config.get('max_target_lead_rad',.12)
-        outside_names=[n for n in previous if abs(previous[n]-self.q[n])>lead+1e-9]
-        persistent=self._persistent_teleop()
-        if outside_names:
-            self.stats['tracking_wait_ticks']+=1
-            if self.tracking_outside_since is None:self.tracking_outside_since=t
-            self.stats['tracking_state']='REFERENCE_OUTSIDE_ENVELOPE';self.stats['limited_actuators']=outside_names
-            if not persistent:
-                timeouts=[self._tracking_timeout(n) for n in outside_names]
-                if any(value is not None and t-self.tracking_outside_since>value for value in timeouts):self._hold('TRACKING_ENVELOPE_LOST')
-                return None
-        else:self.tracking_outside_since=None
-        applied={};blocked={}
+        applied={};lagging={}
         for joint in self.config['joints']:
             name=joint['name'];step=joint['velocity_rad_s']*dt
-            candidate=previous[name]+max(-step,min(step,target[name]-previous[name]))
-            low,high=self.q[name]-lead,self.q[name]+lead
-            if persistent and previous[name]<low:
-                applied[name]=max(previous[name],min(candidate,high))
-            elif persistent and previous[name]>high:
-                applied[name]=min(previous[name],max(candidate,low))
-            else:applied[name]=max(low,min(high,candidate))
-            # Outside references can move inward at the normal slew rate, or
-            # hold while measurement catches up. Never snap to the new band and
-            # never block an unrelated actuator because one joint is lagging.
-            if abs(applied[name]-candidate)>1e-8 or name in outside_names:blocked[name]=(self.q[name],.005)
+            applied[name]=previous[name]+max(-step,min(step,target[name]-previous[name]))
+            if abs(applied[name]-self.q[name])>joint.get('goal_tolerance_rad',.03):lagging[name]=(self.q[name],.005)
         dg=self.config.get('gripper',{}).get('velocity_percent_s',100)*dt
-        candidate=previous_g+max(-dg,min(dg,gripper-previous_g))
-        if previous_g<self.gripper-15.:
-            actual_g=max(previous_g,min(candidate,self.gripper+15.))
-        elif previous_g>self.gripper+15.:
-            actual_g=min(previous_g,max(candidate,self.gripper-15.))
-        else:actual_g=max(self.gripper-15.,min(self.gripper+15.,candidate))
-        if abs(actual_g-candidate)>1e-8 or abs(previous_g-self.gripper)>15.:blocked['_gripper']=(self.gripper,.5)
-        self.stats['tracking_state']='REFERENCE_OUTSIDE_ENVELOPE' if outside_names else 'LEAD_LIMITED' if blocked else 'FOLLOWING'
-        self.stats['limited_actuators']=list(blocked)
-        if blocked:self.stats['lead_limited_ticks']+=1
+        actual_g=previous_g+max(-dg,min(dg,gripper-previous_g))
+        if abs(actual_g-self.gripper)>self.config.get('gripper',{}).get('goal_tolerance_percent',3.):lagging['_gripper']=(self.gripper,.5)
+        # Tracking is observational. Servo bounds/protection remain hardware
+        # authority; only configured velocity slew shapes the commanded target.
+        self.stats.update(tracking_state='TRACKING_LAG' if lagging else 'FOLLOWING',
+            lagging_actuators=list(lagging),limited_actuators=[])
+        if lagging:self.stats['tracking_lag_ticks']=self.stats.get('tracking_lag_ticks',0)+1
         for name in list(self.tracking_wait):
-            if name not in blocked:self.tracking_wait.pop(name);self.tracking_anchor.pop(name,None)
-        for name,(measurement,progress) in blocked.items():
+            if name not in lagging:self.tracking_wait.pop(name);self.tracking_anchor.pop(name,None)
+        for name,(measurement,progress) in lagging.items():
             if name not in self.tracking_wait or abs(measurement-self.tracking_anchor[name])>=progress:
                 self.tracking_wait[name]=t;self.tracking_anchor[name]=measurement
-            elif self._tracking_timeout(name) is not None and t-self.tracking_wait[name]>self._tracking_timeout(name):
-                self._hold('TRACKING_STALLED: '+name);return None
         return applied,actual_g
-    def _tracking_timeout(self,name):
-        if self._persistent_teleop():return None
-        settings=self.config.get('gripper',{}) if name=='_gripper' else next(j for j in self.config['joints'] if j['name']==name)
-        value=settings.get('tracking_timeout_s')
-        if isinstance(value,dict):value=value.get(self.op['operation_type'] if self.op else '')
-        return value
     def _model_tick(self,t):
         if self.model is None:
             from .model_runtime import ModelSupervisor

@@ -112,6 +112,17 @@ export function renderReadinessSection(panel,view) {
   }
   for(const [id,record] of rows)if(!present.has(id)){record.row.remove();rows.delete(id);}
 }
+export function validateJointPositions(positions,joints) {
+  if(!positions || typeof positions!=='object' || Array.isArray(positions) || !Object.keys(positions).length)
+    throw Error('Add named joint targets.');
+  const names=new Set((joints||[]).map(joint=>joint.name));
+  for(const [name,value] of Object.entries(positions)) {
+    if(!names.has(name))throw Error('Unknown joint: '+name);
+    if(!Number.isFinite(value))throw Error(name+' must be finite.');
+  }
+  if(names.size!==Object.keys(positions).length)throw Error('Provide the full configured joint-name set.');
+  return positions;
+}
 let snapshot = {},
   resources = {},
   selectedArm = "",
@@ -717,19 +728,7 @@ function validateDraft() {
         `Unknown semantic field: ${k}. Transport identity is supplied by the station client.`,
       );
   const validatePositions = (q) => {
-    if (!q || typeof q !== "object" || !Object.keys(q).length)
-      throw Error("Add named joint targets.");
-    const config = armConfig();
-    for (const [name, v] of Object.entries(q)) {
-      const j = config.joints?.find((j) => j.name === name);
-      if (!j) throw Error("Unknown joint: " + name);
-      if (
-        !Number.isFinite(v) ||
-        v < (j.min ?? j.min_rad) ||
-        v > (j.max ?? j.max_rad)
-      )
-        throw Error(name + " is outside its configured range.");
-    }
+    validateJointPositions(q,armConfig().joints);
   };
   if (type === "MODEL") {
     if (!$("profile-select").value)
@@ -785,7 +784,7 @@ $("validate-payload").onclick = () => {
     validateDraft();
     text(
       "validation-message",
-      "Draft syntax and configured bounds checked. Runtime admission still applies.",
+      "Draft structure, joint names and finite values checked. Runtime admission still applies.",
     );
   } catch (e) {
     text("validation-message", e.message);
@@ -1000,15 +999,12 @@ function renderJointFields(body, row, type) {
     ];
   const fields = payloadElement("div", "payload-joint-fields");
   for (const name of names) {
-    const joint = config.joints?.find((j) => j.name === name);
     blockNumber(
       fields,
       `Step ${row.index + 1} · ${name} (rad)`,
       value.positions[name],
       [...row.path, "positions", name],
       {
-        min: joint?.min ?? joint?.min_rad,
-        max: joint?.max ?? joint?.max_rad,
         step: "any",
       },
     );

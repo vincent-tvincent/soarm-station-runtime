@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ManualPanel} from '../web/manual-panel.js';
-import {StationClient} from '../web/transport.js';
+import {StationClient, StationError} from '../web/transport.js';
 
 globalThis.document = {hidden:false};
 globalThis.Option = class { constructor(text,value){this.text=text;this.value=value;} };
@@ -21,8 +21,12 @@ function fixture(){
   const elements=new Map();
   const el=id=>{if(!elements.has(id))elements.set(id,{value:id==='leader-host'?'host':id==='leader-device'?'leader':'',textContent:'Normal',disabled:false,dataset:{},replaceChildren(){},classList:{toggle(){}}});return elements.get(id);};
   const client={operatorSessionId:'operator',currentOperation:null,
+    ownsPermission(arm){return states[arm].permission;},
     async enable(arm){calls.push(['enable',arm]);states[arm].permission=true;return{accepted:true};},
-    async startManual(arm){calls.push(['start',arm]);this.currentOperation={armId:arm,type:'DIRECT',mode:'STREAM',operationId:'test-op',ready:true};return this.currentOperation;},
+    async startManual(arm){calls.push(['start',arm]);this.currentOperation={localId:'local-'+calls.length,armId:arm,type:'DIRECT',mode:'STREAM',operationId:'test-op',ready:true};return this.currentOperation;},
+    async retireOperation(localId){calls.push(['retire',localId]);if(this.currentOperation?.localId!==localId)return false;
+      const arm=this.currentOperation.armId;this.currentOperation=null;states[arm].permission=false;emitTransportClose(panel,'stopping',arm);return true;},
+    async releaseIdlePermission(arm,scope){calls.push(['idle-release',arm,scope]);if(this.currentOperation?.armId===arm)return{success:false};states[arm].permission=false;return{success:true};},
     async hold(arm){calls.push(['hold',arm]);this.currentOperation=null;states[arm].permission=false;emitTransportClose(panel,'stopping',arm);return{success:true};},
     setManualTarget(value){calls.push(['target',structuredClone(value)]);},
     async request(path,body){calls.push(['request',path,structuredClone(body)]);return{target:target(1)};},
@@ -113,11 +117,50 @@ test('key release cancels calculations but does not cancel an explicit Start int
   assert.equal(calls.filter(x=>x[0]==='target').length,1);
 });
 
-test('late websocket Start after Stop is held and never receives its staged target',async()=>{
+test('late websocket Start after Stop retires its returned handle and never receives its staged target',async()=>{
   const{panel,client,calls,states}=fixture(),gate=deferred();states.a.permission=true;
-  client.startManual=async arm=>{calls.push(['start',arm]);await gate.promise;client.currentOperation={armId:arm,type:'DIRECT',mode:'STREAM',ready:true};};
+  client.startManual=async arm=>{calls.push(['start',arm]);await gate.promise;client.currentOperation={localId:'late-start',armId:arm,type:'DIRECT',mode:'STREAM',ready:true};return client.currentOperation;};
   const start=panel.start();await panel.stop();gate.resolve();await start;
   assert(!calls.some(x=>x[0]==='target'));assert.equal(client.currentOperation,null);assert.equal(panel.ownsStream,false);
+});
+
+test('canceled permission-only intent releases only its captured idle grant',async()=>{
+  const {panel,client,calls,states}=fixture();states.a.permission=true;
+  const old=panel.intentContext();panel.cancelIntent();
+  await panel.retireCanceled(old);
+  assert.deepEqual(calls.filter(call=>call[0]==='idle-release'),[
+    ['idle-release','a',{controller_session:'session',operator_session_id:'operator'}],
+  ]);
+  assert(!calls.some(call=>call[0]==='hold'));assert.equal(states.a.permission,false);
+});
+
+test('old permission cleanup does not revoke the shared idle grant while a newer same-principal intent proceeds',async()=>{
+  const {panel,calls,states}=fixture();states.a.permission=true;
+  const old=panel.intentContext();panel.actionBusy(1,old);panel.cancelIntent();
+  const current=panel.intentContext();panel.actionBusy(1,current);
+  await panel.retireCanceled(old);
+  assert.equal(states.a.permission,true);assert(!calls.some(call=>['hold','idle-release'].includes(call[0])));
+  panel.actionBusy(-1,old);panel.actionBusy(-1,current);assert.equal(panel.pendingIntents.size,0);
+});
+
+test('late Start cleanup uses the returned old handle and never a current replacement',async()=>{
+  const {panel,client,calls,states}=fixture(),gate=deferred();states.a.permission=true;
+  const original={localId:'original',armId:'a',type:'DIRECT',mode:'STREAM',ready:true};
+  client.startManual=async()=>{await gate.promise;return original;};
+  const starting=panel.start();await Promise.resolve();panel.cancelIntent();
+  const replacement={localId:'replacement',armId:'a',type:'DIRECT',mode:'STREAM',ready:true};
+  client.currentOperation=replacement;
+  gate.resolve();await starting;
+  assert.equal(client.currentOperation,replacement);
+  assert.deepEqual(calls.filter(call=>call[0]==='retire'),[['retire','original']]);
+  assert(!calls.some(call=>['hold','idle-release','target'].includes(call[0])));
+});
+
+for(const action of ['start','home'])test(`${action} claims permission for the current principal rather than trusting public permission=true`,async()=>{
+  const {panel,client,calls,states}=fixture();states.a.permission=true;
+  client.ownsPermission=()=>false;
+  if(action==='start')await panel.start();else await panel.preset('home');
+  assert.deepEqual(calls.filter(call=>['enable','start'].includes(call[0])),[['enable','a'],['start','a']]);
 });
 
 for(const cancel of ['stop','arm','mode','disconnect'])test(`delayed Home cannot send or enable after ${cancel}`,async()=>{
@@ -188,6 +231,25 @@ test('continuous IK advances its accepted reference with only one pending solve'
   assert.deepEqual(panel.reference,target(2,52));assert.equal(calls.filter(x=>x[0]==='target').length,2);
   assert.equal(bodies[1].positions.joint,0,'measured pose is distinct from admitted reference');
   assert(bodies.every(b=>b.dt_s>=0&&b.dt_s<=.1));
+});
+
+for(const error of [new StationError('Busy','HTTP_ERROR',409),new StationError('Delayed','TIMEOUT'),
+  new StationError('Wait for data','NOT_READY'),new StationError('Unconfirmed update','ACK_TIMEOUT'),
+  new StationError('Temporary server failure','HTTP_ERROR',503),new StationError('Network interrupted','NETWORK_ERROR')])
+test(`transient ${error.code}/${error.status} keeps held jog keys and computes a fresh next tick`,async()=>{
+  const {panel,client,calls,states}=fixture();states.a.permission=true;panel.ownsStream=true;panel.keys.add('KeyK');
+  client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',ready:true};let attempts=0;
+  client.request=async()=>{if(++attempts===1)throw error;return{status:'OK',target:target(.3)};};
+  await panel.tick();assert.equal(panel.keys.has('KeyK'),true);assert.equal(panel.solving,false);
+  assert(!calls.some(call=>call[0]==='hold'||call[0]==='error'||call[0]==='target'));
+  await panel.tick();assert.equal(attempts,2);assert.equal(calls.filter(call=>call[0]==='target').length,1);
+});
+
+test('a definitive malformed manual calculation is still surfaced and retires held keys',async()=>{
+  const {panel,client,calls,states}=fixture();states.a.permission=true;panel.ownsStream=true;panel.keys.add('KeyK');
+  client.currentOperation={armId:'a',type:'DIRECT',mode:'STREAM',ready:true};
+  client.request=async()=>{throw new StationError('Unknown joint','HTTP_ERROR',400);};
+  await panel.tick();assert.equal(panel.keys.size,0);assert.ok(calls.some(call=>call[0]==='error'));
 });
 
 test('keyup discards a pending solve and Home reseeds future jogs',async()=>{

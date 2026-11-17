@@ -50,15 +50,14 @@ def load(path):
             if 'label' in item and (not isinstance(item['label'],str) or not 1<=len(item['label'])<=128):
                 raise ValueError('Resource labels require 1..128 characters')
         for j in a['joints']:
-            for k in ('min_rad', 'max_rad', 'velocity_rad_s'):
-                if not math.isfinite(j[k]): raise ValueError('Nonfinite joint limit')
-            if j['min_rad'] >= j['max_rad'] or j['velocity_rad_s'] <= 0:
-                raise ValueError('Invalid joint limit')
+            velocity=j['velocity_rad_s']
+            if isinstance(velocity,bool) or not isinstance(velocity,(int,float)) or not math.isfinite(velocity) or velocity<=0:
+                raise ValueError('Joint velocity must be finite and positive')
+            # min_rad/max_rad are optional legacy display/model metadata.
+            # They neither admit targets nor define completion tolerances.
             tolerance=j.get('goal_tolerance_rad',.03)
-            if not math.isfinite(tolerance) or not 0<tolerance<=j['max_rad']-j['min_rad']:
+            if isinstance(tolerance,bool) or not isinstance(tolerance,(int,float)) or not math.isfinite(tolerance) or tolerance<=0:
                 raise ValueError('Invalid joint goal tolerance')
-        lead=a.get('max_target_lead_rad',.12)
-        if not math.isfinite(lead) or lead<=0:raise ValueError('Invalid target lead')
         gripper_tolerance=a.get('gripper',{}).get('goal_tolerance_percent',3.)
         if not math.isfinite(gripper_tolerance) or not 0<gripper_tolerance<=100:
             raise ValueError('Invalid gripper goal tolerance')
@@ -68,11 +67,6 @@ def load(path):
             if value is None and key=='max_stream_duration_s':continue
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<0 or (value==0 and key!='settle_timeout_s'):
                 raise ValueError('Invalid operation limit: '+key)
-        for actuator in [*a['joints'],a.get('gripper',{})]:
-            timeout=actuator.get('tracking_timeout_s')
-            values=timeout.values() if isinstance(timeout,dict) else [timeout]
-            if any(v is not None and (not isinstance(v,(int,float)) or not math.isfinite(v) or v<=0) for v in values):
-                raise ValueError('Tracking timeout must be null or a positive mode/actuator-specific value')
         for k in ('calibration', 'urdf'):
             if a.get(k): a[k] = str((path.parent / Path(a[k]).expanduser()).resolve())
     for k in ('database','socket','frame_dir','lock_dir'):

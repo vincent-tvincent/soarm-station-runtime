@@ -1,5 +1,6 @@
 import { FKView } from "./fk-view.js";
 import { GamepadPanel } from "./gamepad-panel.js";
+import { isTransientTransportError } from "./transport.js";
 const AXES = [
   ["X", "KeyK", "K", "KeyJ", "J"],
   ["Y", "KeyL", "L", "KeyH", "H"],
@@ -11,6 +12,14 @@ const AXES = [
 const MOVE_KEYS = new Set(AXES.flatMap((a) => [a[1], a[3]]));
 const finite = Number.isFinite;
 const copy = (value) => structuredClone(value);
+export function jointSliderDisplayRange(value, previous={}) {
+  if(!Number.isFinite(value))throw new TypeError('Joint target must be finite');
+  const valid=Number.isFinite(previous.min)&&Number.isFinite(previous.max)&&previous.min<previous.max;
+  let min=valid?previous.min:-Math.PI,max=valid?previous.max:Math.PI;
+  if(value<min)min=Number.isFinite(value-Math.PI/2)?value-Math.PI/2:value;
+  if(value>max)max=Number.isFinite(value+Math.PI/2)?value+Math.PI/2:value;
+  return {min,max};
+}
 export function conditioningPresentation(value, stale = false) {
   const metric = value?.conditioning, ratio = metric?.reciprocal_condition;
   if (stale || metric?.available !== true || !Number.isFinite(ratio) || ratio < 0 || ratio > 1)
@@ -44,7 +53,7 @@ export class ManualPanel {
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
       <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Coarse</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 3 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
       <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
-      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Follow leader moves the follower smoothly toward the live leader pose within its joint and speed limits. Freeze or Home pauses following.</p></div>
+      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Follow leader moves the follower smoothly toward the live leader pose. Freeze or Home pauses following.</p></div>
     </div>
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p>`;
     this.poseElement = poseElement || element.appendChild(document.createElement("section"));
@@ -311,8 +320,6 @@ export class ManualPanel {
     for (const j of [
       ...(this.config.joints || []).map((j) => ({
         ...j,
-        min: j.min ?? j.min_rad,
-        max: j.max ?? j.max_rad,
         value: this.target.positions[j.name],
         unit: "rad",
       })),
@@ -333,25 +340,32 @@ export class ManualPanel {
       const numeric = document.createElement("input");
       Object.assign(numeric, {
         type: "number",
-        min: String(j.min),
-        max: String(j.max),
         step: j.unit === "%" ? "0.5" : "0.005",
         value: j.value.toFixed(j.unit === "%" ? 1 : 3),
       });
+      if(j.unit==='%')Object.assign(numeric,{min:'0',max:'100'});
       numeric.setAttribute("aria-label", j.name + " target " + j.unit);
       const slider = document.createElement("input");
+      const display=j.unit==='%'?{min:0,max:100}:jointSliderDisplayRange(j.value);
       Object.assign(slider, {
         type: "range",
-        min: numeric.min,
-        max: numeric.max,
+        min: String(display.min),
+        max: String(display.max),
         step: numeric.step,
         value: String(j.value),
       });
       slider.setAttribute("aria-label", j.name + " slider");
+      if(j.unit!=='%')slider.title='Drag within this display range; type a joint angle to expand it.';
       const edit = (source) => {
+        if(!source.value.trim())return;
         const v = Number(source.value);
-        if (!finite(v) || v < j.min || v > j.max) return;
+        if (!finite(v) || (j.unit==='%' && (v<0 || v>100))) return;
         numeric.value = String(v);
+        if(j.unit!=='%') {
+          const next=jointSliderDisplayRange(v,{min:Number(slider.min),max:Number(slider.max)});
+          slider.min=String(next.min);slider.max=String(next.max);
+          ends.innerHTML=`<span>${next.min.toFixed(1)} rad</span><span>${next.max.toFixed(1)} rad</span>`;
+        }
         slider.value = String(v);
         this.dirty = true;
         if (j.unit === "%") this.target.gripper = v;
@@ -364,12 +378,18 @@ export class ManualPanel {
       label.append(name, numeric);
       const ends = document.createElement("div");
       ends.className = "range-endpoints";
-      ends.innerHTML = `<span>${j.min.toFixed(1)} ${j.unit}</span><span>${j.max.toFixed(1)} ${j.unit}</span>`;
+      if(j.unit!=='%')ends.title='Slider display range';
+      ends.innerHTML = `<span>${display.min.toFixed(1)} ${j.unit}</span><span>${display.max.toFixed(1)} ${j.unit}</span>`;
       row.append(label, slider, ends);
       box.append(row);
     }
   }
-  actionBusy(delta) {
+  actionBusy(delta,context=null) {
+    if(context) {
+      this.pendingIntents??=new Map();
+      if(delta>0)this.pendingIntents.set(context.generation,context);
+      else if(this.pendingIntents.get(context.generation)===context)this.pendingIntents.delete(context.generation);
+    }
     this.pendingActions = Math.max(0, this.pendingActions + delta);
     this.busy = this.pendingActions > 0;
     this.updateControls();
@@ -425,7 +445,7 @@ export class ManualPanel {
     }
     return result;
   }
-  async retireCanceled(context, run = null) {
+  async retireCanceled(context, run = null, operation = null) {
     // A late mutating reply may have granted authority after Stop. Revoke it,
     // but never apply an old connection's cleanup to a new authenticated session.
     const state = this.snapshot?.arms?.[context.arm] || {};
@@ -436,8 +456,17 @@ export class ManualPanel {
       context.session !== state.controller_session
     )
       return;
-    if (run) await this.stopLeader(run);
-    else await this.holdArm(context.arm);
+    if(run){await this.stopLeader(run);return;}
+    if(operation?.localId) {
+      this.expectedTermination++;
+      try{await this.client.retireOperation(operation.localId);}
+      finally{this.expectedTermination--;}
+    }
+    const newer=[...(this.pendingIntents?.values()||[])].some(intent=>intent.generation>context.generation &&
+      intent.arm===context.arm && intent.principal===context.principal && this.currentIntent(intent));
+    if(newer || this.client.currentOperation?.armId===context.arm)return;
+    await this.client.releaseIdlePermission(context.arm,{controller_session:context.session,
+      operator_session_id:context.principal});
   }
   async changeMode(mode) {
     this.cancelIntent();
@@ -477,7 +506,8 @@ export class ManualPanel {
     }
     this.cancelIntent();
     const context = this.intentContext();
-    this.actionBusy(1);
+    let startedOperation=null;
+    this.actionBusy(1,context);
     try {
       if (context.mode === "leader") {
         if (this.leaderRun) throw Error("Freeze the current leader run first.");
@@ -500,7 +530,7 @@ export class ManualPanel {
       if (!this.dirty || this.mode !== "joint") this.resetTargets();
       if (!this.target) throw Error("Complete measured pose is unavailable.");
       const staged = copy(this.target);
-      if (context.mode === "leader" || !this.stateForArm().permission) {
+      if (context.mode === "leader" || !this.client.ownsPermission(context.arm)) {
         await this.client.enable(context.arm);
         if (!this.currentIntent(context)) {
           await this.retireCanceled(context);
@@ -533,11 +563,11 @@ export class ManualPanel {
           return;
         }
         this.leaderRun = run;
-        this.note("Following requested · the follower will approach the leader smoothly within its joint and speed limits.");
+        this.note("Following requested · the follower will approach the leader smoothly.");
       } else {
-        await this.client.startManual(context.arm);
+        startedOperation=await this.client.startManual(context.arm);
         if (!this.currentIntent(context)) {
-          await this.retireCanceled(context);
+          await this.retireCanceled(context,null,startedOperation);
           return;
         }
         this.ownsStream = true;
@@ -554,12 +584,12 @@ export class ManualPanel {
       }
     } catch (error) {
       if (!this.currentIntent(context)) {
-        await this.retireCanceled(context);
+        await this.retireCanceled(context,null,startedOperation);
         return;
       }
       throw error;
     } finally {
-      this.actionBusy(-1);
+      this.actionBusy(-1,context);
     }
   }
   async stop() {
@@ -600,7 +630,7 @@ export class ManualPanel {
     const context = this.intentContext(),
       measured = this.measured();
     if (!measured) throw Error("Measured pose is unavailable.");
-    this.actionBusy(1);
+    this.actionBusy(1,context);
     try {
       const result = await this.client.request(
         `/api/manual/${encodeURIComponent(context.arm)}/preset`,
@@ -618,7 +648,7 @@ export class ManualPanel {
         context,
       );
     } finally {
-      this.actionBusy(-1);
+      this.actionBusy(-1,context);
     }
   }
   async roll(name) {
@@ -627,7 +657,7 @@ export class ManualPanel {
     const context = this.intentContext(),
       measured = this.measured();
     if (!measured) throw Error("Measured pose is unavailable.");
-    this.actionBusy(1);
+    this.actionBusy(1,context);
     try {
       const result = await this.client.request(
         `/api/manual/${encodeURIComponent(context.arm)}/roll`,
@@ -644,7 +674,7 @@ export class ManualPanel {
         context,
       );
     } finally {
-      this.actionBusy(-1);
+      this.actionBusy(-1,context);
     }
   }
   async sendIntent(target, message, context) {
@@ -665,7 +695,7 @@ export class ManualPanel {
         grantRequired = true;
         if (!this.currentIntent(context)) return;
       }
-      if (grantRequired || !this.stateForArm().permission) {
+      if (grantRequired || !this.client.ownsPermission(context.arm)) {
         try {
           await this.client.enable(context.arm);
         } catch (error) {
@@ -677,14 +707,15 @@ export class ManualPanel {
           return;
         }
       }
+      let startedOperation;
       try {
-        await this.client.startManual(context.arm);
+        startedOperation=await this.client.startManual(context.arm);
       } catch (error) {
         if (!this.currentIntent(context)) await this.retireCanceled(context);
         throw error;
       }
       if (!this.currentIntent(context)) {
-        await this.retireCanceled(context);
+        await this.retireCanceled(context,null,startedOperation);
         return;
       }
       this.ownsStream = true;
@@ -847,6 +878,7 @@ export class ManualPanel {
       );
     } catch (e) {
       if (epoch === this.epoch && this.currentIntent(context)) {
+        if(e.status===409 || ['NOT_READY','ACK_TIMEOUT'].includes(e.code) || isTransientTransportError(e))return;
         this.clearKeys();
         this.onError(e);
       }

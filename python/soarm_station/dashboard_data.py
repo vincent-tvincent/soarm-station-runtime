@@ -1,5 +1,7 @@
 """Public dashboard descriptors and cached motor telemetry; no device access."""
 import math
+import json
+from pathlib import Path
 from .motor_issues import project_motor_issues,validate_motor_issues,motor_issue_for
 
 
@@ -12,6 +14,34 @@ def camera_calibrated(camera):
     return isinstance(matrix,(list,tuple)) and len(matrix)==9 and finite(matrix[0]) is not None and matrix[0]>0
 
 
+def joint_display_range(joint,calibration=None):
+    """A slider/model extent, never an application target-admission limit.
+
+    SO-101 DEGREES normalization uses the calibration midpoint and 4095 counts
+    per turn. The native owner checks this file against servo EEPROM at connect;
+    this descriptor itself does not access hardware or claim a live readback.
+    """
+    if isinstance(calibration,dict):
+        low,high=finite(calibration.get('range_min')),finite(calibration.get('range_max'))
+        if low is not None and high is not None and low<high:
+            midpoint=(low+high)/2
+            return {'min':(low-midpoint)*2*math.pi/4095,'max':(high-midpoint)*2*math.pi/4095,
+                'range_source':'servo_calibration','range_enforced':False}
+    for low_name,high_name in (('display_min_rad','display_max_rad'),('min_rad','max_rad')):
+        low,high=finite(joint.get(low_name)),finite(joint.get(high_name))
+        if low is not None and high is not None and low<high:
+            return {'min':low,'max':high,'range_source':'configured_display','range_enforced':False}
+    return {'min':-math.pi,'max':math.pi,'range_source':'default_display','range_enforced':False}
+
+
+def _display_calibration(arm):
+    if arm.get('backend')!='so101' or not arm.get('calibration'):return {}
+    try:
+        value=json.loads(Path(arm['calibration']).read_text())
+        return value if isinstance(value,dict) else {}
+    except (OSError,ValueError):return {}
+
+
 def resources(config):
     profiles=[]
     for identifier,p in config.get('profiles',{}).items():
@@ -21,11 +51,12 @@ def resources(config):
     arms=[]
     for a in config.get('arms',[]):
         gripper=a.get('gripper',{})
+        calibration=_display_calibration(a)
         arms.append({'id':a['id'],'label':a.get('label',a['id']),'backend':a['backend'],
             'read_only':bool(a.get('read_only',False)),'base_frame':a.get('base_frame'),
             'tcp_frame':a.get('tcp_frame','gripper_frame_link') if a.get('urdf') else None,
             'joints':[{'name':j['name'],'label':j.get('label',j['name']),'unit':'rad',
-                'min':j['min_rad'],'max':j['max_rad'],'velocity_limit':j['velocity_rad_s']} for j in a['joints']],
+                **joint_display_range(j,calibration.get(j['name'])),'velocity_limit':j['velocity_rad_s']} for j in a['joints']],
             'gripper':{'name':gripper.get('name','gripper'),'label':gripper.get('label',gripper.get('name','gripper')),
                 'unit':'percent','min':0,'max':100,'velocity_limit':gripper.get('velocity_percent_s',100)},
             'capabilities':{'operation_types':['DIRECT','TRAJECTORY','MODEL'],'input_modes':['INLINE','STREAM'],

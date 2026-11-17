@@ -66,7 +66,7 @@ def test_authenticated_metadata_and_public_allowlisted_assets(tmp_path,monkeypat
     config={'device_id':'test','web':{'trusted_network_access':False},'arms':[{'id':'arm1','backend':'mock','joints':[{'name':'joint','min_rad':-1.,'max_rad':1.,'velocity_rad_s':1.}]}],'cameras':[],'profiles':{}}
     async def unused(request):raise AssertionError('Actuation route was not requested')
     owner=types.SimpleNamespace(config=config,public_resources=resources(config),motor_records={},motor_record_errors={},readiness_receipts={},component_diagnostics={},states={},inference={},joints={},images={},upload={},events=[],workflows={},decisions=[])
-    for name in ('permission','hold','torque','stream_input','operate','operation_status','start_workflow','history','image','control','camera_stream'):setattr(owner,name,unused)
+    for name in ('permission','hold','torque','stream_input','operate','operation_status','cancel_operation','start_workflow','history','image','control','camera_stream'):setattr(owner,name,unused)
     for name in ('index','asset','api_resources','graph_status','graph_sample','graph_watch','resource_view','state','status','camera_stream'):
         setattr(owner,name,types.MethodType(getattr(DashboardNode,name),owner))
     owner.images={'forward':(b'\xff\xd8camera',1)};owner.stopping=False
@@ -164,7 +164,7 @@ def test_leader_cleanup_uses_native_snapshot_without_policy_ipc_and_precedes_pol
     owner=types.SimpleNamespace(config={'web':{},'arms':[],'socket':'/mock/native.sock'},public_resources={'arms':[]},
         states={'arm1':{'controller_session':'controller','operation_id':'owned','permission':True}},
         state=expanded_state,policy_manager=manager)
-    for name in ('index','status','history','permission','hold','torque','stream_input','operate','operation_status',
+    for name in ('index','status','history','permission','hold','torque','stream_input','operate','operation_status','cancel_operation',
                  'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample','graph_watch'):
         setattr(owner,name,unused)
     app=DashboardNode.create_app(owner)
@@ -199,7 +199,7 @@ def test_leader_start_reads_native_permission_off_http_thread_before_ros_cache_u
     owner=types.SimpleNamespace(config={'web':{},'arms':[],'socket':'test-native-socket'},
         public_resources=resources({'arms':[{'id':'arm1','backend':'mock','joints':[{'name':'pan','min_rad':-2.,'max_rad':2.,'velocity_rad_s':1.}]}]}),
         states={'arm1':{'permission':False,'feedback_valid':False}})
-    for name in ('index','status','history','permission','hold','torque','stream_input','operate','operation_status',
+    for name in ('index','status','history','permission','hold','torque','stream_input','operate','operation_status','cancel_operation',
                  'start_workflow','image','control','camera_stream','asset','api_resources','graph_status','graph_sample','graph_watch'):
         setattr(owner,name,unused)
     DashboardNode.create_app(owner)

@@ -31,6 +31,7 @@ from soarm_station.policy_manager import PolicyManager
 from soarm_station.policy_http import mount_policy_routes
 from soarm_station.ipc import Client
 from soarm_station.readiness import project_readiness
+from soarm_station.http_operations import OperationRequests,RequestConflict
 
 ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','gamepad-panel.js','gamepad-input.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
 
@@ -155,11 +156,13 @@ class DashboardNode(BaseNode):
         context.load_cert_chain(parent/cfg['cert'],parent/cfg['key'])
         await web.TCPSite(self.runner,cfg.get('host','0.0.0.0'),cfg.get('port',8443),ssl_context=context).start()
     def create_app(self,token=''):
+        if not hasattr(self,'operation_requests'):self.operation_requests=OperationRequests()
         app=web.Application(middlewares=[dashboard_access_middleware(self.config.get('web',{}),token)],client_max_size=262144)
         app.router.add_get('/',self.index);app.router.add_get('/api/status',self.status);app.router.add_get('/api/history',self.history)
         app.router.add_post('/api/permission',self.permission);app.router.add_post('/api/hold',self.hold)
         app.router.add_post('/api/torque',self.torque)
         app.router.add_post('/api/stream',self.stream_input);app.router.add_post('/api/operate',self.operate);app.router.add_get('/api/operations/{id}',self.operation_status)
+        app.router.add_post('/api/operations/{id}/cancel',self.cancel_operation)
         app.router.add_post('/api/workflows',self.start_workflow);app.router.add_get('/api/cameras/{id}.jpg',self.image)
         app.router.add_get('/ws/control',self.control);app.router.add_get('/ws/camera/{id}',self.camera_stream)
         app.router.add_get('/assets/{file}',self.asset)
@@ -300,9 +303,34 @@ class DashboardNode(BaseNode):
                 if len(self.goals)<=128:break
         return request_id,h
     async def operate(self,r):
-        b=await r.json();i,h=await self.submit(b,b.get('operator_session_id','browser'));return web.json_response({'request_id':i})
+        body=await r.json()
+        if not isinstance(body,dict):raise ValueError('JSON object required')
+        body=dict(body);body.setdefault('request_id',uuid.uuid4().hex)
+        principal=body.get('operator_session_id','browser')
+        OperationRequests.identity(body['request_id'],principal)
+        try:goal=goal_from_dict(body,principal)
+        except (AssertionError,KeyError,TypeError,OverflowError) as error:
+            raise ValueError('Invalid operation request: '+str(error)[:256]) from error
+        def send(feedback):
+            return self.operation.send_goal_async(goal,feedback_callback=lambda message:feedback(asdict(message.feedback.status)))
+        try:identifier=self.operation_requests.register(body,principal,send,lambda message:asdict(message.result))
+        except RequestConflict as error:raise web.HTTPConflict(text=str(error))
+        except RuntimeError as error:raise web.HTTPServiceUnavailable(text=str(error))
+        return web.json_response({'request_id':identifier})
     async def operation_status(self,r):
-        g=self.goals[r.match_info['id']];return web.json_response({'done':g['future'].done(),'result':asdict(g['future'].result().result) if g['future'].done() else None,'feedback':dict(g['feedback'])})
+        identifier=r.match_info['id']
+        if self.operation_requests.contains(identifier):return web.json_response(self.operation_requests.snapshot(identifier))
+        if identifier not in self.goals:raise web.HTTPNotFound(text='Operation request is not known')
+        g=self.goals[identifier];return web.json_response({'done':g['future'].done(),'result':asdict(g['future'].result().result) if g['future'].done() else None,'feedback':dict(g['feedback'])})
+    async def cancel_operation(self,r):
+        body=await r.json()
+        if not isinstance(body,dict):raise ValueError('JSON object required')
+        principal=body.get('operator_session_id')
+        if not isinstance(principal,str) or not principal:raise ValueError('operator_session_id required')
+        try:return web.json_response(self.operation_requests.cancel(r.match_info['id'],principal))
+        except KeyError:raise web.HTTPNotFound(text='Operation request is not known')
+        except PermissionError as error:raise web.HTTPForbidden(text=str(error))
+        except RuntimeError as error:raise web.HTTPServiceUnavailable(text=str(error))
     async def stream_input(self,r):
         b=await r.json();self.command.publish(stream_from_dict(b,b['operator_session_id']));return web.json_response({'forwarded':True})
     async def start_workflow(self,r):
@@ -348,11 +376,43 @@ class DashboardNode(BaseNode):
                 except asyncio.TimeoutError:continue
                 if m.type==web.WSMsgType.TEXT:
                     import json
-                    d=json.loads(m.data)
-                    if d.get('arm_id')!=arm:raise ValueError('Arm mismatch')
-                    if semantics=='persistent_target' and control_owner is None:
-                        raise ValueError('Persistent control ownership is not ready')
-                    self.command.publish(stream_from_dict(d,principal))
+                    import math
+                    d=None
+                    try:
+                        d=json.loads(m.data)
+                        if not isinstance(d,dict):raise ValueError('Control frame must be a JSON object')
+                        if d.get('arm_id')!=arm:raise ValueError('Arm mismatch')
+                        if semantics=='persistent_target' and control_owner is None:
+                            raise ValueError('Persistent control ownership is not ready')
+                        for key in ('runtime_boot_id','controller_session','operation_id','window_id'):
+                            if not isinstance(d.get(key),str) or not 1<=len(d[key])<=64:raise ValueError('Invalid '+key)
+                        for key in ('operation_epoch','sequence'):
+                            if type(d.get(key))!=int or not 0<=d[key]<2**64:raise ValueError('Invalid '+key)
+                        if 'semantic_revision' in d and (type(d['semantic_revision'])!=int or not 0<=d['semantic_revision']<2**64):
+                            raise ValueError('Invalid semantic_revision')
+                        if d.get('frame_kind') not in ('COMMAND','HEARTBEAT','END'):raise ValueError('Unknown frame kind')
+                        if d['frame_kind']=='COMMAND':
+                            if not isinstance(d.get('input_id'),str) or not 1<=len(d['input_id'])<=64:raise ValueError('Input ID required')
+                            if d.get('payload_kind','DIRECT_JOINT_TARGET')!='DIRECT_JOINT_TARGET':raise ValueError('Remote control requires a joint target')
+                            body=d.get('body');positions=body.get('positions') if isinstance(body,dict) else None
+                            if not isinstance(positions,dict) or not 1<=len(positions)<=64:raise ValueError('Named joint target required')
+                            if any(not isinstance(name,str) or not 1<=len(name)<=64 or type(value) not in (int,float) or not math.isfinite(value) for name,value in positions.items()):
+                                raise ValueError('Joint targets must be named finite numbers')
+                            gripper=body.get('gripper')
+                            if type(gripper) not in (int,float) or not math.isfinite(gripper) or not 0<=gripper<=100 or body.get('gripper_unit','percent')!='percent':
+                                raise ValueError('Gripper requires percent in [0,100]')
+                        elif d.get('body'):raise ValueError('Non-command frame contains body')
+                        converted=stream_from_dict(d,principal)
+                    except (ValueError,TypeError,KeyError,OverflowError,AssertionError) as exc:
+                        rejection={'type':'input_rejected','reason':str(exc)[:512]}
+                        if isinstance(d,dict):
+                            if type(d.get('sequence'))==int and 0<=d['sequence']<2**64:rejection['sequence']=d['sequence']
+                            if isinstance(d.get('input_id'),str) and len(d['input_id'])<=64:rejection['input_id']=d['input_id']
+                        await ws.send_json(rejection)
+                        continue
+                    self.command.publish(converted)
+                elif m.type==web.WSMsgType.BINARY:
+                    await ws.send_json({'type':'input_rejected','reason':'Control frames must be JSON text'})
                 elif m.type in (web.WSMsgType.CLOSE,web.WSMsgType.CLOSED,web.WSMsgType.ERROR):break
             if result.done() and not ws.closed:
                 await ws.send_json({'type':'result','result':asdict(result.result().result)})

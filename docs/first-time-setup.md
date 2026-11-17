@@ -223,7 +223,7 @@ for complete field and connection details.
 
 In **Control → Leader arm**, select **Operator Mac → SO-101 leader** and press
 **Follow leader**. The bridge checks the saved calibration, then the follower
-moves toward the live leader pose under the existing speed and joint limits.
+moves toward the live leader pose with speed interpolation and servo-enforced joint ranges.
 You do not need to match the two poses manually. **Freeze / Esc** holds the
 follower; after Freeze or Home, press Follow leader to approach the current
 leader pose again. Gripper follow can be disabled to keep the jaw held.

@@ -111,7 +111,7 @@ def test_start_requires_explicit_permission_and_resource_mapping(host_config):
         assert result['accepted'] and result['state']=='STARTING' and not held
         command=registry.hosts['test-host']['ws'].sent[0]
         assert command['type']=='start' and command['joint_names']==['pan','lift']
-        assert command['joint_limits']=={name:{'min_rad':-2.,'max_rad':2.} for name in ('pan','lift')}
+        assert 'joint_limits' not in command
         assert not any('permission' in message.get('type','') for message in registry.hosts['test-host']['ws'].sent)
         assert registry.snapshot()['hosts'][0]['latest_pose'] is None
     asyncio.run(check())
@@ -363,14 +363,69 @@ def test_bridge_toggle_keeps_body_live_and_holds_last_sent_jaw(host_config):
     asyncio.run(check())
 
 
-def test_leader_targets_clip_existing_follower_limits_without_mutating_observation():
+def test_leader_targets_preserve_body_angles_and_only_normalize_jaw_percentage():
     measured={'positions':{'pan':3.,'lift':-.3},'gripper':-2.,'gripper_unit':'percent'}
     limits={'pan':{'min_rad':-1.,'max_rad':1.},'lift':{'min_rad':-.5,'max_rad':.5}}
     result=bounded_leader_target(measured,limits)
-    assert result=={'positions':{'pan':1.,'lift':-.3},'gripper':0.,'gripper_unit':'percent'}
+    assert result=={'positions':{'pan':3.,'lift':-.3},'gripper':0.,'gripper_unit':'percent'}
     assert measured['positions']['pan']==3. and measured['gripper']==-2.
     with pytest.raises(ValueError):bounded_leader_target(measured,None)
     with pytest.raises(ValueError):bounded_leader_target({**measured,'positions':{'pan':float('nan'),'lift':0.}},limits)
+
+
+def test_nonfatal_input_rejection_keeps_leader_run_and_uses_a_new_sample(host_config):
+    async def check():
+        delivered=asyncio.Event();sample_count=[]
+        class Control:
+            closed=False
+            def __init__(self):self.queue=asyncio.Queue();self.commands=[]
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):self.closed=True
+            def __aiter__(self):return self
+            async def __anext__(self):return await self.queue.get()
+            def message(self,value):
+                self.queue.put_nowait(SimpleNamespace(type=SimpleNamespace(value=1),data=json.dumps(value)))
+            async def send_json(self,value):
+                grant={'stream_ready':True,'operation_id':'op','window_id':'current-window',
+                       'window_valid_for_ms':250,'last_sequence':0,'last_accepted_input_id':''}
+                if value.get('operation_type'):
+                    assert value['input_semantics']=='persistent_target'
+                    self.message({'type':'grant','grant':grant})
+                    self.message({'type':'state','state':{'phase':'ACTIVE','operation_id':'op','gripper_percent':50.}})
+                elif value.get('frame_kind')=='COMMAND':
+                    self.commands.append(copy.deepcopy(value))
+                    if len(self.commands)==1:
+                        self.message({'type':'input_rejected','reason':'Expired input window','sequence':value['sequence']})
+                        self.message({'type':'grant','grant':grant})
+                    else:
+                        self.message({'type':'grant','grant':{**grant,'last_sequence':value['sequence'],
+                            'last_accepted_input_id':value['input_id']}})
+                        delivered.set()
+        control=Control()
+        class Session:
+            def ws_connect(self,*args,**kwargs):return control
+        class Sampler:
+            closed=False
+            def __init__(self,*args):pass
+            async def start(self):pass
+            async def sample(self):
+                sample_count.append(True);stamp=time.monotonic_ns()
+                return {'body':{'positions':{'pan':3.+len(sample_count)*.01,'lift':-.1},
+                    'gripper':50.,'gripper_unit':'percent'},'started_ns':stamp,'completed_ns':stamp}
+            async def close(self):Sampler.closed=True
+        bridge=InputHostBridge(host_config,'https://gateway.invalid',None,sampler_factory=Sampler,enumerate_ports=ports)
+        bridge.session=Session();bridge.registry=Socket()
+        request={'run_id':'run','device_id':'profile-leader','arm_id':'follower','operator_session_id':'operator',
+            'runtime_boot_id':'boot','controller_session':'session','joint_names':['pan','lift'],'hz':100}
+        bridge.active=request;bridge.task=asyncio.create_task(bridge.operate(request))
+        await asyncio.wait_for(delivered.wait(),1.)
+        assert not bridge.task.done() and bridge.active is request
+        first,second=control.commands[:2]
+        assert second['sequence']>first['sequence']
+        assert second['body']['positions']['pan']>first['body']['positions']['pan']>3.
+        assert not any(message.get('state')=='ERROR' for message in bridge.registry.sent)
+        await bridge.stop('run');assert Sampler.closed
+    asyncio.run(check())
 
 
 def test_control_end_cancels_a_pending_leader_read_and_preserves_actual_reason():
@@ -414,7 +469,7 @@ def test_pickup_uses_raw_pose_and_optional_gripper_not_clipped_command():
     sample={'positions':{'pan':9.,'lift':0.},'gripper':40.}
     limits={name:{'min_rad':-2.,'max_rad':2.} for name in ('pan','lift')}
     assert not pickup_matches(sample,reference)
-    assert pickup_matches(bounded_leader_target(sample,limits),reference) # would incorrectly unlock if clipping happened first
+    assert not pickup_matches(bounded_leader_target(sample,limits),reference)
     sample={'positions':{'pan':1.95,'lift':.04},'gripper':90.}
     assert not pickup_matches(sample,reference)
     assert pickup_matches(sample,reference,False)

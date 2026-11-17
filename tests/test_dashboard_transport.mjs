@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { StationClient } from "../web/transport.js";
+import { StationClient, StationError } from "../web/transport.js";
 
 const TOKEN = "station-test-token-12345678901234567890";
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -158,14 +158,21 @@ function fixture(options = {}) {
         return response({ success: true, message: "held" });
       }
       if (call.path === "/api/operate") {
-        const requestId = `request-${++serial}`;
+        const requestId = call.body.request_id;
         operations.set(requestId, {
-          id: `operation-${serial}`,
+          id: `operation-${++serial}`,
           type: call.body.operation_type,
           mode: call.body.mode,
+          principal:call.body.operator_session_id,
           done: false,
         });
         return response({ request_id: requestId });
+      }
+      if(call.path.startsWith('/api/operations/') && call.path.endsWith('/cancel')) {
+        const id=decodeURIComponent(call.path.split('/').at(-2)),op=operations.get(id);
+        if(op && op.principal!==call.body.operator_session_id)return response({accepted:false,reason:'Owner mismatch'},403);
+        if(op)op.done=true;
+        return response({accepted:true,done:true});
       }
       if (call.path.startsWith("/api/operations/")) {
         const op = operations.get(
@@ -270,12 +277,106 @@ const direct = () => ({
 });
 const model = () => ({ model_steps: [{ instruction: "", duration_s: 2 }] });
 
-test('disconnect sends its final hold with fetch keepalive for page exit',async()=>{
+test('disconnect releases only its captured idle grant with keepalive for page exit',async()=>{
   const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const principal=f.client.operatorSessionId;
   await f.client.disconnect();
   const hold=f.calls.find(call=>call.path==='/api/hold');
   assert.equal(hold.keepalive,true);
+  assert.deepEqual(hold.body,{arm_id:'arm1',controller_session:'session1',operator_session_id:principal,operation_id:null});
+  assert.equal(f.status.arms.arm1.permission,false);assert.equal(f.client._ownedGrants.size,0);
   assert(!f.calls.filter(call=>call.path==='/api/status').some(call=>call.keepalive));
+});
+
+test('public permission alone is not proof that this browser owns the current grant',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);
+  assert.equal(f.client.state.arms.arm1.permission,true);assert.equal(f.client.ownsPermission('arm1'),false);
+  await f.client.enable('arm1');assert.equal(f.client.ownsPermission('arm1'),true);
+  f.status.arms.arm1.controller_session='session2';await f.client.refresh();
+  assert.equal(f.client.ownsPermission('arm1'),false);assert.equal(f.client._ownedGrants.size,0);
+  await f.client.disconnect();assert(!f.calls.some(call=>call.path==='/api/hold'));
+});
+
+test('disconnect closes its old WS before idle cleanup and cannot stop a newer active same-principal operation',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();await opening;
+  const principal=f.client.operatorSessionId,native={permission:true,operation_id:'replacement'};
+  f.setRoute(call=>{
+    if(call.path!=='/api/hold')return;
+    assert.equal(ws.readyState,3);assert.equal(call.body.operator_session_id,principal);
+    const matches=Object.hasOwn(call.body,'operation_id') && call.body.operation_id===native.operation_id;
+    if(!Object.hasOwn(call.body,'operation_id') || matches)native.permission=false;
+    return f.response({success:matches,message:'Operation changed'});
+  });
+  await f.client.disconnect();assert.equal(native.permission,true);
+  assert.equal(f.calls.filter(call=>call.path==='/api/hold').length,1);
+  assert.equal(f.calls.find(call=>call.path==='/api/hold').body.operation_id,null);
+});
+
+test('a delayed disconnect cleanup keeps its original identity across a reconnect and new active operation',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const original=f.client.operatorSessionId,gate=deferred();let originalBody;
+  f.setRoute(call=>{
+    if(call.path==='/api/hold'&&!originalBody){originalBody=call.body;return gate.promise;}
+  });
+  const retiring=f.client.disconnect();await flush();
+  await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();await opening;
+  const replacement=f.client.currentOperation.localId,newPrincipal=f.client.operatorSessionId;
+  gate.resolve(f.response({success:false,message:'Owner changed'}));await retiring;
+  assert.notEqual(newPrincipal,original);assert.equal(originalBody.operator_session_id,original);
+  assert.equal(originalBody.controller_session,'session1');assert.equal(originalBody.operation_id,null);
+  assert.equal(f.client.currentOperation.localId,replacement);assert.equal(ws.readyState,1);
+  assert.equal(f.client._ownedGrants.get('arm1').operator_session_id,newPrincipal);
+  assert.equal(f.client.ownsPermission('arm1'),true);assert.equal(f.client.connected,true);
+  await f.client.disconnect();
+});
+
+test('disconnect cancels the exact HTTP request before attempting captured idle-grant cleanup',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const op=await f.client.submit('arm1','DIRECT','INLINE',direct()),gate=deferred();let canceled=false;
+  f.setRoute(call=>{
+    if(call.path.endsWith('/cancel'))return gate.promise.then(()=>{canceled=true;return f.response({accepted:true,done:false});});
+    if(call.path==='/api/hold'){assert.equal(canceled,true);assert.equal(call.body.operation_id,null);}
+  });
+  const stopping=f.client.disconnect();await flush();
+  assert.equal(f.client.currentOperation,null);assert(!f.calls.some(call=>call.path==='/api/hold'));
+  const cancel=f.calls.find(call=>call.path.endsWith('/cancel'));
+  assert.equal(cancel.path,`/api/operations/${op.requestId}/cancel`);
+  gate.resolve();await stopping;assert.equal(f.calls.filter(call=>call.path==='/api/hold').length,1);
+});
+
+test('retiring an old local operation handle never closes a replacement socket',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);
+  const first=f.client.startManual('arm1'),old=f.sockets[0];old.open();const oldHandle=(await first).localId;
+  assert.ok(oldHandle);await f.client.retireOperation(oldHandle);assert.equal(old.readyState,3);
+  const second=f.client.startManual('arm1'),current=f.sockets[1];current.open();const next=await second;
+  assert.equal(await f.client.retireOperation(oldHandle),false);
+  assert.equal(current.readyState,1);assert.equal(f.client.currentOperation.localId,next.localId);
+  assert(!f.calls.some(call=>call.path==='/api/hold'));
+  await f.client.disconnect();
+});
+
+test('successful finite completion retains its healthy grant until explicit disconnect',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const op=await f.client.submit('arm1','DIRECT','INLINE',direct());
+  f.operations.get(op.requestId).done=true;await f.clock.advance(60);
+  assert.equal(f.client.currentOperation,null);assert.equal(f.client.ownsPermission('arm1'),true);
+  assert(!f.calls.some(call=>call.path==='/api/hold'||call.path.endsWith('/cancel')));
+  await f.client.disconnect();assert.equal(f.status.arms.arm1.permission,false);
+  assert.equal(f.calls.find(call=>call.path==='/api/hold').body.operation_id,null);
+});
+
+test('a delayed idle-release acknowledgment cannot overwrite newer grant or operation state',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const scope=f.client._ownedGrants.get('arm1'),gate=deferred();
+  f.setRoute(call=>call.path==='/api/hold'?gate.promise:undefined);
+  const release=f.client.releaseIdlePermission('arm1',scope);
+  await f.client.enable('arm1');const opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();const op=await opening;
+  gate.resolve(f.response({success:true}));await release;
+  assert.equal(f.client.currentOperation.localId,op.localId);assert.equal(f.client.ownsPermission('arm1'),true);
+  assert.equal(f.client.state.arms.arm1.permission,true);assert.equal(ws.readyState,1);
+  f.setRoute(null);await f.client.disconnect();
 });
 
 for (const accepted of [true,false]) test(`scoped handoff stops local targets before Hold and closes socket after response (${accepted})`,async()=>{
@@ -606,11 +707,11 @@ test("sparse retry keeps canonical input/revision, uses fresh transport identity
   await f.client.disconnect();
 });
 
-test("missing sparse ACK stops uncertain task with explicit hold instead of retaining/replaying it", async () => {
+test("missing sparse ACK retires only the unconfirmed update while scoped status and the operation continue", async () => {
   const f = fixture({ ackTimeoutMs: 300 });
   await f.client.connect(TOKEN);
   f.setAutoAck(false);
-  await f.client.submit("arm1", "TRAJECTORY", "STREAM");
+  const operation=await f.client.submit("arm1", "TRAJECTORY", "STREAM");
   await f.clock.advance(60);
   const update = f.client.updateStream(trajectory());
   const outcome = assert.rejects(
@@ -619,12 +720,21 @@ test("missing sparse ACK stops uncertain task with explicit hold instead of reta
   );
   await f.clock.advance(400);
   await outcome;
-  assert.equal(f.client.currentOperation, null);
-  assert.ok(f.calls.some((c) => c.path === "/api/hold"));
+  assert.equal(f.client.currentOperation.requestId,operation.requestId);
+  assert.equal(f.client.currentOperation.pendingInputId,null);
+  const commands=f.calls.filter(c=>c.path==='/api/stream'&&c.body.frame_kind==='COMMAND');
+  await f.clock.advance(450);
+  assert.equal(f.calls.filter(c=>c.path==='/api/stream'&&c.body.frame_kind==='COMMAND').length,commands.length);
+  assert.ok(f.calls.some(c=>c.path==='/api/stream'&&c.body.frame_kind==='HEARTBEAT'));
+  assert(!f.calls.some(c=>c.path==='/api/hold'||c.path.endsWith('/cancel')));
+  const last=commands.at(-1).body,server=f.operations.get(operation.requestId);
+  Object.assign(server,{inputId:last.input_id,revision:last.semantic_revision});
+  await f.clock.advance(60);
+  assert.equal(f.client.currentOperation.lastAcceptedRevision,last.semantic_revision,'late ACK remains observable');
   await f.client.disconnect();
 });
 
-test("lost operate response requests hold and never retries a possibly accepted INLINE action", async () => {
+test("lost operate response cancels its known request ID and never replays or holds the arm", async () => {
   const f = fixture({ requestTimeoutMs: 300 });
   await f.client.connect(TOKEN);
   const lost = deferred();
@@ -637,12 +747,16 @@ test("lost operate response requests hold and never retries a possibly accepted 
   await f.clock.advance(350);
   await outcome;
   assert.equal(f.calls.filter((c) => c.path === "/api/operate").length, 1);
-  assert.equal(f.calls.filter((c) => c.path === "/api/hold").length, 1);
+  const sent=f.calls.find(c=>c.path==='/api/operate').body;
+  const canceled=f.calls.find(c=>c.path===`/api/operations/${sent.request_id}/cancel`);
+  assert.equal(canceled.body.operator_session_id,sent.operator_session_id);
+  assert.equal(canceled.keepalive,true);
+  assert.equal(f.calls.filter((c) => c.path === "/api/hold").length, 0);
   assert.equal(f.client.currentOperation, null);
   await f.client.disconnect();
 });
 
-test("unconfirmed compensating hold is reported; definitive admission rejection does not stop another operation", async () => {
+test("unconfirmed scoped cancellation is reported; admission rejection never stops another operation", async () => {
   const f = fixture({ requestTimeoutMs: 200 });
   await f.client.connect(TOKEN);
   f.setRoute((c) =>
@@ -656,15 +770,108 @@ test("unconfirmed compensating hold is reported; definitive admission rejection 
   f.setRoute((c) =>
     c.path === "/api/operate"
       ? new Promise(() => {})
-      : c.path === "/api/hold"
-        ? f.response({ success: false })
+      : c.path.endsWith('/cancel')
+        ? f.response({ accepted: false, reason:'Cancellation unavailable' })
         : undefined,
   );
   const p = f.client.submit("arm1", "DIRECT", "INLINE", direct());
   const rejected = assert.rejects(p);
   await f.clock.advance(250);
   await rejected;
-  assert.ok(f.errors.some((e) => e.code === "HOLD_UNCONFIRMED"));
+  assert.ok(f.errors.some((e) => e.code === "CANCEL_UNCONFIRMED"));
+  assert.equal(f.calls.filter(c=>c.path==='/api/hold').length,0);
+  await f.client.disconnect();
+});
+
+test('temporary operation polling failures retain ownership and retry the same request ID',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);let polls=0;
+  f.setRoute(c=>c.path.startsWith('/api/operations/')&&c.method==='GET'&&++polls===1?f.response('Temporary failure',503):undefined);
+  const op=await f.client.submit('arm1','MODEL','STREAM',{},'model-a');
+  await f.clock.advance(180);
+  assert.equal(f.client.currentOperation.requestId,op.requestId);assert.equal(f.client.connected,true);
+  assert.ok(polls>=2);assert.ok(f.events.some(e=>e.event==='transport-delayed'));
+  assert(!f.calls.some(c=>c.path==='/api/hold'||c.path.endsWith('/cancel')));
+  f.operations.get(op.requestId).done=true;await f.clock.advance(60);
+  assert.equal(f.client.currentOperation,null,'an actual terminal result still retires the operation');
+  await f.client.disconnect();
+});
+
+test('a transient sparse POST failure retries the existing input identity before ACK without restarting the operation',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);
+  const op=await f.client.submit('arm1','TRAJECTORY','STREAM');await f.clock.advance(60);
+  let first=true;
+  f.setRoute(c=>{if(c.path==='/api/stream'&&c.body.frame_kind==='COMMAND'&&first){first=false;return Promise.reject(new TypeError('Temporary network loss'));}});
+  const update=f.client.updateStream(trajectory());await f.clock.advance(400);await update;
+  const commands=f.calls.filter(c=>c.path==='/api/stream'&&c.body.frame_kind==='COMMAND');
+  assert.equal(commands.length,2);assert.equal(commands[0].body.input_id,commands[1].body.input_id);
+  assert.equal(commands[0].body.semantic_revision,commands[1].body.semantic_revision);
+  assert.ok(commands[1].body.sequence>commands[0].body.sequence);
+  assert.equal(f.client.currentOperation.requestId,op.requestId);
+  assert(!f.calls.some(c=>c.path==='/api/hold'||c.path.endsWith('/cancel')));
+  await f.client.disconnect();
+});
+
+test('late HTTP admission after replacement cancels only the original request',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);const gate=deferred();let oldBody;
+  f.setRoute(c=>{if(c.path==='/api/operate'&&!oldBody){oldBody=c.body;return gate.promise;}});
+  const first=f.client.submit('arm1','DIRECT','INLINE',direct());
+  const retired=assert.rejects(first,e=>e.code==='CANCELED');
+  f.client._stopLocalOperation('stopped','Retired test intent');
+  const next=await f.client.submit('arm1','DIRECT','INLINE',direct());
+  gate.resolve(f.response({request_id:oldBody.request_id}));await retired;await flush();
+  assert.equal(f.client.currentOperation.requestId,next.requestId);
+  const cancels=f.calls.filter(c=>c.path.endsWith('/cancel'));
+  assert.equal(cancels.length,1);assert.equal(cancels[0].path,`/api/operations/${oldBody.request_id}/cancel`);
+  assert(!f.calls.some(c=>c.path==='/api/hold'));
+  await f.client.disconnect();
+});
+
+test('late cancellation of a failed HTTP operation cannot retire replacement permission or execution',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const first=await f.client.submit('arm1','DIRECT','INLINE',direct()),old=f.client._active,gate=deferred();
+  f.setRoute(c=>c.path===`/api/operations/${first.requestId}/cancel`?gate.promise:undefined);
+  f.client._failOperation(old,new StationError('Definitive old error','CONTROL_ERROR'));
+  await f.client.enable('arm1');const next=await f.client.submit('arm1','DIRECT','INLINE',direct());
+  gate.resolve(f.response({accepted:true,done:true}));await flush();
+  assert.equal(f.client.currentOperation.requestId,next.requestId);assert.equal(f.client._ownedArms.has('arm1'),true);
+  f.client._failOperation(old,new StationError('Late duplicate failure','CONTROL_ERROR'));await flush();
+  assert.equal(f.client.currentOperation.requestId,next.requestId);
+  assert.equal(f.calls.filter(c=>c.path.endsWith('/cancel')).length,1);
+  assert(!f.calls.some(c=>c.path==='/api/hold'));
+  await f.client.disconnect();
+});
+
+test('persistent manual pickup waits through missing measurements and PAUSED resumes with a fresh sample',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);
+  const pending=f.client.startManual('arm1');const ws=f.sockets[0];ws.open();await pending;
+  f.status.arms.arm1.feedback_valid=false;f.client.state.arms.arm1.feedback_valid=false;
+  ws.message({type:'grant',grant:f.grant(null,{phase:'PAUSED'})});
+  await f.clock.advance(30);
+  assert.equal(ws.sent.filter(message=>message.frame_kind==='COMMAND').length,0);
+  assert.equal(f.client.currentOperation.state,'paused');assert.equal(ws.readyState,1);
+  f.status.arms.arm1.feedback_valid=true;f.client.state.arms.arm1.feedback_valid=true;
+  ws.message({type:'grant',grant:f.grant(null,{phase:'PAUSED'})});await f.clock.advance(20);
+  assert.ok(ws.sent.some(message=>message.frame_kind==='COMMAND'));
+  assert(!f.calls.some(c=>c.path==='/api/hold'||c.path.endsWith('/cancel')));
+  await f.client.disconnect();
+});
+
+test('per-packet rejection retains manual connection; actual terminal error closes only that owned socket',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);
+  const opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();await opening;
+  ws.message({type:'grant',grant:f.grant()});await f.clock.advance(20);
+  const pickup=ws.sent.find(message=>message.frame_kind==='COMMAND');
+  ws.message({type:'grant',grant:f.grant(null,{last_accepted_input_id:pickup.input_id})});
+  ws.message({type:'input_rejected',reason:'Malformed previous frame',sequence:pickup.sequence});
+  f.client.setManualTarget({positions:positions(.7),gripper:35});await f.clock.advance(20);
+  const next=ws.sent.filter(message=>message.frame_kind==='COMMAND').at(-1);
+  assert.equal(ws.readyState,1);assert.notEqual(next.input_id,pickup.input_id);assert.ok(next.sequence>pickup.sequence);
+  assert.deepEqual(next.body.positions,positions(.7));
+  assert.ok(f.events.some(e=>e.event==='input-rejected'));assert.ok(f.client.currentOperation);
+  ws.message({type:'error',reason:'Native owner failed'});await flush();
+  assert.equal(ws.readyState,3);assert.equal(f.client.currentOperation,null);
+  await f.clock.advance(500);assert.equal(f.sockets.length,1,'actual disconnect never auto-reopens');
+  assert(!f.calls.some(c=>c.path==='/api/hold'||c.path.endsWith('/cancel')));
   await f.client.disconnect();
 });
 
@@ -830,19 +1037,55 @@ test("manual feedback stays current internally while UI state callbacks are deci
   await f.client.disconnect();
 });
 
-test("an enable response arriving after explicit disconnect is compensated by hold", async () => {
+test("an enable response arriving after explicit disconnect is compensated by captured idle-only cleanup", async () => {
   const f = fixture();
   await f.client.connect(TOKEN);
   const wait = deferred();
   f.setRoute((c) => (c.path === "/api/permission" ? wait.promise : undefined));
   const permission = f.client.enable("arm1");
+  const principal=f.client.operatorSessionId;
   const rejected = assert.rejects(permission, (e) => e.code === "CANCELED");
   await f.client.disconnect();
   wait.resolve(f.response({ accepted: true, permission: true }));
   await flush();
   await rejected;
   assert.ok(f.calls.some((c) => c.path === "/api/hold"));
+  assert.deepEqual(f.calls.find(c=>c.path==='/api/hold').body,
+    {arm_id:'arm1',controller_session:'session1',operator_session_id:principal,operation_id:null});
+  assert.equal(f.status.arms.arm1.permission,false);
   assert.equal(f.client.connected, false);
+});
+
+test('late accepted permission cleanup uses the original principal and cannot stop a replacement after reconnect',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);const gate=deferred();let firstPermission=true;
+  const original=f.client.operatorSessionId;
+  f.setRoute(call=>{
+    if(call.path==='/api/permission'&&firstPermission){firstPermission=false;return gate.promise;}
+    if(call.path==='/api/hold'&&call.body.operator_session_id===original) {
+      assert.equal(call.body.operation_id,null);return f.response({success:false,message:'Owner changed'});
+    }
+  });
+  const enabling=f.client.enable('arm1'),canceled=assert.rejects(enabling,e=>e.code==='CANCELED');
+  await f.client.disconnect();await f.client.connect(TOKEN);await f.client.enable('arm1');
+  const newPrincipal=f.client.operatorSessionId,opening=f.client.startManual('arm1'),ws=f.sockets[0];ws.open();const op=await opening;
+  gate.resolve(f.response({accepted:true,permission:true}));await canceled;
+  const hold=f.calls.find(call=>call.path==='/api/hold');
+  assert.equal(hold.body.operator_session_id,original);assert.notEqual(hold.body.operator_session_id,newPrincipal);
+  assert.equal(f.client.currentOperation.localId,op.localId);assert.equal(ws.readyState,1);
+  assert.equal(f.client.ownsPermission('arm1'),true);
+  await f.client.disconnect();
+});
+
+test('a controller-session change during enable neither installs stale grant metadata nor cleans up the new session',async()=>{
+  const f=fixture();await f.client.connect(TOKEN);const gate=deferred();
+  f.setRoute(call=>call.path==='/api/permission'?gate.promise:call.path==='/api/hold'?f.response({success:false,message:'Owner changed'}):undefined);
+  const enabling=f.client.enable('arm1'),canceled=assert.rejects(enabling,e=>e.code==='CANCELED');
+  f.status.arms.arm1.controller_session='replacement-session';f.status.arms.arm1.runtime_boot_id='replacement-boot';
+  await f.client.refresh();gate.resolve(f.response({accepted:true,permission:true}));await canceled;
+  assert.equal(f.client.state.arms.arm1.controller_session,'replacement-session');
+  assert.equal(f.client._ownedGrants.size,0);
+  assert.equal(f.calls.find(call=>call.path==='/api/hold').body.controller_session,'session1');
+  await f.client.disconnect();
 });
 
 test("runtime boot change invalidates local operation and cannot regrant or resend it", async () => {

@@ -1,4 +1,4 @@
-"""Recorded Fold import and the explicitly approved -105 degree software floor."""
+"""Recorded Fold coordinates are independent of optional display extents."""
 import copy
 import math
 from pathlib import Path
@@ -36,7 +36,7 @@ def test_recorded_fold_is_available_and_preserves_jaw_without_changing_home():
     assert result['geometry']['frame_id']=='base_link'
     assert config==before
 
-def test_native_target_validation_accepts_fold_but_still_rejects_below_approved_floor():
+def test_native_target_validation_accepts_finite_angles_below_old_display_floor():
     config=arm_config();shoulder=next(j for j in config['joints'] if j['name']=='shoulder_lift')
     assert shoulder['min_rad']==math.radians(-105)
     model=ManualControl(config)
@@ -45,13 +45,15 @@ def test_native_target_validation_accepts_fold_but_still_rejects_below_approved_
     try:
         arm._target(target)
         outside=copy.deepcopy(target);outside['positions']['shoulder_lift']=math.radians(-105)-1e-6
-        with pytest.raises(ValueError):arm._target(outside)
+        positions,_=arm._target(outside)
+        assert positions==outside['positions']
         assert arm.backend.writes==0
     finally:arm.pool.shutdown(wait=False,cancel_futures=True)
 
-def test_copying_pose_does_not_override_a_narrower_profile_limit():
+def test_narrower_display_metadata_does_not_disable_the_recorded_pose():
     config=arm_config()
     next(j for j in config['joints'] if j['name']=='shoulder_lift')['min_rad']=math.radians(-100)
     model=ManualControl(config)
-    assert not model.describe()['presets']['fold']
-    with pytest.raises(ValueError):model.preset('fold',config['manual_control']['poses']['home']['positions'],50.)
+    assert model.describe()['presets']['fold']
+    result=model.preset('fold',config['manual_control']['poses']['home']['positions'],50.)
+    assert result['target']['positions']['shoulder_lift']==pytest.approx(math.radians(OBSERVED_DEG['shoulder_lift']))

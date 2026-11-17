@@ -137,7 +137,7 @@ An external application can use HTTPS/WSS without installing ROS or LeRobot. Kee
 
 The normal control sequence is **discover resources → read current state → explicitly grant permission → start an operation → consume feedback → stop/hold when finished**. Use the same client-generated `operator_session_id` for permission, operation and stream requests. Read `runtime_boot_id` and `controller_session` from current `/api/status`; do not hard-code them. Resource IDs and joint names come from `/api/resources`. Body joints use radians; the gripper uses a separate calibrated percentage, 0 closed / 100 open.
 
-`POST /api/operate` returns a gateway `request_id`. Poll `/api/operations/{request_id}` for acceptance progress and completion; its native `operation_id` is a different identifier. STREAM commands use the current feedback window and increasing transport sequence. `/api/stream` returning `forwarded: true` only means the gateway forwarded the frame—check `last_accepted_input_id` and, for MODEL/TRAJECTORY, `last_accepted_semantic_revision` in operation feedback.
+`POST /api/operate` registers a pending action and returns its gateway `request_id`. Supply a unique `request_id` (up to 64 identifier characters) to recognize a delayed response; identical retained IDs/bodies are idempotent. Cancel only that request with `POST /api/operations/{request_id}/cancel` and its `operator_session_id`. Poll `/api/operations/{request_id}` for acceptance progress and completion; its native `operation_id` is a different identifier. STREAM commands use the current feedback window and increasing transport sequence. `/api/stream` returning `forwarded: true` only means the gateway forwarded the frame—check `last_accepted_input_id` and, for MODEL/TRAJECTORY, `last_accepted_semantic_revision` in operation feedback.
 
 Read [the external API integration guide](docs/web-api.md) for exact JSON payloads, a runnable read-only Python example, permission/operation examples, stream framing and browser-client reuse. It also explains the difference between bounded Cartesian IK, manual IK calculation and continuous joint control. The approximately 100 Hz device loop is independent of UI polling and the trained policy's inference cadence.
 
@@ -182,7 +182,8 @@ Paths below are relative to the gateway. `{arm_id}`, `{camera_id}`, `{host_id}` 
 | Method | Path | Purpose / key input |
 | --- | --- | --- |
 | POST | `/api/permission` | `{arm_id, controller_session, operator_session_id, enable}`; inspect returned `accepted`, `permission`, `reason`. |
-| POST | `/api/operate` | Start `DIRECT`, `TRAJECTORY` or `MODEL` in `INLINE`/`STREAM` mode; returns `request_id`. |
+| POST | `/api/operate` | Register `DIRECT`, `TRAJECTORY` or `MODEL` in `INLINE`/`STREAM` mode; returns the supplied or generated `request_id`. |
+| POST | `/api/operations/{id}/cancel` | Request cancellation of that exact action using its `operator_session_id`; also handles pending admission. |
 | GET | `/api/operations/{request_id}` | `done`, `feedback` and eventual `result`; not a durable job-history API. |
 | POST | `/api/stream` | Forward a current-window `COMMAND`, `HEARTBEAT` or `END` frame for an admitted HTTP stream. |
 | WSS | `/ws/control` | **DIRECT + STREAM only**: opening goal, grant/state feedback and named joint targets. `input_semantics` selects persistent manual intent or the default live samples; see [stream semantics](docs/web-api.md#direct-control-websocket). |

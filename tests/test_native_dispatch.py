@@ -75,7 +75,7 @@ def test_reconnect_has_no_goals_and_requires_new_session(tmp_path):
         assert a.session!=session and not a.permission and a.last_write==0. and a.backend.writes==0
     finally:a.close()
 
-def test_command_advances_while_measured_plant_lags_then_respects_lead_cap():
+def test_command_advances_by_velocity_slew_even_when_measured_plant_lags():
     root=Path(__file__).resolve().parents[1];c=load(root/'config/mock.yaml');a=ArmController(c['arms'][0],c,'boot',{})
     from soarm_station.control import now
     a.q={j['name']:0. for j in a.config['joints']};a.gripper=50.;a.sample_time=now()
@@ -88,7 +88,8 @@ def test_command_advances_while_measured_plant_lags_then_respects_lead_cap():
     a._tick(now(),.01);second=a.commanded_q['elbow_flex']
     assert second>first and second-first<=.01500001
     for _ in range(20):a._tick(now(),.01)
-    assert a.commanded_q['elbow_flex']==pytest.approx(.12)
+    assert a.commanded_q['elbow_flex']==pytest.approx(.15)
+    assert a.stats['tracking_state']=='TRACKING_LAG' and a.op is not None
 
 def test_completed_path_preserves_final_servo_goal():
     root=Path(__file__).resolve().parents[1];c=load(root/'config/mock.yaml');a=ArmController(c['arms'][0],c,'boot',{})

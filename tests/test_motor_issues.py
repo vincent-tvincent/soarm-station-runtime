@@ -31,6 +31,19 @@ def latch(previous,issue):
 
 
 class MotorIssueTests(unittest.TestCase):
+    def test_observed_tracking_lag_reports_only_sustained_nonprogress_without_envelope_fault(self):
+        value=snapshot();value['reference_positions']['elbow_flex']=2.
+        value['stats']={'tracking_state':'TRACKING_LAG','limited_actuators':[],
+                        'lagging_actuators':['elbow_flex'],'no_progress_s':{'elbow_flex':.1}}
+        self.assertEqual(row(value)['state'],'unknown')
+        value['stats']['no_progress_s']['elbow_flex']=1.2
+        original=copy.deepcopy(value);issue=row(value)
+        self.assertEqual(issue['state'],'stall');self.assertEqual(issue['code'],'TRACKING_NOT_PROGRESSING')
+        self.assertEqual(value,original);self.assertEqual(value['phase'],'ACTIVE')
+        self.assertEqual(row(value,'wrist_flex')['state'],'clear')
+        value['phase']='PAUSED'
+        self.assertEqual(row(value)['state'],'unknown')
+
     def test_explicit_stall_identifies_only_the_named_motor_and_preserves_input(self):
         value=snapshot();value['phase']='HOLD';value['error']='TRACKING_STALLED: elbow_flex'
         original=copy.deepcopy(value);result=project(value)

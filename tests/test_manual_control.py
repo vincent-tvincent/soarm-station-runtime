@@ -160,9 +160,10 @@ class ManualControlTests(unittest.TestCase):
         self.assertEqual(minus,model.roll_preset('minus_90',minus['positions'],37.)['target'])
         for n in NAMES[:-1]:self.assertEqual(minus['positions'][n],current[n])
         c['manual_control']['poses']['fold']={'positions':{**HOME,'shoulder_lift':math.radians(-104.79)}}
-        invalid=ManualControl(c)
-        self.assertFalse(invalid.describe()['poses']['fold']['available'])
-        with self.assertRaises(ValueError):invalid.preset('fold',current,37.)
+        outside=ManualControl(c)
+        self.assertTrue(outside.describe()['poses']['fold']['available'])
+        self.assertEqual(outside.preset('fold',current,37.)['target']['positions'],
+                         c['manual_control']['poses']['fold']['positions'])
 
     def test_missing_model_bad_units_and_partial_joint_input_are_explicit(self):
         c=config();c.pop('urdf');model=ManualControl(c)
@@ -173,9 +174,34 @@ class ManualControlTests(unittest.TestCase):
         with self.assertRaises(ValueError):model.fk({**HOME,'wrist_roll':float('nan')},50.)
         with self.assertRaises(ValueError):model.step(HOME,None,keys=['KeyK'],dt_s=.03)
         with self.assertRaises(ValueError):model.step(HOME,50.,keys=['KeyK'],dt_s=-1.)
-        # Real observations outside the command domain remain displayable, not clipped.
+        # Model/display extents do not reject finite measured or target angles.
         self.assertTrue(np.isfinite(model.fk({**HOME,'shoulder_pan':2.},50.)['position_m']).all())
-        with self.assertRaises(ValueError):model.step({**HOME,'shoulder_pan':2.},50.,keys=['KeyK'],dt_s=.03)
+        self.assertEqual(model.step({**HOME,'shoulder_pan':2.},50.,keys=['KeyK'],dt_s=.03)['status'],'OK')
+
+    def test_ik_beyond_legacy_and_urdf_extents_keeps_velocity_and_fk_contract(self):
+        original=config();narrow=copy.deepcopy(original)
+        for joint in narrow['joints']:joint.update(min_rad=-.001,max_rad=.001)
+        q={**HOME,'shoulder_pan':2.4}
+        expected=ManualControl(original).step(q,50.,keys=['KeyK'],dt_s=.03,level=2)
+        actual=ManualControl(narrow).step(q,50.,keys=['KeyK'],dt_s=.03,level=2)
+        self.assertEqual(actual,expected)
+        self.assertEqual(actual['status'],'OK')
+        self.assertGreater(actual['target']['positions']['shoulder_pan'],2.4)
+        self.assertLess(actual['residuals']['position_m'],.00015)
+        for joint in original['joints']:
+            self.assertLessEqual(abs(actual['target']['positions'][joint['name']]-q[joint['name']]),joint['velocity_rad_s']*.03+1e-10)
+
+    def test_absent_angle_metadata_and_far_named_presets_are_supported(self):
+        c=config()
+        for joint in c['joints']:joint.pop('min_rad');joint.pop('max_rad')
+        far={**HOME,'shoulder_pan':4.,'wrist_roll':7.}
+        c['manual_control']['poses']['home']['positions']=far
+        c['manual_control']['wrist_roll_reference_rad']=7.
+        model=ManualControl(c)
+        self.assertEqual(model.preset('home',HOME,42.)['target']['positions'],far)
+        roll=model.roll_preset('plus_90',far,42.)['target']
+        self.assertAlmostEqual(roll['positions']['wrist_roll'],7.+math.pi/2)
+        self.assertFalse(model.describe()['application_angle_limits'])
 
 
 if __name__=='__main__':unittest.main()

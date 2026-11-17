@@ -100,15 +100,15 @@ Each arm admits one operation at a time:
 - `TRAJECTORY`: timed joint points or supported Cartesian endpoints.
 - `MODEL`: a registered local or native remote policy profile.
 
-`INLINE` carries bounded inputs. `STREAM` accepts typed `COMMAND`, `HEARTBEAT` and `END` messages after `READY`. Healthy streams have no total lifetime deadline unless requested or capped by the profile. Browser/manual DIRECT WebSocket operations explicitly use `input_semantics: persistent_target`: accepted target intent remains until replaced or stopped, with no target/heartbeat inactivity expiry. Native leader and other legacy sources default to `live_sample`, whose targets expire independently of heartbeats. Stream frames still use host-issued 250-ms admission windows, increasing transport sequence numbers and current boot/session/operation identities. DIRECT starts from the existing measured/held reference and applies speed/lead limits; the first target need not match that pose. Socket closure cancels its own operation; reconnect does not rearm.
+`INLINE` carries bounded inputs. `STREAM` accepts typed `COMMAND`, `HEARTBEAT` and `END` messages. DIRECT streams have no profile-imposed lifetime; only an explicitly requested duration ends them automatically. Browser/manual DIRECT WebSocket operations use `input_semantics: persistent_target`: accepted target intent remains until replaced or stopped. The native leader uses the same persistent-target contract. Legacy `live_sample` DIRECT sources pause and discard stale samples during input/feedback/control gaps, preserving the same operation and permission for fresh input. They do not replay missed samples. `PAUSED` feedback still permits fresh recovery samples.
 
-Successful INLINE completion retains the healthy owner's permission and final command reference. Each subsequent motion still requires a new operation. Explicit disable, hold/cancel, END, control-WebSocket disconnect, actual source expiry, fault and restart revoke permission. Reconnection does not resume an old operation. Stateless HTTPS clients explicitly hold/disable when their sequence is finished.
+Stream frames retain host-issued admission windows, increasing sequence numbers and current boot/session/operation identities. Rejected individual frames produce `input_rejected`; they do not close an established stream. Actual socket closure cancels its own operation and reconnect requires a fresh Start. Successful INLINE completion retains the healthy owner's permission and final command reference; each later motion still requires a new operation. Explicit Stop/disable, cancellation, END, real owner loss, hardware faults and restart end control.
 
 Sparse MODEL/TRAJECTORY stream commands require a positive monotonic `semantic_revision`. A higher valid revision replaces intent; a retry of the current revision preserves its input ID/body and does not restart it. Retired revisions cannot execute again. DIRECT producers use latest-only targets without this field. A rebuilt interface definition is required when changing ROS participants across protocol versions.
 
 Trajectory replacements begin from the admitted commanded reference, rather than lagging measurements. A STREAM trajectory remains active at its settled endpoint and can accept a later replacement. This supports bounded path replacement; it is not a general rolling-chunk scheduler. Body-only trajectories preserve the existing gripper grasp reference. Expected gripper contact does not automatically freeze body advancement.
 
-A 100-Hz per-arm loop owns final velocity/lead-bounded dispatch. Default target lead is 0.12 rad; default joint completion tolerance is 0.03 rad, overridable by a qualified profile. Model timing follows the policy's trained cadence. Camera decoding and model work remain outside the device thread. Shutdown/hold preserves support torque.
+A 100-Hz per-arm loop owns final dispatch with velocity slew for smooth motion. There is no measured-position lead cap or tracking-error shutdown. Tracking lag/stall remains visible as diagnostics. Default joint completion tolerance is 0.03 rad, configurable per joint. Model timing follows the policy's trained cadence. Camera decoding and model work remain outside the device thread. Shutdown/hold preserves support torque.
 
 ### Configurable work limits
 
@@ -121,11 +121,11 @@ Per-arm `operation_limits` supports:
 | `default_model_step_duration_s` | 30 |
 | `max_model_step_duration_s` | 3600 |
 | `settle_timeout_s` | 2 |
-| `max_stream_duration_s` | `null` (no total STREAM limit) |
+| `max_stream_duration_s` | `null`; applies only to MODEL/TRAJECTORY, not DIRECT |
 
-Optional joint/gripper `tracking_timeout_s` is either a positive value or a mapping for DIRECT/TRAJECTORY/MODEL; `null` disables that inferred-stall policy. Source freshness, measured feedback, device faults and torque loss remain distinct checks.
+Legacy `max_target_lead_rad` and `tracking_timeout_s` fields no longer impose motion gates. The servo controller enforces its configured angle range. Station does not reject or clamp body targets against YAML or URDF angle bounds. Optional `display_min_rad`/`display_max_rad` (and legacy min/max metadata) only describe a UI/model extent; SO-101 resource ranges are derived from the unchanged, startup-verified servo calibration. Resource descriptors explicitly report `range_enforced: false`. Numeric entry and slider display ranges can extend beyond that extent; finite values, correct joint names/units and representable motor packets remain required.
 
-Cartesian endpoints use LeRobot/Placo with explicit base frames, bounded solve time, joint bounds, independent FK residual checks and timed joint paths. Position-only and strict-pose endpoints are supported. Tool-axis tasks, requested positive collision clearance, derivative trajectories, coordinated multi-arm planning and guaranteed continuous Cartesian paths reject explicitly. The supplied SO-101 model is for kinematics/TF and has no mesh/collision geometry.
+Cartesian endpoints use LeRobot/Placo with explicit base frames, bounded solve time, disabled Placo joint-angle limits, independent FK residual checks and timed joint paths. Position-only and strict-pose endpoints are supported. Tool-axis tasks, requested positive collision clearance, derivative trajectories, coordinated multi-arm planning and guaranteed continuous Cartesian paths reject explicitly. The supplied SO-101 model is for kinematics/TF and has no mesh/collision geometry.
 
 ## Dashboard and operator API
 
