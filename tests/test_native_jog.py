@@ -69,3 +69,44 @@ def test_jog_rejected_on_external_live_sample_operation(setup):
     begin(arm)
     with pytest.raises(ValueError,match='owned DIRECT'):arm.input(frame(arm,jog_body(1.)))
     assert arm.target is None
+
+
+@pytest.mark.parametrize('hardware_flag,reason', [(True,'SERVO_OVERLOAD'), (False,'NO_JAW_PROGRESS')])
+def test_gamepad_contact_holds_jaw_through_release_while_body_keeps_jogging(setup,hardware_flag,reason):
+    arm,clock=setup
+    arm.config['urdf']=str(ROOT/'models/so101/so101.urdf')
+    arm.q.update(shoulder_lift=-.87,elbow_flex=1.13)
+    arm.backend.q=dict(arm.q)
+    arm.prepare_jog()
+    begin(arm,persistent_target=True)
+    op_id=arm.op['operation_id']
+    original=arm.backend.send
+    arm.backend.send=lambda q,g:original(q,max(40.,g))  # Object at 40% opening.
+    reads=[]
+    def overload():
+        reads.append(arm.gripper)
+        return hardware_flag and arm.gripper<=40.
+    arm.backend.gripper_overload=overload
+    def run(attempt,jaw,count):
+        for i in range(count):
+            if i%5==0:
+                body=jog_body(.2,jaw)
+                if attempt:body['jog']['grasp_attempt']=attempt
+                arm.input(frame(arm,body,identifier=f'fresh-{arm.last_sequence+1}'))
+            tick(arm,clock)
+    run(8,0.,60)
+    fb=arm.feedback()
+    assert fb['frozen_grasp_attempt']==8 and fb['grasp_freeze_reason']==reason
+    held=fb['jog_gripper_percent']
+    assert 38<=held<40 and reads
+    joint_reference=dict(arm.commanded_q)
+    run(8,95.,12)  # Release before the browser receives its first lock report.
+    run(0,None,12)  # Browser has now entered its existing X/Square lock state.
+    assert arm.commanded_gripper==held and arm.commanded_q!=joint_reference
+    assert arm.permission and arm.op['operation_id']==op_id
+    run(9,90.,12)  # Explicit unlock and the next trigger pickup.
+    assert arm.commanded_gripper>held+5 and not arm.feedback().get('frozen_grasp_attempt')
+    # Other producers using an absolute jaw goal do not opt into auto-lock.
+    reads.clear()
+    run(0,0.,65)
+    assert not arm.feedback().get('frozen_grasp_attempt') and reads==[]

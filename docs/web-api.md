@@ -234,6 +234,15 @@ Check `GET /api/manual/{arm_id}/describe` for `native_jog`. On an owned persiste
 
 Each component is normalized to −1…1. Profile 2 gives this example a requested +Y speed of 20 mm/s. Use a null jaw target and zero jaw rate to retain the admitted opening. Send all-zero rates on release. The Pi advances jog rates only through the packet's admitted window. The session can remain open at rest. A subsequent DIRECT joint command replaces the jog, while socket closure retires the owned operation. The FK and single-step HTTP routes remain calculation-only.
 
+For the gamepad's automatic jaw lock, send an absolute `gripper_target` and a
+nonzero uint32 `grasp_attempt`. Keep that ID for the current trigger pickup.
+After contact, feedback repeats `frozen_grasp_attempt`, `grasp_freeze_reason`
+and the held `jog_gripper_percent`. Apply the lock once for the matching
+operation and pickup. Independent stick rates continue. While locked, send a
+null jaw target and zero jaw rate. Use a new attempt ID after explicit unlock
+and pickup. Omitting the field or sending zero selects ordinary jog behavior.
+ROS clients using these message types need the updated Station interfaces.
+
 ### MODEL: ACT or language-conditioned policy
 
 For a managed profile, prepare its saved revision through `/api/v1/policy-profiles/{id}/prepare` and wait for its job. Select the intended arm's **matching ready profile revision** from `applied_by_arm` in `/api/v1/policy-runtime`; use its `runtime_profile_id` as the operation's `profile_id`. The saved human-readable profile ID and immutable runtime ID are different. Startup-configured policy IDs advertised for that arm by `/api/resources` can also be used directly; they do not require this management preparation flow.

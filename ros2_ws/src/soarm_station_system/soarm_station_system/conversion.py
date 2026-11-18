@@ -78,6 +78,8 @@ def frame_to_dict(m):
             body={'jog':{'translation':list(j.translation),'elevation':j.elevation,'roll':j.roll,
                          'level':j.level,'position_only':j.position_only,'gripper_rate':j.gripper_rate,
                          'gripper_target':j.gripper_target if j.has_gripper_target else None}}
+            if j.grasp_attempt:
+                body['jog']['grasp_attempt'] = j.grasp_attempt
         elif m.payload_kind=='JOINT_TRAJECTORY':body={'points':trajectory_points(m.joint_trajectory)}
         elif m.payload_kind=='MODEL_TASK':body={'instruction':m.model_task.instruction}
         else:raise ValueError('Unsupported payload')
@@ -184,6 +186,10 @@ def stream_from_dict(d,principal):
             j.level=b['level'];j.position_only=b['position_only'];j.gripper_rate=float(b['gripper_rate'])
             j.has_gripper_target=target is not None
             j.gripper_target=float(target) if target is not None else 0.
+            attempt = b.get('grasp_attempt', 0)
+            if type(attempt) is not int or not 0 <= attempt < 2**32 or (attempt and target is None):
+                raise ValueError('A gamepad grasp attempt requires an absolute jaw target')
+            j.grasp_attempt = attempt
         elif m.payload_kind=='MODEL_TASK':m.model_task.instruction=b['instruction']
         elif m.payload_kind=='JOINT_TRAJECTORY':
             from trajectory_msgs.msg import JointTrajectoryPoint

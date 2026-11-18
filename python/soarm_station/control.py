@@ -9,6 +9,7 @@ import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from .hardware import DeviceLock, make_arm, TorqueConfirmationError
+from .gripper_contact import GraspAttempt
 
 def now(): return time.clock_gettime(time.CLOCK_BOOTTIME)
 def uid(): return uuid.uuid4().hex
@@ -351,6 +352,9 @@ class ArmController:
                                     jog_joint_names=list(self.commanded_q),
                                     jog_positions_rad=list(map(float,self.commanded_q.values())),
                                     jog_gripper_percent=float(self.commanded_gripper))
+                grasp = self.op.get('grasp')
+                if grasp is not None and grasp.held_opening is not None:
+                    jog_feedback.update(frozen_grasp_attempt=grasp.number, grasp_freeze_reason=grasp.reason)
             return {**jog_feedback, 'phase':self.phase,'stream_ready':True,'arm_id':self.id,'runtime_boot_id':self.boot,
                     'controller_session':self.session,'operation_id':self.op['operation_id'],
                     'operation_epoch':self.epoch,'window_id':window,'window_valid_for_ms':int((self.windows[window]-t)*1000),
@@ -406,6 +410,9 @@ class ArmController:
                     if not self._persistent_teleop() or self.jog_model is None:
                         raise ValueError('Manual jog requires prepared kinematics and an owned DIRECT stream')
                     jog = self.jog_model.jog_rates(body['jog'])
+                    attempt = body['jog'].get('grasp_attempt', 0)
+                    if type(attempt) is not int or not 0 <= attempt < 2**32 or (attempt and jog[2] is None):
+                        raise ValueError('A gamepad grasp attempt requires an absolute jaw target')
                 elif kind=='DIRECT':
                     q,g=self._target(body)
                     # begin() already seeds the admitted reference from the
@@ -419,10 +426,19 @@ class ArmController:
                     if jog is None:
                         self.op.pop('jog', None)
                         self.op.pop('jog_anchor', None)
+                        self.op.pop('grasp', None)
                         self.target=(q,g)
                     else:
                         from .jog_kinematics import JogAnchor
                         rates, _, _ = jog
+                        grasp = self.op.get('grasp')
+                        if attempt:
+                            if grasp is None or grasp.number != attempt:
+                                self.op['grasp'] = GraspAttempt(attempt)
+                        elif jog[2] is not None or rates['gripper_percent_s']:
+                            self.op.pop('grasp', None)
+                        elif grasp is not None:
+                            grasp.pause_observation()
                         neutral = not (any(rates['translation_m_s']) or rates['elevation_rad_s'] or rates['roll_rad_s'])
                         if neutral or 'jog_anchor' not in self.op or t >= self.op.get('jog_until',0):
                             self.op['jog_anchor'] = JogAnchor()
@@ -512,6 +528,16 @@ class ArmController:
             limited=self._limit(q,g,t,dt)
             if limited is None:return
             applied,actual_g=limited
+            grasp = op.get('grasp')
+            if grasp is not None:
+                jaw_target = op['jog'][2]
+                if jaw_target is None or t >= op['jog_until']:
+                    grasp.pause_observation()
+                else:
+                    held = grasp.update(t, jaw_target, self.commanded_gripper, self.gripper,
+                                        getattr(self.backend, 'gripper_overload', None))
+                    if held is not None:
+                        actual_g = held
             if op['operation_type']=='MODEL':
                 if not self.model.commit(lambda:self.backend.send(applied,actual_g)):return
             else:self.backend.send(applied,actual_g)

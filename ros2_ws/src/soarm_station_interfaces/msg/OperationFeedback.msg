@@ -18,3 +18,6 @@ float64 jog_step_fraction
 string<=64[<=64] jog_joint_names
 float64[<=64] jog_positions_rad
 float64 jog_gripper_percent
+# A latched jaw hold for this operation and trigger pickup. Zero means none.
+uint32 frozen_grasp_attempt
+string<=24 grasp_freeze_reason

@@ -429,3 +429,33 @@ test('native gamepad uses live stick rates and holds the native jaw through lock
   assert.ok(intent.translation[0]>0);assert.equal(f.calls.targets.length,0);
   f.focus(false);assert.equal(f.panel.nativeIntent(),null);
 });
+
+test('contact locks exactly one trigger pickup and leaves the stick and later unlock usable', t => {
+  const f=fixture(t), stick=[0,-.54,0,0];
+  f.manual.descriptor.native_jog=true;
+  f.manual.client.currentOperation.operationId='owned-run';
+  f.poll(raw({axes:stick,lt:.85}));
+  const first=f.panel.nativeIntent().grasp_attempt;
+  assert.ok(first>0);
+  const feedback={operation_id:'owned-run',frozen_grasp_attempt:first,grasp_freeze_reason:'NO_JAW_PROGRESS',jog_gripper_percent:38};
+  f.panel.applyGripFeedback({...feedback,operation_id:'retired-run'});
+  assert.equal(f.panel.engine.gripperState,'following');
+  f.panel.applyGripFeedback(feedback);
+  const epoch=f.panel.sourceEpoch;
+  f.panel.applyGripFeedback(feedback);
+  assert.equal(f.panel.sourceEpoch,epoch);
+  f.poll(raw({axes:stick,lt:0}));
+  const locked=f.panel.nativeIntent();
+  assert.equal(locked.gripper_target,null);
+  assert.ok(locked.translation[0]>0);
+  assert.equal(f.panel.engine.gripperState,'locked');
+  assert.equal(f.element.querySelector('#gamepad-grip-state').textContent,'Auto-locked');
+  assert.equal(f.calls.stops,0);
+  f.poll(raw({axes:stick,lt:0,buttons:[2]}));             // X releases the lock.
+  f.panel.applyGripFeedback(feedback);                     // Late report cannot relock it.
+  assert.equal(f.panel.engine.gripperState,'pickup');
+  f.poll(raw({axes:stick,lt:.95}));
+  assert.notEqual(f.panel.nativeIntent().grasp_attempt,first);
+  f.panel.applyGripFeedback(feedback);
+  assert.equal(f.panel.engine.gripperState,'following');
+});

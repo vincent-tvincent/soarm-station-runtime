@@ -113,5 +113,9 @@ def test_manual_jog_roundtrip_preserves_distinct_rate_and_hold_semantics():
         intent['gripper_target']=target
         decoded=frame_to_dict(stream_from_dict(wire,'operator'))
         assert decoded['body']['jog']==intent and decoded['window_id']=='window'
+    armed = {**intent, 'grasp_attempt': 41}
+    assert frame_to_dict(stream_from_dict({**wire,'body':armed},'operator'))['body']['jog']==armed
+    with pytest.raises(ValueError):
+        stream_from_dict({**wire,'body':{**armed,'gripper_target':None}},'operator')
     for patch in [{'translation':[0.,float('nan'),0.]},{'level':True},{'gripper_rate':1.,'gripper_target':20.}]:
         with pytest.raises(ValueError):stream_from_dict({**wire,'body':{**intent,**patch}},'operator')

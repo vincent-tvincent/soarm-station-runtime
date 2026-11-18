@@ -76,6 +76,14 @@ export class GamepadPanel {
     if (!alreadyToggled && !this.engine.toggleGripper(opening, this.engine.liveGrip)) return false;
     return this.freezeGripper(opening);
   }
+  applyGripFeedback(feedback) {
+    if (this.manual.mode !== 'gamepad' || !this.manual.isOwnStream() ||
+        feedback.operation_id !== this.manual.client.currentOperation?.operationId) return;
+    if (this.engine.freezeGrasp(feedback.frozen_grasp_attempt, feedback.jog_gripper_percent,
+                                feedback.grasp_freeze_reason)) {
+      this.freezeGripper(feedback.jog_gripper_percent);
+    }
+  }
   selectGripperTrigger(side, alreadySelected = false) {
     const opening = this.heldOpening();
     if (!alreadySelected && !this.engine.selectTrigger(side, opening)) return false;
@@ -150,8 +158,12 @@ export class GamepadPanel {
   suspend() {
     this.sourceEpoch++; this.lastSolveAt = null; this.pendingMotion = null; this.needsNeutral = true; this.output = null;
     const locked = this.engine.gripperState === 'locked';
-    this.engine.reset(this.heldOpening(), this.raw);
-    if (locked) this.engine.toggleGripper(this.heldOpening(), this.engine.liveGrip);
+    const reason = this.engine.lockReason;
+    const opening = locked && this.engine.heldClosing !== null
+      ? 100 * (1 - this.engine.heldClosing) : this.heldOpening();
+    this.engine.reset(opening, this.raw);
+    if (locked && this.engine.toggleGripper(opening, this.engine.liveGrip))
+      this.engine.lockReason = reason;
   }
   operationStarted() { this.disconnected = false; this.suspend(); this.render(); }
   operationEnded() { this.suspend(); this.engine.resume_required = true; this.render(); }
@@ -239,7 +251,8 @@ export class GamepadPanel {
     const target = this.engine.gripperState === 'following' ? o.gripper_target : null;
     if (!activeRate(o) && target === null) return null;
     return {translation:o.translation, elevation:o.elevation, roll:o.roll, position_only:false,
-            level:this.manual.level, gripper_rate:0, gripper_target:target};
+            level:this.manual.level, gripper_rate:0, gripper_target:target,
+            ...(target === null ? {} : {grasp_attempt:this.engine.graspAttempt})};
   }
   async solve() {
     if (this.manual.descriptor?.native_jog) return;
@@ -303,9 +316,13 @@ export class GamepadPanel {
     marker.hidden=!valid||this.engine.gripperState!=='pickup'||this.engine.pickupThreshold===null||!this.manual.isOwnStream();
     marker.style.left=`${percent(this.engine.pickupThreshold)}%`;
     const state=this.engine.gripperState;
-    this.el('gamepad-grip-state').textContent=!this.manual.isOwnStream()?'Not started':state==='locked'?'Locked':state==='pickup'?'Waiting for pickup':'Following';
+    this.el('gamepad-grip-state').textContent=!this.manual.isOwnStream()?'Not started':state==='locked'?(this.engine.lockReason?'Auto-locked':'Locked'):state==='pickup'?'Waiting for pickup':'Following';
     const selected=this.engine.activeTrigger==='right'?'RT / R2':'LT / L2';
     this.el('gamepad-grip-note').textContent=!this.manual.isOwnStream()?`${selected} selected · Start holds the current opening.`:state==='locked'?`Opening held at ${Math.round(this.heldOpening()??0)}%.`:state==='pickup'?`Squeeze ${selected} past ${percent(this.engine.pickupThreshold)}% to take over.`:`${selected} · opening target ${Math.round(this.output?.gripper_target??this.heldOpening()??0)}%`;
+    if (this.manual.isOwnStream() && state === 'locked' && this.engine.lockReason) {
+      const reason = {SERVO_OVERLOAD:'Servo overload', NO_JAW_PROGRESS:'Jaw stopped closing', FULLY_CLOSED:'Fully closed'}[this.engine.lockReason];
+      this.el('gamepad-grip-note').textContent = `${reason || 'Grasp held'} · ${percent(1-this.engine.heldClosing)}% opening. X / □ to unlock.`;
+    }
     const lock=this.el('gamepad-grip-lock');lock.firstChild.textContent=state==='locked'?'Unlock gripper ':'Lock gripper ';lock.setAttribute('aria-pressed',String(state==='locked'));
     this.updateControls();
     if(this.active)this.manual.updateControls();

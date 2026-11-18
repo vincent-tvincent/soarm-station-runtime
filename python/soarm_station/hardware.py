@@ -73,6 +73,15 @@ class LeRobotArm:
     def read(self):
         values=self.bus.sync_read('Present_Position')
         return {j['name']:math.radians(values[j['name']]) for j in self.config['joints']},float(values[self.gripper_name])
+    def gripper_overload(self):
+        """Read STS3215 register 65 on the jaw only. Bit 5 reports overload."""
+        try:
+            status = self.bus.read('Status', self.gripper_name, normalize=False)
+        except (OSError, RuntimeError, KeyError, ValueError):
+            # Optional evidence. Normal encoder, torque and dispatch I/O retain
+            # their own error handling if the physical device is unavailable.
+            return None
+        return bool(status & 0x20) if type(status) is int and 0 <= status <= 255 else None
     def _torque_values(self):
         values=self.bus.sync_read('Torque_Enable',normalize=False)
         expected={j['name'] for j in self.config.get('joints',[])}|{self.gripper_name}

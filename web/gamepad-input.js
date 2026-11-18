@@ -65,6 +65,8 @@ export class GamepadInputEngine {
     this.pickupMargin = setting(pickupMargin, "pickupMargin", 0, 1, false);
     this.dpadRollScale = setting(dpadRollScale, "dpadRollScale", 0, 1);
     this.gripperState = "pickup";
+    this.graspAttempt = 0;
+    this.lockReason = "";
     this.heldClosing = null;
     this.pickupThreshold = null;
     this.liveLT = 0;
@@ -118,6 +120,7 @@ export class GamepadInputEngine {
   _pickup(value, selectedValue) {
     this._setHeld(value);
     this.gripperState = "pickup";
+    this.lockReason = "";
     this._lastGrip = clamp(selectedValue, 0, 1);
     this._pickupArmed = this.pickupThreshold !== null && this._lastGrip < this.pickupThreshold;
   }
@@ -181,12 +184,24 @@ export class GamepadInputEngine {
     if (this.gripperState === "locked") {
       this._pickup(currentOpening, selectedValue);
     } else {
-      this._setHeld(currentOpening);
-      this.gripperState = "locked";
-      this._lastGrip = clamp(selectedValue, 0, 1);
-      this._pickupArmed = false;
+      this._lock(currentOpening, selectedValue, "");
     }
     this._reason = "";
+    return true;
+  }
+
+  _lock(heldOpening, selectedValue, reason) {
+    this._setHeld(heldOpening);
+    this.gripperState = "locked";
+    this._lastGrip = clamp(selectedValue, 0, 1);
+    this._pickupArmed = false;
+    this.lockReason = reason;
+  }
+
+  freezeGrasp(attempt, heldOpening, reason) {
+    if (!attempt || attempt !== this.graspAttempt || this.gripperState !== "following" ||
+        opening(heldOpening) === null) return false;
+    this._lock(heldOpening, this.liveGrip, reason);
     return true;
   }
 
@@ -265,6 +280,7 @@ export class GamepadInputEngine {
       if (!this._pickupArmed && selectedValue <= releaseLevel) this._pickupArmed = true;
       if (this._pickupArmed && this._lastGrip < this.pickupThreshold && selectedValue >= this.pickupThreshold && selectedValue > this._lastGrip) {
         this.gripperState = "following";
+        this.graspAttempt = (this.graspAttempt % 0xffffffff) + 1;
       }
     }
     this._lastGrip = selectedValue;

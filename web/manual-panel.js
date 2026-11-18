@@ -227,6 +227,7 @@ export class ManualPanel {
       this.reference = {positions:Object.fromEntries(fb.jog_joint_names.map((n,i)=>[n,fb.jog_positions_rad[i]])),
                         gripper:fb.jog_gripper_percent, gripper_unit:"percent"};
       this.target = copy(this.reference);
+      if (fb.frozen_grasp_attempt && this.mode === "gamepad") this.gamepad?.applyGripFeedback(fb);
       if (this.visible && (this.mode === "ik" || this.mode === "gamepad")) {
         this.note(fb.jog_status === "BLOCKED" ? "No further motion in this direction."
           : fb.jog_status === "WAITING_FOR_INPUT" ? "Holding position · waiting for fresh input."
