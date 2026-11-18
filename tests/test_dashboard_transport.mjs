@@ -277,6 +277,44 @@ const direct = () => ({
 });
 const model = () => ({ model_steps: [{ instruction: "", duration_s: 2 }] });
 
+test("browser leader samples under one current grant and never sends a delayed read under its replacement", async () => {
+  const f=fixture(), reads=[], sent=[];
+  await f.client.connect(TOKEN);
+  const opening=f.client.startManual("arm1",{
+    readLeader:({signal})=>{const gate=deferred();reads.push({gate,signal});return gate.promise;},
+    onLeaderSent:body=>sent.push(body),
+  });
+  const ws=f.sockets[0];ws.open();await opening;
+  assert.equal(ws.sent[0].source,"browser_leader");
+  assert.equal(ws.sent[0].input_semantics,"live_sample");
+  await f.clock.advance(40);assert.equal(reads.length,0);
+  ws.message({type:"grant",grant:f.grant(null,{window_id:"first"})});
+  await f.clock.advance(15);assert.equal(reads.length,1);
+  await f.clock.advance(270);assert.equal(reads.length,1);
+  ws.message({type:"grant",grant:f.grant(null,{window_id:"next"})});
+  const body={positions:positions(),gripper:62,gripper_unit:"percent"};
+  reads[0].gate.resolve(body);await flush();
+  assert.equal(ws.sent.length,1);
+  await f.clock.advance(10);assert.equal(reads.length,2);
+  reads[1].gate.resolve(body);await flush();
+  assert.equal(ws.sent.length,2);assert.equal(ws.sent[1].window_id,"next");
+  assert.deepEqual(ws.sent[1].body,body);assert.deepEqual(sent,[body]);
+  await f.clock.advance(15);const active=reads.at(-1);
+  ws.close();assert.equal(active.signal.aborted,true);
+  active.gate.resolve(body);await f.clock.advance(80);
+  assert.equal(ws.sent.length,2);assert.equal(f.sockets.length,1);
+});
+
+test("USB loss retires the exact browser leader socket",async()=>{
+  const f=fixture();await f.client.connect(TOKEN);
+  const opening=f.client.startManual("arm1",{readLeader:async()=>{throw Error("USB disconnected");}});
+  const ws=f.sockets[0];ws.open();await opening;
+  ws.message({type:"grant",grant:f.grant()});await f.clock.advance(15);
+  assert.equal(f.client.currentOperation,null);assert.equal(ws.readyState,3);
+  assert.equal(ws.sent.length,1);assert.equal(f.calls.filter(c=>c.path==="/api/hold").length,0);
+  assert.ok(f.errors.some(e=>e.message.includes("USB disconnected")));
+});
+
 test('disconnect releases only its captured idle grant with keepalive for page exit',async()=>{
   const f=fixture();await f.client.connect(TOKEN);await f.client.enable('arm1');
   const principal=f.client.operatorSessionId;

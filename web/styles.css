@@ -2038,6 +2038,13 @@ kbd {
 [data-manual-view="leader"] .field-label {
   margin-bottom: 18px;
 }
+.browser-leader-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.browser-leader-actions button { font-size:11px; }
+.browser-leader-import { margin:12px 0; padding-top:10px; border-top:1px solid var(--line); }
+.browser-leader-import .field-label { margin-bottom:10px; }
+.browser-leader-import input[type="file"] { width:100%; font-size:11px; padding:7px; }
+.browser-leader-import .field-row { gap:10px; }
+#browser-leader-status { overflow-wrap:anywhere; }
 @media (max-width: 650px) {
   .manual-control-area {
     min-height: 0;

@@ -2,6 +2,8 @@
 
 SO-Arm Station is a ROS 2 application for operating configurable sets of cameras and independent robot arms on Linux. It provides joint control, timed trajectories, learned-policy execution, camera streaming, a private-network web dashboard, and persistent telemetry. SO-101 is the current hardware adapter; mock arms and cameras support development without devices.
 
+The robot host serves the operator interface. Keyboard, gamepad, camera and policy controls run in the web dashboard. A USB leader pairs directly in a browser that supports Web Serial. [Leader setup](docs/leader-input.md)
+
 ## Live demos
 
 Recorded from a running SO-101 station with live camera feeds and ROS telemetry.
@@ -81,11 +83,10 @@ For multiple mock resources, select `config/multi_mock.yaml`. For detailed insta
 ## Configure a deployment
 
 Already configured and calibrated both arms with LeRobot? Follow the
-[first-time hardware setup guide](docs/first-time-setup.md), based on the
-configured Pi follower, three cameras and Mac leader. It shows where both
-calibration files go, which bindings to edit, and how to start both processes.
-For automatic Mac input-host startup, see the
-[persistent leader companion](docs/leader-input.md#automatic-mac-startup).
+[first-time hardware setup guide](docs/first-time-setup.md). Station runs on the
+follower host. On the operator computer, open the dashboard in a browser. A
+USB leader can be paired directly in a desktop browser supporting Web Serial.
+The Pi stores its calibration. [Browser leader setup](docs/leader-input.md)
 
 Create a physical SO-101 profile under the ignored `local/` directory:
 
@@ -196,21 +197,18 @@ Paths below are relative to the gateway. `{arm_id}`, `{camera_id}`, `{host_id}` 
 | POST | `/api/manual/{arm_id}/preset` | Calculate configured Home/Fold target using `{positions, gripper, name, preserve_wrist?}`. No actuation. |
 | POST | `/api/manual/{arm_id}/roll` | Calculate a configured wrist-roll target using `{positions, gripper, name}`. No actuation. |
 
-### Remote leader input hosts
+### USB leader and Station input sources
 
-These routes coordinate an installed native input-host process. They are not required for a generic LLM/CV client. See [leader setup and payloads](docs/leader-input.md).
-
-To reuse a calibrated leader, keep its files on the computer connected to its
-USB cable. Put the existing LeRobot calibration at
-`local/leader-input/calibration/leader.json`, then use
-`local/leader-input/input-host.json` to match its USB serial and reference that
-file. A ready-to-edit [input-host template](config/leader-input.example.json)
-and [copy, configure and connect guide](docs/leader-input.md#reuse-an-existing-leader-calibration)
-are included. Restart the input bridge after editing its profile; Station does
-not need a restart.
+Open **Control → Leader arm**, select **This browser · USB**, choose a saved
+leader profile and click **Pair USB leader**. The browser opens its port chooser.
+**Follow leader** starts the owned DIRECT stream. The operator computer uses
+the web page for USB access, with no Station installation. Optional server-side
+input hosts can also be selected. [Setup and payloads](docs/leader-input.md)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/api/leader-profiles` | List browser leader profiles and their calibration. |
+| POST | `/api/leader-profiles` | Import a leader calibration on Station for use by authorized browsers. |
 | GET | `/api/input-hosts` | Live connected hosts and OS serial-device inventory. |
 | WSS | `/ws/input-host` | Native host registration, inventory/status and start/stop coordination. |
 | POST | `/api/input-hosts/{host_id}/start` | Start the selected configured leader for an explicitly permitted arm. |

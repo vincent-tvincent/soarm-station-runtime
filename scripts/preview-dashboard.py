@@ -21,7 +21,8 @@ from aiohttp import web
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST, PORT = "127.0.0.1", 8767
-ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js", "manual-panel.js", "gamepad-panel.js", "gamepad-input.js", "fk-view.js"}
+ASSETS = {"app.js", "graph.js", "transport.js", "styles.css", "camera-layout.js", "payload-model.js", "manual-panel.js", "browser-leader-panel.js", "leader-serial.js", "gamepad-panel.js", "gamepad-input.js", "fk-view.js",
+          "policy-management.js", "policy-management.css", "policy-api.js", "policy-draft.js", "yaml-vendor.js", "LICENSE-yaml.txt"}
 
 
 class Preview:
@@ -349,6 +350,17 @@ def build_app(preview):
         arm['manual_control']={'poses':{'home':{'positions':dict(zip(['shoulder_pan','shoulder_lift','elbow_flex','wrist_flex','wrist_roll'],[0.,math.radians(-50),math.radians(65),0.,0.])), 'gripper':None}}}
         arms.append(arm)
     ManualRoutes({'arms':arms}).mount(app)
+    # Browser calibration imports in this preview are disposable and isolated
+    # from the real Station profile directory.
+    import tempfile
+    from soarm_station.browser_leader_profiles import mount_browser_leader_routes
+    profile_root=tempfile.TemporaryDirectory(prefix='soarm-browser-leader-preview-')
+    profile_store=mount_browser_leader_routes(app,{'arms':arms},root=profile_root.name)
+    async def close_profiles(_app):
+        def close():
+            with profile_store.lock:profile_root.cleanup()
+        await asyncio.to_thread(close)
+    app.on_cleanup.append(close_profiles)
     async def input_hosts(_): return preview.response({'hosts':[]})
     app.router.add_get('/api/input-hosts',input_hosts)
     return app

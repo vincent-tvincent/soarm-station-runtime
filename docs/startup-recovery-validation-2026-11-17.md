@@ -25,7 +25,10 @@ visible instead of equating HTTP connectivity with a fully ready station.
 - Synthetic UI checks at 1600×900 and 780×1000 confirmed readable component status,
   no horizontal overflow, and preserved control buttons and the fixed FK panel.
 
-## Mac companion
+## Mac companion (historical)
+
+The subsequent browser USB release retired this client installation. Current
+operators pair from the dashboard. [Current leader setup](leader-input.md)
 
 The configured Mac companion was installed as a per-user launch agent with a
 persistent source snapshot and profile. Automatic process restart and subsequent

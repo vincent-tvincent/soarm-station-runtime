@@ -20,12 +20,11 @@ The normal calibration cache has `robots/<type>/<id>.json` for followers and
 | --- | --- | --- |
 | SO-101 follower, `arm1` | Pi USB | `local/robot.yaml` and follower calibration |
 | `forward`, `overview`, `wrist` cameras | Pi USB | Camera entries in `robot.yaml` |
-| SO-101 leader | Mac USB | Native input-host profile and leader calibration |
-| Browser | Any computer reaching Station | Opens the Pi's dashboard; no ROS installation required |
+| SO-101 leader | Operator computer USB | Browser USB pairing and a leader calibration profile stored on Station |
+| Browser | An authorized computer reaching Station | Opens the Pi dashboard. Direct USB leader access uses desktop Web Serial. |
 
-The leader does not need a direct USB connection to the Pi. If both arms are
-attached to one Linux host, run the input bridge there instead, using the
-leader's separate port and calibration. Stop any official teleoperation or
+The browser reads an operator-connected leader. A Station-attached leader can
+also use a server-side reader with its separate port and calibration. Stop any official teleoperation or
 recording program still using those ports before Station opens them.
 
 ## 2. Install Station on the follower host
@@ -155,79 +154,22 @@ scripts/install-service "$PWD/local/robot.yaml"
 The service and foreground launch run the same application. Run one hardware
 owner for each device set.
 
-## 5. Configure the leader on its USB host
+## 5. Pair the leader on the dashboard
 
-On the Mac, clone the same repository. The input bridge does not require ROS.
-Use the LeRobot environment that already works with the leader; it also needs
-`aiohttp` and `pyserial`.
-
-```bash
-git clone https://github.com/vincent-tvincent/soarm-station-runtime.git
-cd soarm-station-runtime
-export SOARM_STATION_INPUT_PYTHON=/path/to/your/lerobot-venv/bin/python
-mkdir -p local/leader-input/calibration
-cp -n /path/to/your/leader-calibration.json \
-  local/leader-input/calibration/leader.json
-cp -n config/leader-input.example.json local/leader-input/input-host.json
-scripts/run-leader-input --list
-```
-
-Edit `local/leader-input/input-host.json` with the serial from inventory. Our
-configured structure is:
-
-```json
-{
-  "host_id": "operator-mac",
-  "label": "Operator Mac",
-  "leaders": [{
-    "id": "waveshare_leader",
-    "label": "SO-101 leader",
-    "match": {"serial": "YOUR_LEADER_USB_SERIAL"},
-    "calibration": "calibration/leader.json",
-    "motor_model": "sts3215",
-    "joint_map": {
-      "shoulder_pan": "shoulder_pan",
-      "shoulder_lift": "shoulder_lift",
-      "elbow_flex": "elbow_flex",
-      "wrist_flex": "wrist_flex",
-      "wrist_roll": "wrist_roll"
-    },
-    "gripper_source": "gripper"
-  }]
-}
-```
-
-`waveshare_leader` is a chosen profile ID. `match.serial` is the actual USB
-controller serial. The calibration path is relative to this JSON on the Mac,
-not the Pi's filesystem. Copying calibration alone does not create the binding.
-
-Copy the Pi's public TLS certificate using your SSH user and checkout path:
-
-```bash
-scp user@YOUR_STATION_HOSTNAME:/path/to/soarm-station-runtime/local/tls/cert.pem \
-  local/leader-input/station-ca.pem
-
-scripts/run-leader-input \
-  --config local/leader-input/input-host.json \
-  --url https://YOUR_STATION_HOSTNAME:8443 \
-  --ca local/leader-input/station-ca.pem
-```
-
-The bridge advertises devices without starting following. Keep it running and
-restart it after editing its profile; dashboard Refresh does not reload the
-local JSON. The current setup does not install an automatically starting Mac
-companion. See [the leader guide](leader-input.md#reuse-an-existing-leader-calibration)
-for complete field and connection details.
+Plug the SO-101 leader into the computer running desktop Chrome, or another
+browser supporting Web Serial. Open **Control → Leader arm → This browser · USB**.
+Select the profile for the existing leader. If this is a new Station, import the
+leader’s LeRobot calibration JSON in the panel, then select it. Click **Pair USB
+leader** and select the correct adapter in the browser prompt. Station stores
+the calibration profile on the Pi. All operator-side steps take place in the
+browser. [Browser leader guide](leader-input.md)
 
 ## 6. Use the configured system
 
-In **Control → Leader arm**, select **Operator Mac → SO-101 leader** and press
-**Follow leader**. The bridge checks the saved calibration, then the follower
-moves toward the live leader pose with speed interpolation and servo-enforced joint ranges.
-You do not need to match the two poses manually. **Freeze / Esc** holds the
-follower; after Freeze or Home, press Follow leader to approach the current
-leader pose again. Gripper follow can be disabled to keep the jaw held.
-This is the native bridge path; browser virtual-serial forwarding is not implemented.
+Press **Follow leader** to verify the selected leader and start fresh encoder
+sampling. The follower approaches its pose under the configured velocity rates.
+**Freeze / Esc** holds the follower. After Freeze or Home, press **Follow leader**
+to start following again. Turn off **Gripper follow** to keep the jaw held.
 
 For ACT/VLA deployment, use Policies to select a model execution profile, its
 local/remote execution target and camera bindings. See [policy management](policy-management.md).
@@ -239,7 +181,7 @@ training remain in the separate training workflow.
 | Item | Reuse or configure? |
 | --- | --- |
 | Motor IDs, baud, homing offsets and calibrated ranges | Reuse LeRobot setup and each arm's own calibration. |
-| Host and USB bindings | Configure in the two Station/input-host profiles. |
+| Host and USB bindings | Bind the follower on the Pi. Pair the leader USB port in the browser. |
 | Camera devices and names | Configure on the follower host. |
 | Model, software motion limits and named poses | Use/review the SO-101 example; importing calibration does not create these. |
 | Dashboard hostname/certificate and storage | Configure for this deployment. |

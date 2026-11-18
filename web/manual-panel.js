@@ -1,6 +1,7 @@
 import { FKView } from "./fk-view.js";
 import { GamepadPanel } from "./gamepad-panel.js";
 import { isTransientTransportError } from "./transport.js";
+import { BrowserLeaderPanel } from "./browser-leader-panel.js";
 const AXES = [
   ["X", "KeyK", "K", "KeyJ", "J"],
   ["Y", "KeyL", "L", "KeyH", "H"],
@@ -30,11 +31,12 @@ export function conditioningPresentation(value, stale = false) {
       `${Number(metric.characteristic_length_m).toPrecision(4)} m. This is not a distance or safety percentage.` };
 }
 export class ManualPanel {
-  constructor({ element, poseElement, actionElement, client, onError, onNotice, onConditioning, onCameraCycle, onCameraLayout, gamepadEnv }) {
+  constructor({ element, poseElement, actionElement, client, onError, onNotice, onConditioning, onCameraCycle, onCameraLayout, gamepadEnv, leaderSerial }) {
     Object.assign(this, { element, client, onError, onNotice, onConditioning });
     this.arm = "";
     this.mode = "joint";
     this.followGripper = true;
+    this.leaderSource = 'browser';
     this.level = 3;
     this.keys = new Set();
     this.epoch = 0;
@@ -53,7 +55,7 @@ export class ManualPanel {
       <div data-manual-view="joint"><div class="small-heading">Joint targets <span>radians / gripper %</span></div><div id="manual-joints"></div><button id="reset-targets" class="text-button">Use measured pose</button></div>
       <div data-manual-view="ik" hidden><div class="small-heading">Cartesian jog <span>base frame</span></div><div class="ik-jog-grid">${AXES.map(([name, minus, mKey, plus, pKey]) => `<div class="ik-jog-row"><span>${name}<output data-axis="${name}"></output></span><button data-jog="${minus}" aria-label="${name} ${name === "Gripper" ? "close" : "decrease"}">${name === "Gripper" ? "Close" : "−"} <kbd>${mKey}</kbd></button><button data-jog="${plus}" aria-label="${name} ${name === "Gripper" ? "open" : "increase"}">${name === "Gripper" ? "Open" : "+"} <kbd>${pKey}</kbd></button></div>`).join("")}</div><div class="manual-speed"><div class="small-heading">Speed <span id="ik-speed-label">Coarse</span></div><div class="segmented speed-levels" aria-label="IK speed">${[1, 2, 3, 4, 5].map((n) => `<button data-speed="${n}" class="${n === 3 ? "active" : ""}">${n}</button>`).join("")}</div><p class="detail-note">Fine → maximum · hold <kbd>Shift</kbd> for maximum</p></div><button id="ik-position-only" class="manual-toggle" aria-pressed="false">Position only <kbd>Tab</kbd></button><div class="manual-wrist-row"><button data-roll="minus_90">−90° <kbd>R</kbd></button><button data-roll="reference">Reference <kbd>T</kbd></button><button data-roll="plus_90">+90° <kbd>E</kbd></button></div><button id="partial-home" class="text-button">Home · preserve wrist <kbd>Space</kbd></button></div>
       <div data-manual-view="gamepad" id="gamepad-panel" hidden></div>
-      <div data-manual-view="leader" hidden><label class="field-label">Input host<select id="leader-host"><option value="">No input hosts connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select an input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Connect an input host to discover devices.</span><button id="refresh-leaders" class="text-button">Refresh</button></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Follow leader moves the follower smoothly toward the live leader pose. Freeze or Home pauses following.</p></div>
+      <div data-manual-view="leader" hidden><label class="field-label">Leader source<select id="leader-source"><option value="browser">This browser · USB</option><option value="station">Station input</option></select></label><div id="browser-leader-panel"></div><div id="station-leader-panel" hidden><label class="field-label">Station input host<select id="leader-host"><option value="">No server-attached leaders connected</option></select></label><label class="field-label">Leader device<select id="leader-device"><option value="">Select a station input host</option></select></label><div class="panel-subheading"><span id="leader-status" class="detail-note">Choose a leader attached to a station input host.</span><button id="refresh-leaders" class="text-button">Refresh</button></div></div><button id="leader-gripper-follow" class="manual-toggle" aria-pressed="true">Gripper follow <kbd>O</kbd></button><p class="detail-note">Follow leader moves the follower smoothly toward the live leader pose. Freeze or Home pauses following.</p></div>
     </div>
     <div class="manual-actions"><button id="start-manual" class="primary" disabled>Start</button><button id="stop-manual" disabled>Stop <kbd>Esc</kbd></button><button id="home-manual" disabled>Home <kbd>N</kbd></button><button id="fold-manual" disabled>Fold <kbd>M</kbd></button></div><p id="manual-note" class="detail-note" role="status">Targets stay local until you start.</p>`;
     this.poseElement = poseElement || element.appendChild(document.createElement("section"));
@@ -65,6 +67,8 @@ export class ManualPanel {
       (this.poseElement?.id === id ? this.poseElement : this.poseElement?.querySelector("#" + id));
     this.fk = new FKView(this.poseElement);
     this.gamepad = new GamepadPanel({element:this.el('gamepad-panel'),manual:this,onCameraCycle,onCameraLayout,env:gamepadEnv});
+    this.browserLeader = new BrowserLeaderPanel({element:this.el('browser-leader-panel'),manual:this,serial:leaderSerial});
+    this.el('leader-source').onchange=()=>this.safe(()=>this.changeLeaderSource(this.el('leader-source').value));
     this.el("manual-mode").onchange = () =>
       this.safe(() => this.changeMode(this.el("manual-mode").value));
     this.el("reset-targets").onclick = () => {
@@ -125,8 +129,9 @@ export class ManualPanel {
     });
     window.addEventListener("blur", () => this.clearKeys());
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) this.clearKeys();
+      if (document.hidden) {this.clearKeys();this.pauseBrowserLeader('Following paused because the page is hidden.');}
     });
+    window.addEventListener('pagehide',()=>this.pauseBrowserLeader('Following stopped when the page closed.'));
     document.addEventListener("focusin", (e) => {
       if (e.target.matches('input,select,textarea,[contenteditable="true"]'))
         this.clearKeys();
@@ -134,7 +139,7 @@ export class ManualPanel {
     this.timer = setInterval(() => this.tick(), 33);
     this.poseTimer = setInterval(() => this.refreshPose(), 50);
     this.hostTimer = setInterval(() => {
-      if ((this.poseVisible ?? this.visible) && this.mode === "leader")
+      if ((this.poseVisible ?? this.visible) && this.mode === "leader" && !this.isBrowserLeader())
         this.safe(() => this.refreshHosts());
       if (this.leaderRun) this.safe(() => this.heartbeat());
     }, 500);
@@ -171,19 +176,25 @@ export class ManualPanel {
       this.client.currentOperation?.type === "DIRECT"
     );
   }
+  isBrowserLeader(){return this.mode==='leader' && this.leaderSource==='browser';}
+  pauseBrowserLeader(reason) {
+    if(!this.browserLeader || !(this.browserLeader.session || this.browserLeader.pairing || this.browserLeader.preparing))return;
+    this.cancelIntent();void this.safe(()=>this.browserLeader.stop(reason));
+  }
   setVisible(value, poseVisible = value) {
     this.visible = value;
     this.poseVisible = poseVisible;
     this.gamepad?.setActive(value && this.mode === "gamepad");
-    if (!value) this.clearKeys();
+    if (!value) {this.clearKeys();this.pauseBrowserLeader('Following paused because Control is not visible.');}
     if (poseVisible) {
       this.refreshPose();
-      if (this.mode === "leader") this.safe(() => this.refreshHosts());
+      if(this.mode==='leader')this.safe(()=>this.isBrowserLeader()?this.browserLeader.refreshProfiles():this.refreshHosts());
     }
   }
   update({ snapshot, resources, arm, connected }) {
     const wasConnected = this.connected;
     const armChanged = this.arm !== arm;
+    const previousSession=this.snapshot?.arms?.[this.arm]?.controller_session;
     const operation = this.client.currentOperation;
     const ownSocketOpen = this.client.connected === true && this.ownsStream &&
       operation?.armId === arm && operation.type === "DIRECT" && operation.mode === "STREAM" &&
@@ -193,6 +204,8 @@ export class ManualPanel {
     // Explicit client disconnect or the operation's socket-close event still does.
     this.connected = Boolean(connected || ownSocketOpen);
     this.resources = resources;
+    if(armChanged || !this.connected || (previousSession && previousSession!==snapshot.arms?.[arm]?.controller_session))
+      this.pauseBrowserLeader(armChanged?'Follower selection changed. Follow to start again.':'Follower connection changed. Follow to start again.');
     if (armChanged) {
       this.cancelIntent();
       this.arm = arm;
@@ -211,6 +224,8 @@ export class ManualPanel {
     // connected state. Fetch capabilities when that connection becomes ready.
     if (arm && this.connected && (armChanged || !wasConnected))
       this.safe(() => this.loadDescription());
+    if(arm && this.connected && this.isBrowserLeader() && (armChanged || !wasConnected))
+      this.safe(()=>this.browserLeader.refreshProfiles());
     if (!this.target && this.measured()) this.resetTargets();
     if (!this.connected) {
       this.renderConditioning(null,true);
@@ -250,6 +265,7 @@ export class ManualPanel {
         "interrupted",
       ].includes(event.state)
     ) {
+      const closing=this.browserLeader?.operationEnded(event);if(closing)void this.safe(()=>closing);
       this.ownsStream = false;
       const expectedHold =
         this.expectedTermination &&
@@ -273,6 +289,10 @@ export class ManualPanel {
     this.refreshPose();
   }
   updateControls() {
+    if(this.client.connected===false) {
+      this.connected=false;
+      if(this.browserLeader?.session)this.pauseBrowserLeader('Follower disconnected. Follow to start again.');
+    }
     const active =
       !!this.client.currentOperation ||
       !!this.leaderRun ||
@@ -285,11 +305,11 @@ export class ManualPanel {
       !!this.measured();
     this.el("start-manual").disabled =
       !ready ||
-      (active && !(this.mode === "leader" && this.isOwnStream() && this.client.currentOperation?.operationId && !this.leaderRun)) ||
+      (active && !(this.mode === "leader" && this.isOwnStream() && this.client.currentOperation?.operationId && !this.leaderRun && !this.browserLeader?.active)) ||
       this.busy ||
       (["ik","gamepad"].includes(this.mode) && !this.descriptor?.available) ||
       (this.mode === "gamepad" && (!this.descriptor?.analog_rates || !this.gamepad?.canStart())) ||
-      (this.mode === "leader" && !this.el("leader-device").value);
+      (this.mode === "leader" && (this.isBrowserLeader()?!this.browserLeader.canFollow():!this.el("leader-device").value));
     this.el("start-manual").innerHTML = this.busy
       ? "Starting…"
       : this.mode === "leader"
@@ -309,6 +329,8 @@ export class ManualPanel {
     this.el("manual-mode").disabled = this.busy;
     this.el("leader-host").disabled = this.busy || !!this.leaderRun;
     this.el("leader-device").disabled = this.busy || !!this.leaderRun;
+    this.el('leader-source').disabled=this.busy || Boolean(this.browserLeader?.pairing||this.browserLeader?.preparing);
+    this.browserLeader?.render();
     for (const b of this.element.querySelectorAll("[data-jog]"))
       b.disabled = this.busy || !this.isOwnStream();
     for (const b of this.element.querySelectorAll("[data-roll]"))
@@ -482,12 +504,27 @@ export class ManualPanel {
     await this.client.releaseIdlePermission(context.arm,{controller_session:context.session,
       operator_session_id:context.principal});
   }
+  async changeLeaderSource(source) {
+    if(!['browser','station'].includes(source))throw Error('Choose a supported leader source.');
+    if(source===this.leaderSource)return;
+    this.cancelIntent();const generation=this.intentGeneration;
+    this.actionBusy(1);
+    try {
+      if(this.leaderSource==='browser')await this.browserLeader.stop('Leader source changed.');
+      else if(this.leaderRun){const run=this.leaderRun;this.leaderRun=null;await this.stopLeader(run);}
+      if(generation!==this.intentGeneration)return;
+      this.leaderSource=source;this.el('leader-source').value=source;
+      this.el('browser-leader-panel').hidden=source!=='browser';this.el('station-leader-panel').hidden=source!=='station';
+      if(source==='browser')await this.browserLeader.refreshProfiles();else await this.refreshHosts();
+    } finally {this.actionBusy(-1);}
+  }
   async changeMode(mode) {
     this.cancelIntent();
     const generation = this.intentGeneration,
       arm = this.arm;
     this.actionBusy(1);
     try {
+      if(this.isBrowserLeader())await this.browserLeader.stop('Leader mode left. Follow to start again.');
       if (this.leaderRun) {
         const run = this.leaderRun;
         this.leaderRun = null;
@@ -501,7 +538,7 @@ export class ManualPanel {
       for (const v of this.element.querySelectorAll("[data-manual-view]"))
         v.hidden = v.dataset.manualView !== mode;
       this.resetTargets();
-      if (mode === "leader") await this.refreshHosts();
+      if(mode==='leader')await (this.isBrowserLeader()?this.browserLeader.refreshProfiles():this.refreshHosts());
       if (generation !== this.intentGeneration || arm !== this.arm) return;
       this.note(
         mode === "ik"
@@ -514,6 +551,7 @@ export class ManualPanel {
   }
   async start() {
     if (this.busy || !this.connected || !this.arm) return;
+    if(this.isBrowserLeader())return this.startBrowserLeader();
     if (this.mode === "gamepad") {
       if (!this.descriptor?.available || !this.descriptor?.analog_rates) throw Error(this.descriptor?.reason || "Gamepad kinematics are not ready.");
       if (!this.gamepad?.canStart()) throw Error(this.gamepad?.startReason() || "Controller unavailable.");
@@ -607,15 +645,63 @@ export class ManualPanel {
       this.actionBusy(-1,context);
     }
   }
+  async startBrowserLeader() {
+    if(this.busy || !this.connected || !this.arm || this.browserLeader.active)return;
+    this.cancelIntent();const context=this.intentContext();
+    let session,operation,permissionAttempted=false,following=false;
+    this.actionBusy(1,context);
+    try {
+      session=await this.browserLeader.prepare(context);
+      if(!this.currentIntent(context))return;
+      if(this.isOwnStream()) {
+        const previous=this.client.currentOperation;
+        if(!previous.operationId)throw Error('Waiting for the previous owned stream to finish opening.');
+        await this.holdArm(context.arm,{controller_session:context.session,
+          operator_session_id:context.principal,operation_id:previous.operationId});
+        this.ownsStream=false;
+      } else if(this.client.currentOperation || this.stateForArm().operation_id)
+        throw Error('Another operation owns the follower.');
+      if(!this.currentIntent(context))return;
+      permissionAttempted=true;await this.client.enable(context.arm);
+      if(!this.currentIntent(context) || !this.browserLeader.current(session))return;
+      const opening=this.client.startManual(context.arm,this.browserLeader.startOptions(session));
+      // Capture the newly reserved local handle before any asynchronous reply.
+      this.browserLeader.attachOperation(session,this.client.currentOperation);
+      operation=await opening;
+      if(!this.currentIntent(context) || !this.browserLeader.current(session))return;
+      this.browserLeader.attachOperation(session,operation);this.ownsStream=true;following=true;
+      this.note('Following USB leader · Freeze or Home pauses following.');
+    } catch(error) {
+      if(!this.currentIntent(context) || error?.name==='AbortError' || error?.code==='CANCELED')return;
+      throw error;
+    } finally {
+      try {
+        try {
+          if(!following && session && this.browserLeader.session===session)
+            await this.browserLeader.stop('Following canceled. The USB port remains paired.');
+        } finally {
+          if(!following && permissionAttempted)
+            await this.retireCanceled(context,null,operation||{localId:session?.localId});
+        }
+      } finally {this.actionBusy(-1,context);}
+    }
+  }
   async stop() {
     this.cancelIntent();
     const arm = this.arm,
-      run = this.leaderRun;
+      run = this.leaderRun,
+      owned=this.isOwnStream()?this.client.currentOperation:null;
     this.leaderRun = null;
     this.ownsStream = false;
     this.actionBusy(1);
     try {
-      if (run) await this.stopLeader(run);
+      if(this.isBrowserLeader()) {
+        await this.browserLeader.stop();
+        if(owned?.localId && this.client.currentOperation?.localId===owned.localId) {
+          this.expectedTermination++;
+          try{await this.client.retireOperation(owned.localId);}finally{this.expectedTermination--;}
+        }
+      } else if (run) await this.stopLeader(run);
       else if (arm && this.connected) await this.holdArm(arm);
       this.note(this.mode === "leader" ? "Frozen. Follow leader will move the follower smoothly toward the current leader pose." : "Stopped. Support torque is preserved.");
     } finally {
@@ -649,6 +735,10 @@ export class ManualPanel {
     if (!measured) throw Error("Measured pose is unavailable.");
     this.actionBusy(1,context);
     try {
+      if(this.isBrowserLeader()) {
+        await this.browserLeader.stop('Home pauses USB following. Follow to start again.');
+        if(!this.currentIntent(context))return;
+      }
       const result = await this.client.request(
         `/api/manual/${encodeURIComponent(context.arm)}/preset`,
         {
@@ -676,6 +766,10 @@ export class ManualPanel {
     if (!measured) throw Error("Measured pose is unavailable.");
     this.actionBusy(1,context);
     try {
+      if(this.isBrowserLeader()) {
+        await this.browserLeader.stop('Wrist preset pauses USB following.');
+        if(!this.currentIntent(context))return;
+      }
       const result = await this.client.request(
         `/api/manual/${encodeURIComponent(context.arm)}/roll`,
         {
@@ -935,7 +1029,7 @@ export class ManualPanel {
       );
       const overlay =
         this.mode === "leader"
-          ? host?.report_age_ms < 500 && host?.active
+          ? this.isBrowserLeader()?this.browserLeader.overlay:host?.report_age_ms < 500 && host?.active
             ? host.latest_pose
             : null
           : this.target;
@@ -994,22 +1088,23 @@ export class ManualPanel {
       const data = await this.client.request("/api/input-hosts");
       if (!this.connected) return;
       this.hosts = data.hosts || [];
+      const available=this.hosts.filter(host=>host.connected!==false && host.state!=='OFFLINE');
       const select = this.el("leader-host"),
         old = select.value,
         signature = JSON.stringify(
-          this.hosts.map((h) => [h.id, h.label, h.state]),
+          available.map((h) => [h.id, h.label, h.state]),
         );
       if (select.dataset.signature !== signature) {
         select.replaceChildren(
           new Option(
-            this.hosts.length
-              ? "Select input host"
-              : "No input hosts connected",
+            available.length
+              ? "Select station input host"
+              : "No server-attached leaders connected",
             "",
           ),
-          ...this.hosts.map((h) => new Option(h.label || h.id, h.id)),
+          ...available.map((h) => new Option(h.label || h.id, h.id)),
         );
-        select.value = this.hosts.some((h) => h.id === old) ? old : "";
+        select.value = available.some((h) => h.id === old) ? old : "";
         select.dataset.signature = signature;
       }
       this.renderDevices();
@@ -1054,6 +1149,7 @@ export class ManualPanel {
     this.updateControls();
   }
   async setGripperFollow(value) {
+    if(this.isBrowserLeader())this.browserLeader.setGripperFollow(value);
     const run = this.leaderRun;
     if (run && !run.stopping) {
       const result = await this.client.request(

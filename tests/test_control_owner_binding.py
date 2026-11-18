@@ -128,6 +128,15 @@ def test_binding_only_applies_to_explicit_persistent_direct_stream(owner_server,
     assert value.arm.permission and value.arm.op
 
 
+def test_browser_sampled_source_keeps_live_sample_semantics_and_retires_on_eof(owner_server):
+    station=owner_server;binding=station.begin(persistent=False);link=station.client()
+    assert link.call('bind_control_owner',**binding,live_sample_owner=True)['accepted']
+    assert station.arm.op['persistent_target'] is False
+    link.close()
+    assert station.released.wait(1)
+    assert not station.arm.permission and not station.arm.op
+
+
 def test_same_binding_retry_is_idempotent_but_rebind_and_late_eof_cannot_stop_replacement(owner_server):
     value=owner_server;binding=value.begin();client=value.client()
     first=client.call('bind_control_owner',**binding)

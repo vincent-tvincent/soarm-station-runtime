@@ -200,9 +200,9 @@ It is monitoring information and does not add motion admission rules.
   the system disk during ordinary storage loss. Recovery records the missing
   interval as a gap and resumes the configured cadence. See
   [storage configuration and mountpoint protection](runtime-reference.md).
-- A Mac leader companion can start at login, reconnect and advertise
-  automatically. Its profile/calibration live outside temporary directories.
-  See [companion installation](leader-input.md#automatic-mac-startup).
+- Operator USB leaders are paired in the browser. Existing calibrations are
+  stored on the Pi. Open the dashboard and use **Follow leader** for the next
+  operation. See [browser USB setup](leader-input.md).
 - Remembered input hosts are marked offline after a gateway restart until a
   live bridge reconnects. Offline leader metadata is optional: keyboard,
   gamepad and other control modes remain independently available.

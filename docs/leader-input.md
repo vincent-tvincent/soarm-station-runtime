@@ -1,288 +1,105 @@
-# Native leader input hosts
+# Leader control from the browser
 
-This bridge makes the Control panel's Leader host/device dropdown reflect actual OS serial
-devices on a connected Mac or Linux input host. The browser does not discover or
-open USB on its own. An unconfigured serial adapter is visible but cannot be
-started; a configured candidate is checked against live motor calibration only
-after the operator presses **Follow leader**. Existing LeRobot calibration files can be
-reused unchanged; an additional input-host profile associates a file with its
-physical USB device.
+Open Station’s HTTPS dashboard on the computer connected to the SO-101 leader.
+The page uses the browser’s built-in Web Serial API. Station software runs on
+its server. The operator computer needs a supported browser and a USB adapter
+that its operating system exposes as a serial port. Desktop Chrome supports
+Web Serial on macOS, Windows, Linux and ChromeOS. [Chrome Web Serial guide](https://developer.chrome.com/docs/capabilities/serial)
 
-## Reuse an existing leader calibration
+## Pair and follow
 
-Use the input computer's existing compatible LeRobot environment with `aiohttp`
-and `pyserial` installed. YAML profiles additionally need PyYAML; the supplied
-template uses JSON. No ROS installation is needed on the input computer.
+1. Connect the leader’s USB cable to the computer running the browser. Open **Operations → Control → Leader arm** and choose **This browser · USB**.
+2. Select the saved profile for that leader. To add one, import the existing LeRobot leader calibration JSON using the panel. Station stores it on the server for future visits and other authorized operators.
+3. Click **Pair USB leader** and choose the correct adapter in the browser’s device chooser. USB adapters with the same vendor and product IDs can look identical. Station verifies the servo model, motor IDs, range limits and homing offsets when opening the leader for following.
+4. Press **Follow leader**. The browser reads the joint encoders. The Pi moves the follower toward the current leader pose at the configured joint speeds. **Freeze / Esc** ends following. **Home** hands off to the selected follower’s preset. Press **Follow leader** again to resume explicitly.
 
-Keep these files on the computer connected to the **leader's USB cable**. In a
-Mac-leader/Pi-follower setup, that means the Mac. The follower does not need to
-be reconnected, and no calibration file needs to be rewritten on either arm.
+**Gripper follow** controls whether the follower jaw tracks the leader jaw or
+holds its opening. The FK display can show the measured leader pose alongside
+the follower. Pairing grants access to the chosen port in this browser. A new
+tab can pair again. Closing the tab, disconnecting USB during following, or
+closing the control connection retires that run.
 
-Use this layout inside the runtime checkout on the input computer:
+Use a browser-trusted HTTPS endpoint for a new deployment. The browser needs a
+secure context and a click from the operator to show the chooser. The current
+Station network access rules still apply. A deployment using a self-signed
+server certificate can show a certificate warning in a fresh browser. The
+**Station input** option is available for a leader already attached to a
+configured server-side reader. [Web Serial port permissions](https://developer.mozilla.org/en-US/docs/Web/API/Serial/requestPort)
 
-```text
-local/leader-input/
-├── input-host.json          # Computer identity, device match and calibration path
-├── calibration/
-│   └── leader.json          # Copy of this leader's existing LeRobot calibration
-└── station-ca.pem          # Public Station certificate, for a private TLS setup
-```
+### Upgrading an operator Mac that previously used the helper
 
-`local/` is ignored by Git. A calibration JSON and an input-host JSON are
-different files: pass **input-host.json** to `--config`, not the motor-calibration
-file itself. The calibration file contains the per-motor IDs, homing offsets
-and ranges; the input-host file says which device uses it.
-
-### 1. Copy the existing calibration
-
-From the runtime repository root on the input computer:
-
-```bash
-mkdir -p local/leader-input/calibration
-cp -n /path/to/your/existing/leader-calibration.json \
-  local/leader-input/calibration/leader.json
-cp -n config/leader-input.example.json local/leader-input/input-host.json
-```
-
-These commands preserve existing destination files. If an input-host profile
-already exists, add or update its relevant leader entry rather than replacing
-the whole file. Give each additional leader a distinct calibration filename.
-
-Use the calibration file saved for that physical leader. LeRobot normally
-stores it under its calibration directory in
-`teleoperators/<teleoperator-name>/<id>.json`; a custom `calibration_dir` or
-`HF_LEROBOT_CALIBRATION` changes the location. Use the path printed by the
-calibration command or the working configuration you already use. Copying this
-file does not run calibration or write motor registers.
-
-### 2. Match the USB device
-
-Use the same compatible Python environment that you use for LeRobot:
-
-```bash
-export SOARM_STATION_INPUT_PYTHON=/path/to/your/lerobot-venv/bin/python
-scripts/run-leader-input --list
-```
-
-This lists OS device metadata without opening a motor port. In
-`local/leader-input/input-host.json`, replace
-`REPLACE_WITH_LEADER_USB_SERIAL` with the device's actual `serial` value.
-If the adapter has no unique serial number, use an explicit `match.port`
-instead. The profile's `id` is a logical name; it is not the USB serial number.
-Set `host_id` uniquely for each input computer, and use `label` fields for the
-names shown in the dashboard.
-
-The supplied template already refers to `"calibration": "calibration/leader.json"`.
-That path is relative to **input-host.json**, so it resolves to the file in the
-layout above. Absolute paths are also accepted. The SO-101 template maps the
-five body joints directly and keeps the gripper separate; adjust `joint_map`
-only when the selected follower uses different joint names.
-
-Check the complete local configuration:
-
-```bash
-scripts/run-leader-input --config local/leader-input/input-host.json --list
-```
-
-The intended device should report `configured: true`. This checks discovery,
-file structure and mapping; it does not yet verify calibration against the
-physical motors or begin following. No matching profile, an ambiguous match,
-missing file or invalid calibration is reported in the device's `reason` field.
-
-### 3. Connect the input host to Station
-
-For a Station installation using its generated private certificate, copy its
-**public certificate** to the input computer once:
-
-```bash
-scp user@station-host:/path/to/soarm-station-runtime/local/tls/cert.pem \
-  local/leader-input/station-ca.pem
-```
-
-Then launch the bridge with your Station URL:
-
-```bash
-scripts/run-leader-input \
-  --config local/leader-input/input-host.json \
-  --url https://your-station-host:8443 \
-  --ca local/leader-input/station-ca.pem
-```
-
-Use the hostname covered by the certificate. If Station uses a certificate
-already trusted by the input computer, `--ca` can be omitted. Trusted Tailscale
-peers use Station's existing access policy; no private key needs to be copied.
-
-**If the bridge was already running, stop that bridge and restart it with the
-updated profile.** Its configuration is loaded at startup; dashboard Refresh
-does not reload the local JSON. Station itself does not need a restart.
-
-### Automatic Mac startup
-
-After verifying the profile, install the companion as a per-user login agent:
-
-```bash
-SOARM_STATION_INPUT_PYTHON=/absolute/path/to/lerobot-venv/bin/python \
-  scripts/install-leader-input-macos \
-  --config local/leader-input/input-host.json \
-  --url https://your-station-host:8443 \
-  --ca local/leader-input/station-ca.pem
-```
-
-End any active leader run and stop a manually launched bridge before installing,
-so two processes do not advertise the same host ID. The installer copies a
-source snapshot, the profile, unchanged calibration bytes and the public TLS
-certificate to `~/Library/Application Support/SO-Arm Station/leader-input/`.
-It uses the specified existing Python environment; keep that environment at a
-persistent location. The development checkout can then be moved or removed.
-No ROS, follower calibration, private Station key or additional login token is
-copied. The launch agent starts at Mac login, restarts an exited bridge, and the
-bridge reconnects when Station becomes available. It only advertises devices;
-it never resumes following or opens the leader port without an explicit Start.
-
-The installed profile is `input-host.json` in that directory. Edit it there.
-After editing it, restart **this companion only**, while no leader run is active:
-
-```bash
-launchctl kickstart -k "gui/$(id -u)/org.soarm.station.leader-input"
-launchctl print "gui/$(id -u)/org.soarm.station.leader-input"
-```
-
-Connection/error logs are `bridge.log` with three 1 MiB backups. To update the
-installed source, rerun the installer from the updated checkout, passing the
-**installed** profile and certificate so your edited bindings are retained.
-This is login startup, not a system daemon that operates before Mac login.
-To disable automatic startup without deleting calibration:
+First import the leader calibration on Station. An older installation stores a
+copy under `~/Library/Application Support/SO-Arm Station/leader-input/`, with
+the relative calibration filename in `input-host.json`. After ending any active
+leader run, unload the old login agent:
 
 ```bash
 launchctl bootout "gui/$(id -u)/org.soarm.station.leader-input"
-rm "$HOME/Library/LaunchAgents/org.soarm.station.leader-input.plist"
 ```
 
-Station remembers advertised host labels and configured device metadata in
-`input-hosts.json` beside its selected runtime configuration. After a Station
-restart, remembered hosts appear **Offline** until their bridge reconnects.
-That cache does not save poses, runs or control permission, and is never used
-to authorize a command. An offline leader does not prevent other control modes.
+Move `~/Library/LaunchAgents/org.soarm.station.leader-input.plist` and the
+managed `leader-input` folder above to Trash. Keep your original LeRobot
+calibration. A fresh operator computer can go straight to **Pair and follow**.
 
-### 4. Select it in the dashboard
+## Reuse an existing leader calibration
 
-Open **Control → Leader arm**, press **Refresh**, select the input computer,
-then select the configured leader. The native bridge must remain running while
-using it. Press **Follow leader** when ready for the follower to move. The
-follower approaches the leader's current pose using its existing joint/gripper
-speed settings, then keeps following fresh leader targets. Manual pose matching
-is not required. Calibrated finite body angles are forwarded unchanged; YAML
-and URDF display ranges do not clip them. Servo position limits are authoritative.
+Use the **leader** calibration generated by LeRobot for this physical arm. Keep
+the follower calibration in the Pi’s robot profile. The standard calibration is
+a JSON object keyed by motor name. Each entry contains the motor ID, drive mode,
+homing offset and raw range endpoints. Importing it creates a profile on Station.
+The browser checks those settings against the connected servos using read commands.
 
-**Freeze / Esc** holds the follower. Press Follow leader again to approach the
-leader's current pose and resume. Home first stops following, moves to its
-configured target, and can hand back through the same Follow leader action.
-The **Gripper follow** toggle controls whether the jaw follows or stays held.
+The normal SO-101 import maps body joints by exact name to the selected follower,
+with its gripper handled separately. A custom profile can supply an explicit
+one-to-one mapping from leader motor names to follower joint names. The server
+stores profiles under its Git-ignored `local/browser-leader-profiles/` directory.
+The browser receives calibration values and optional USB vendor/product hints.
+The serial port is chosen by the operator through the browser permission dialog.
 
-If Start reports a calibration mismatch, select the existing file that belongs
-to the attached motors. The bridge does not automatically overwrite motor
-calibration. This guide configures an existing calibration; it does not replace
-LeRobot's calibration procedure when a device actually needs one.
+## API and data flow
 
-## Data path and ownership
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/leader-profiles` | List canonical profiles and their calibration for authorized browser clients. |
+| POST | `/api/leader-profiles` | Import a calibrated leader profile on Station. |
+| WSS | `/ws/control` | Send fresh named joint positions and gripper percentage for the explicitly owned follower operation. |
 
-```text
-Input host: OS inventory -> local leader profile -> read-only native sampler
-    -> existing HTTPS/WSS 8443 gateway -> DIRECT+STREAM -> sole follower runtime
+For a standard import, send `{id, label, arm_id, calibration}` where
+`calibration` is the parsed LeRobot file. A canonical profile contains `id`,
+`label`, `motor_model: "sts3215"`, `joint_map`, `gripper_source` and
+`calibration`. The optional `match` object accepts USB `vid` and `pid`.
+Importing an identical profile is idempotent. A conflicting ID returns HTTP 409.
+
+The browser synchronously initiates the USB chooser on the pairing click. For
+following it issues read-only STS3215 register queries at 1 Mbaud and maps
+encoder counts to the calibrated LeRobot units. The body uses radians and the
+jaw uses percent open. It submits one freshly acquired sample under its original
+Pi-issued input window. Late samples are discarded. The gateway binds the
+control socket to that exact DIRECT operation, while a temporary sample delay
+pauses target advancement. [Waveshare ST servo protocol](https://docs.waveshare.com/Servo_Communication_Protocol)
+
+## Optional Station-attached input
+
+If a leader is physically connected to the Pi or a separately managed robot
+input server, an administrator can run `scripts/run-leader-input` **there** with
+its server-side device profile. The existing `/api/input-hosts` and
+`/ws/input-host` endpoints support these integrations. The dashboard can select
+an available **Station input**. A USB leader plugged into the operator computer
+uses **This browser · USB**. [Example server-side input profile](../config/leader-input.example.json)
+
+For a Pi-attached leader, use the server’s native LeRobot interpreter with its
+own device binding and calibration. For example, on the Station host:
+
+```bash
+SOARM_STATION_INPUT_PYTHON="$PWD/.runtime-venv/bin/python" scripts/run-leader-input \
+  --config local/leader-input/input-host.json --url https://localhost:8443 \
+  --ca local/tls/cert.pem
 ```
 
-The input host makes outbound connections only. `/ws/input-host` advertises
-inventory/status and receives explicit start/stop messages. Selected leader input
-uses the existing `/ws/control` contract and original Pi-issued windows; each
-sample is read after a window arrives. The bridge never calls permission-enable,
-never calibrates/configures motors, never opens follower/camera devices, and
-never resumes a stopped operation after reconnect. Body targets preserve the
-calibrated leader angles, while the jaw remains normalized to 0–100%. The native
-runtime retains velocity integration and source/operation identity checks; no
-YAML absolute-angle range is applied by the bridge.
+### Gateway integration hooks
 
-The gateway's existing trusted-loopback/Tailscale access middleware applies.
-Trusted peers do not need a new login token. TLS is still verified using the
-configured CA/system trust store. A legacy `SOARM_STATION_TOKEN`, if explicitly
-present, is sent in the Authorization header, never a URL. No token is generated
-or demanded by the input-host bridge.
-
-## Profile and launcher reference
-
-The launcher uses `SOARM_STATION_INPUT_PYTHON` when set, then this checkout's
-`.venv/bin/python`, then `python3`. The reader supports the selected LeRobot 0.7
-`SerialMotorsBus` API and historical 0.6 `FeetechMotorsBus` API through a
-version-specific import fallback. Compatibility with a particular device still
-needs verification; mocked tests do not establish physical following.
-
-Without `--config`, the bridge advertises actual OS serial devices as
-unconfigured. The complete SO-101 profile structure is in
-[config/leader-input.example.json](../config/leader-input.example.json).
-
-Match fields are exact `serial`, `port`, `vid` and `pid`. Multiple matching
-profiles are an error. Stable serial matching is preferable when unique;
-otherwise use the checked physical path. Relative calibration paths resolve
-against the host configuration file. The five body values are read using the
-degree normalization and explicitly converted to ROS radians; the separate jaw
-value remains percent. The mapping must exactly match the selected follower's
-joint names. Calibration is compared, never rewritten.
-
-Start messages provide `joint_names`; they no longer transmit YAML
-`joint_limits`. Update and restart the native bridge alongside this gateway
-revision. For an installed Mac companion, reinstall its source snapshot with
-`scripts/install-leader-input-macos`; updating a separate checkout alone does
-not update that installed copy. Legacy `bounded_leader_target` callers remain
-compatible by name, but its body-angle values are no longer clipped.
-
-An established control WebSocket can return `input_rejected` for one invalid
-or expired frame. The bridge keeps the run, reports the bounded reason, and
-continues with a new sample and sequence under the current grant. It does not
-replay the rejected pose. `error`, terminal results and actual socket/source
-closure still end their owned run.
-
-
-The sampler runs in one child. A native connection/driver error or Stop
-terminates that child if necessary, releasing its OS handles. It shares the
-existing physical-device lock naming convention. An occupied device, invalid
-calibration or mismatch stops the requested run rather than opening a second
-owner or invoking a calibration wizard.
-
-## Gateway integration hooks
-
-The only shared-file work is performed by the dashboard integrator:
-
-```python
-from soarm_station.leader_gateway import LeaderHostRegistry
-
-registry = LeaderHostRegistry(
-    state_provider=lambda: {
-        "arms": dict(dashboard.states),
-        "resources": dashboard.public_resources,
-    },
-    hold_callback=hold_matching_run,
-    start_state_provider=read_current_native_state,
-)
-registry.register_routes(app)
-```
-
-`start_state_provider()` may be async. Station supplies a fresh native-controller
-snapshot for each Start, with feedback age including the IPC round trip. This
-avoids rejecting a successful permission grant while waiting for the next ROS
-status publication. The endpoint rechecks host/device/run state after that read
-before reserving a leader run. The native operation admission still validates
-permission and ownership when the actual control stream opens.
-
-`state_provider()` supplies the cached ROS view for cleanup, including `arms` and
-`resources.arms[].joints`. `hold_matching_run(arm_id,
-expected_controller_session, operator_session_id, expected_operation_id)` is async or synchronous and
-returns `{"success": bool}`; it must retain the supplied resource/session scope
-and use the runtime's atomic `hold_owned` check. An absent expected operation ID
-may stop only when there is no active operation and the principal/session still
-match. It must
-not hold an unrelated controller or issue a permission-enable request. The
-registry independently refuses mismatched controller/operation identities.
-Mount under the existing access middleware. Startup/shutdown hooks are included;
-no additional listener or ROS node is created.
+These routes control a reader registered by a robot input server. A
+browser-connected USB leader uses the profile and control APIs above.
 
 | Method/path | Contract |
 | --- | --- |
@@ -293,73 +110,11 @@ no additional listener or ROS node is created.
 | POST `/api/input-hosts/{id}/stop` | Same matching run/session fields. Returns `stopped,hold_confirmed,state,reason`; wrong or absent ownership never issues a global hold. |
 | WS `/ws/input-host` | Native bridge hello/inventory/state/stopped; gateway start/stop/refresh. This is not a browser USB API. |
 
-Each device entry contains `id,label,configured,reason,port,serial,joint_names`
-and available VID/PID/profile metadata. `configured=true` means a matching local
-profile/calibration file is structurally usable; it does not claim that motor
-identity/calibration has already been verified. Runtime states distinguish
-STARTING, READY, ALIGNING, RUNNING, STOPPING, ERROR and OFFLINE. Pose/rate fields are
-observed bridge reports, not fictional defaults; null means no sample.
-
-The native input stream owns the run lifetime. There is no browser-heartbeat
-expiry; `browser_lease_ms` is null. A delayed UI poll does not stop a healthy
-leader stream. Use **Stop / Esc**, disable control or disconnect the input host
-to end following. Dashboard disconnect/page exit sends a Hold request using
-fetch keepalive; it is a request, not an independently guaranteed crash detector.
-If the browser disappears without delivering that request, the native stream
-can continue while fresh leader input arrives. Source/control-socket loss still
-stops the operation, and reconnect only advertises again.
-
-The **Home** shortcut stops the matching leader run and waits for `stopped`
-and `hold_confirmed` before starting the Home operation. Follow leader retires only the panel-owned Home stream, confirms its hold and
-obtains a fresh permission grant before opening the next leader run. Fresh leader
-targets are sent immediately; the native rate limiter controls the approach.
-A delayed sample that misses its Pi-issued window is discarded and freshly read
-rather than causing an extra 50-ms bridge abort. Native feedback/source-loss
-handling remains in the controller. Result messages preserve the native terminal
-reason so a late UI status request does not mask it with a heartbeat mismatch.
-The separate default 100-ms sampler IPC deadline is also removed. A pending
-read ends with its control stream or explicit Stop; native driver errors still
-propagate, and the controller still stops advancement on actual source loss.
-
-The **Gripper follow** toggle (UI shortcut **O**) changes only the jaw command
-source. Disabled follow retains the last successfully sent jaw reference while
-body poses continue from fresh leader samples. Before the first sent command,
-use a valid supplied `gripper_reference`, otherwise the current follower
-`gripper_percent` from control feedback. Missing feedback never becomes a
-fabricated 50% or 0% target. Enabling follow resumes fresh calibrated leader jaw
-samples through the existing runtime velocity integration. It does
-not reset the operation or change coordinates. `hosts[].active.follow_gripper`
-is the desired setting; `active.gripper_reference` reports the most recent
-observed sent jaw target. `latest_pose` remains the real leader pose, even when
-its jaw is not being followed.
-
 ## Verification
 
-Tests inject OS inventory, calibration files, fake motor buses, mocked WebSockets
-and fake samplers. They open no serial hardware and perform no physical motion.
-Check real serial identity, existing leader calibration, source latency, initial convergence,
-stop/disconnect and rate behavior in a separately authorized hardware session.
-Inventory availability, sampling, follower admission and physical following are
-distinct milestones.
-
-
-## Continuous teleoperation lifetime — November 16, 2026
-
-The bridge and command-line operator now explicitly open a `persistent_target`
-DIRECT stream, like keyboard and gamepad control. Input gaps, browser polling
-and alignment have no session expiry. A control-loop delay or stale measured
-feedback pauses dispatch without discarding the run; fresh feedback resumes the
-same operation. Profile stream-duration/tracking timers do not terminate this
-teleoperation contract. A caller-specified operation duration is still honored.
-
-Pi-issued packet windows still reject delayed/replayed samples; a rejected old
-sample does not end the session. New samples use fresh windows. Explicit Freeze,
-control-socket closure, host disconnect and actual hardware faults still stop
-control. Reconnection advertises the input host and does not automatically resume.
-
-A joint reference displaced outside its tracking band recovers inward at the
-configured velocity while other joints continue. This software tracking state
-is distinct from a reported servo protection fault. Status shows both per motor,
-including the reported reason and target-versus-measured error.
-
-See [recovery validation and deployment](teleoperation-recovery-2026-11-16.md) for the diagnosed failures, tested transitions and physical verification boundary.
+The browser path was exercised in desktop Chrome with a simulated USB leader
+and a complete mock ROS Station. The test imported a calibration, paired through
+a user gesture, rejected a mismatched servo before permission, followed fresh
+body and jaw samples, froze and resumed, handed off through Home, and released
+the owned run on USB disconnect. All USB packets in that run were register
+reads. Physical USB timing and motion require an attached leader and follower.

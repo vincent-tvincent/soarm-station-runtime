@@ -270,7 +270,7 @@ The opening message also accepts `input_semantics`:
 
 | Value | Target lifetime |
 | --- | --- |
-| `persistent_target` | Browser/manual target intent remains accepted until replaced, stopped or canceled. Pauses in input or heartbeats do not expire the operation. The dashboard's joint, keyboard, gamepad and native leader controls use this mode. |
+| `persistent_target` | Browser/manual target intent remains accepted until replaced, stopped or canceled. Pauses in input or heartbeats do not expire the operation. The dashboard’s joint, keyboard and gamepad controls and the optional native reader use this mode. |
 | `live_sample` (default) | Legacy/custom sampled-input clients must keep supplying fresh samples. Source/target expiry checks apply; Station teleoperation clients explicitly select `persistent_target`. |
 
 This choice applies to DIRECT WebSocket operations only. An explicitly requested
@@ -348,7 +348,7 @@ await client.connect(); // Optional token argument for bearer-only access.
 // await client.hold("arm1");
 ```
 
-`startManual` seeds its initial target from measured state. Its returned promise means the transport opened, not that every target is already admitted; use operation events. This module is the dashboard client, not a separately versioned npm SDK. Native Python leader/JSON clients can inspect `python/soarm_station/operator.py`; that legacy CLI still requires `--ca` and `SOARM_STATION_TOKEN` in its environment even on trusted networks. The newer native leader-host integration supports tokenless trusted access and is documented in [leader-input.md](leader-input.md).
+`startManual` seeds its initial target from measured state. Its returned promise means the transport opened, not that every target is already admitted; use operation events. This module is the dashboard client, not a separately versioned npm SDK. Native Python leader/JSON clients can inspect `python/soarm_station/operator.py`; that legacy CLI still requires `--ca` and `SOARM_STATION_TOKEN` in its environment even on trusted networks. The browser USB flow and optional server-side input hosts use the same gateway access policy. [Leader setup](leader-input.md)
 
 ## Cameras, graph and errors
 
@@ -361,11 +361,15 @@ Check HTTP status and response content type. Policy-management errors are struct
 
 ### Continuous leader takeover and scoped handoff
 
-The dashboard's **Follow leader** action sends `pickup:false` to
-`POST /api/input-hosts/{host_id}/start`. The follower approaches the leader's
-fresh targets under its existing joint/gripper speed limits. Manual pose
-matching is not required, including after Freeze or Home. This is also the API
-default when `pickup` is omitted.
+Browser USB leaders use an explicitly owned DIRECT stream on `/ws/control`
+with `input_semantics: "live_sample"` and `source: "browser_leader"`. `GET
+/api/leader-profiles` supplies calibration and motor mapping. `POST
+/api/leader-profiles` imports a profile on Station. The browser reads after
+each valid window and discards late USB replies. A new Follow command is
+required after Freeze or disconnect. [Browser leader guide](leader-input.md)
+
+For a **Station input** source, the dashboard uses the existing
+`POST /api/input-hosts/{host_id}/start` route with `pickup:false`.
 
 For clients deliberately needing the old manual pickup behavior, explicit
 `pickup:true` remains an opt-in: it waits for the raw leader pose to match the

@@ -111,8 +111,10 @@ class Runtime:
                     or arm.principal!=request['principal'] or not op
                     or op.get('operation_id')!=request['operation_id']):
                 raise ValueError('Control operation ownership changed or is unavailable')
-            if op.get('persistent_target') is not True or op.get('operation_type')!='DIRECT' or op.get('mode')!='STREAM':
-                raise ValueError('Control owner binding requires a persistent DIRECT STREAM operation')
+            sampled = op.get('persistent_target') is False and request.get('live_sample_owner') is True
+            if (not (op.get('persistent_target') is True or sampled) or
+                    op.get('operation_type')!='DIRECT' or op.get('mode')!='STREAM'):
+                raise ValueError('Control owner binding requires a persistent DIRECT STREAM or an explicitly owned live sample stream')
             return ControlOwnerBinding(arm,arm.session,arm.principal,op['operation_id'])
     def call(self,r):
         op=r['op']

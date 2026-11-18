@@ -49,15 +49,12 @@ Pure FK/IK/preset routes are `/api/manual/{arm}/describe` (GET) and
 `/fk`, `/step`, `/preset`, `/roll` (POST). They calculate only. Motion still
 uses the existing DIRECT websocket. Only one solve is pending per panel; old
 results cannot restart control after Stop, mode changes or disconnection.
-See [calculator contracts](manual-control-backend.md) and [leader bridge](leader-input.md).
+See [calculator contracts](manual-control-backend.md) and [browser USB leader](leader-input.md).
 
-Leader uses an actual native input host, with host/device dropdowns populated
-from its OS inventory. The bridge needs its matching existing calibration; it
-never starts calibration automatically. No USB leader was present on the Mac
-at implementation time. An absent host/device is shown as unavailable, not a
-sample device. Before moving from Leader to Home/another mode, stop confirmation
-is checked. Cleanup uses an operation/session-scoped native hold so late cleanup
-cannot stop a replacement operation.
+The Leader panel pairs the operator computer’s USB serial adapter through the
+browser. It verifies the selected calibration before motion. An optional
+Station-attached input source can be selected in the same panel. Freeze, Home
+and mode changes retire the owned run. [Browser leader guide](leader-input.md)
 
 ## Telemetry collector
 

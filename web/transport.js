@@ -1234,6 +1234,8 @@ export class StationClient {
     };
   }
   async startManual(armId, options = {}) {
+    if (options.readLeader !== undefined && typeof options.readLeader !== "function")
+      throw new StationError("Leader sample reader must be a function", "INVALID_INPUT");
     if (
       options.duration_s != null &&
       options.duration_s !== 0 &&
@@ -1249,7 +1251,10 @@ export class StationClient {
     op.target = seed;
     op.targetEdited = false;
     op.pickupIds = new Set();
-    op.pickedUp = false;
+    op.readLeader = options.readLeader;
+    op.onLeaderSent = options.onLeaderSent;
+    if (op.readLeader) op.leaderReads = new AbortController();
+    op.pickedUp = Boolean(op.readLeader);
     const opened = deferred();
     const ws = new this.env.WebSocket(
       this._url("/ws/control", true),
@@ -1268,7 +1273,8 @@ export class StationClient {
         operator_session_id: op.principal,
         operation_type: "DIRECT",
         mode: "STREAM",
-        input_semantics: "persistent_target",
+        input_semantics: op.readLeader ? "live_sample" : "persistent_target",
+        ...(op.readLeader ? {source:"browser_leader"} : {}),
       };
       if (options.duration_s)
         goal.duration_s = finite(options.duration_s, "Operation duration");
@@ -1276,7 +1282,8 @@ export class StationClient {
       op.state = "preparing";
       this._operationEvent(op, "accepted");
       opened.resolve(this._publicOperation(op));
-      this._manualTick(op);
+      if (op.readLeader) void this._leaderTick(op);
+      else this._manualTick(op);
     };
     ws.onmessage = (event) => {
       if (this._active !== op) return;
@@ -1351,6 +1358,39 @@ export class StationClient {
     if (this._active?.transport === "websocket") this._active.readJog = readIntent;
   }
   get usingJog() { return Boolean(this._active?.jogging); }
+
+  async _leaderTick(op) {
+    if (this._active !== op || op.ending) return;
+    const started = this.env.now();
+    const grant = op.grant;
+    if (grant && started < grant.localDeadline && op.ws.readyState === 1 && op.ws.bufferedAmount === 0) {
+      try {
+        // One fresh USB read per send. A read that outlives its grant cannot
+        // be stamped with a newer window, even if the tab was suspended.
+        const sample = await op.readLeader({signal:op.leaderReads.signal});
+        if (this._active !== op || op.ending || op.leaderReads.signal.aborted) return;
+        if (op.ws.readyState === 1 && op.ws.bufferedAmount === 0 &&
+            op.grant?.window_id === grant.window_id && this.env.now() < grant.localDeadline) {
+          const body = this._directTarget(op.armId, sample);
+          const frame = this._frame(op, "COMMAND", {
+            payload_kind:"DIRECT_JOINT_TARGET", input_id:this.env.uuid(), body,
+          });
+          if (frame) {
+            op.ws.send(JSON.stringify(frame));
+            op.onLeaderSent?.(body);
+          }
+        }
+      } catch (error) {
+        if (this._active === op && !op.ending && !op.leaderReads.signal.aborted)
+          this._failOperation(op, error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+    }
+    if (this._active === op && !op.ending) {
+      const delay = Math.max(0, this.timing.manualMs - (this.env.now()-started));
+      this._later(op, () => { void this._leaderTick(op); }, delay);
+    }
+  }
 
   setManualTarget(target) {
     const op = this._active;
@@ -1467,6 +1507,7 @@ export class StationClient {
   }
   _clearOperation(op) {
     if (this._active === op) this._active = null;
+    op.leaderReads?.abort();
     for (const timer of op.timers) this.env.clearTimeout(timer);
     op.timers.clear();
     op.grant = null;

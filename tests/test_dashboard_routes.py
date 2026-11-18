@@ -224,9 +224,10 @@ def test_leader_start_reads_native_permission_off_http_thread_before_ros_cache_u
     assert owner.states['arm1']['permission'] is False
 
 
-@pytest.mark.parametrize('semantics,persistent,cancel_failure',[
-    (None,False,False),('live_sample',False,False),('persistent_target',True,False),('persistent_target',True,True)])
-def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(semantics,persistent,cancel_failure,monkeypatch):
+@pytest.mark.parametrize('semantics,persistent,cancel_failure,browser_leader',[
+    (None,False,False,False),('live_sample',False,False,False),('persistent_target',True,False,False),
+    ('persistent_target',True,True,False),('live_sample',False,False,True)])
+def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(semantics,persistent,cancel_failure,browser_leader,monkeypatch):
     from aiohttp import web
     from aiohttp.test_utils import TestClient,TestServer
     from soarm_station_interfaces.msg import OperationFeedback
@@ -236,7 +237,9 @@ def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(sema
         def __init__(self,path):assert path=='test-native-socket'
         def call(self,operation,**binding):
             assert operation=='bind_control_owner'
-            assert binding=={'arm_id':'arm1','controller_session':'controller','principal':'browser-owner','operation_id':'owned-action'}
+            expected={'arm_id':'arm1','controller_session':'controller','principal':'browser-owner','operation_id':'owned-action'}
+            if browser_leader:expected['live_sample_owner']=True
+            assert binding==expected
             lifetime.append('bound')
             return {'accepted':True,**binding}
         def close(self):lifetime.append('closed')
@@ -264,11 +267,12 @@ def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(sema
                 goal={'arm_id':'arm1','operator_session_id':'browser-owner',
                     'operation_type':'DIRECT','mode':'STREAM','runtime_boot_id':'boot','controller_session':'controller'}
                 if semantics is not None:goal['input_semantics']=semantics
+                if browser_leader:goal['source']='browser_leader'
                 await ws.send_json(goal)
                 message=await ws.receive_json(timeout=1)
                 assert message['type']=='grant'
                 assert submitted[0][1:] == ('browser-owner',persistent)
-                assert lifetime==(['bound'] if persistent else [])
+                assert lifetime==(['bound'] if persistent or browser_leader else [])
                 await ws.send_json({'arm_id':'arm1','runtime_boot_id':'boot','controller_session':'controller',
                     'operation_id':'owned-action','operation_epoch':1,'window_id':'window','sequence':1,
                     'input_id':'current','frame_kind':'COMMAND','payload_kind':'DIRECT_JOINT_TARGET',
@@ -277,12 +281,12 @@ def test_control_socket_selects_explicit_intent_and_cancels_only_its_action(sema
                     if 'command' in lifetime:break
                     await asyncio.sleep(.005)
                 assert 'command' in lifetime
-                if persistent:assert lifetime.index('bound')<lifetime.index('command')
+                if persistent or browser_leader:assert lifetime.index('bound')<lifetime.index('command')
             for _ in range(20):
                 if canceled:break
                 await asyncio.sleep(.005)
             assert canceled==['owned-action']
-            assert ('closed' in lifetime)==persistent
+            assert ('closed' in lifetime)==(persistent or browser_leader)
     asyncio.run(exercise())
 
 

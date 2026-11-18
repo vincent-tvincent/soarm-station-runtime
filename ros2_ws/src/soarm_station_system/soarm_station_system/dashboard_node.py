@@ -32,8 +32,9 @@ from soarm_station.policy_http import mount_policy_routes
 from soarm_station.ipc import Client
 from soarm_station.readiness import project_readiness
 from soarm_station.http_operations import OperationRequests,RequestConflict
+from soarm_station.browser_leader_profiles import mount_browser_leader_routes
 
-ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','gamepad-panel.js','gamepad-input.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
+ASSET_NAMES=frozenset(('app.js','graph.js','transport.js','styles.css','camera-layout.js','payload-model.js','manual-panel.js','browser-leader-panel.js','leader-serial.js','gamepad-panel.js','gamepad-input.js','fk-view.js','policy-management.js','policy-management.css','policy-draft.js','policy-api.js','yaml-vendor.js','LICENSE-yaml.txt'))
 
 def asdict(m):return dict(message_to_ordereddict(m))
 def telemetry_view(config,upload):
@@ -171,6 +172,7 @@ class DashboardNode(BaseNode):
         app.router.add_post('/api/graph/sample',self.graph_sample);app.router.add_post('/api/v1/ros/sample',self.graph_sample)
         app.router.add_post('/api/v1/ros/watch',self.graph_watch)
         ManualRoutes(self.config, native_socket=self.config.get('socket')).mount(app)
+        mount_browser_leader_routes(app,self.config,root=os.environ.get('SOARM_STATION_ROOT'))
         async def conditional_hold(arm,session,principal,operation_id=None):
             def call():
                 client=Client(self.config['socket'])
@@ -286,7 +288,7 @@ class DashboardNode(BaseNode):
         pending_goal=self.operation.send_goal_async(g,feedback_callback=receive_feedback)
         try:h=await resolved(pending_goal)
         except BaseException:
-            if persistent_target:
+            if persistent_target or b.get('source') == 'browser_leader':
                 # A persistent target cannot rely on an idle timer to clean up
                 # an accepted goal whose gateway response was lost/canceled.
                 def retire_late(future):
@@ -353,22 +355,26 @@ class DashboardNode(BaseNode):
             semantics=b.get('input_semantics','live_sample')
             if semantics not in ('live_sample','persistent_target'):
                 raise ValueError('Unknown DIRECT input semantics')
+            browser_leader = b.get('source') == 'browser_leader'
+            if browser_leader and semantics != 'live_sample':
+                raise ValueError('Browser leader input requires fresh live samples')
+            bind_lifetime = browser_leader or semantics == 'persistent_target'
             state=self.states[arm]
             # Opening a socket is not consent to arm: permission must already be granted to this requested operator ID.
             principal=b['operator_session_id']
             def on_feedback(m):feedback.clear();feedback.update(asdict(m.feedback.status))
-            # Browser target intent opts in explicitly. Native leader/operator
-            # clients also use this route; UI producers explicitly request
-            # persistent_target while unmarked external streams retain live_sample.
-            # Socket close/error cancels this exact action for either contract.
+            # Sampled leader input and latched manual input both release their
+            # exact operation on owner EOF. Only latched input retains a target.
             i,h=await self.submit(b,principal,on_feedback,persistent_target=semantics=='persistent_target');result=self.goals[i]['future'];last_feedback=0.;last_state=0.
             while not ws.closed and not self.stopping and not result.done():
                 t=time.monotonic()
-                if semantics=='persistent_target' and control_owner is None and feedback.get('operation_id'):
-                    control_owner=await bind_control_owner(self.config['socket'],{
+                if bind_lifetime and control_owner is None and feedback.get('operation_id'):
+                    binding={
                         'arm_id':arm,'controller_session':b['controller_session'],
-                        'principal':principal,'operation_id':feedback['operation_id']})
-                if feedback and (semantics!='persistent_target' or control_owner is not None) and t-last_feedback>=.05:
+                        'principal':principal,'operation_id':feedback['operation_id']}
+                    if browser_leader:binding['live_sample_owner']=True
+                    control_owner=await bind_control_owner(self.config['socket'],binding)
+                if feedback and (not bind_lifetime or control_owner is not None) and t-last_feedback>=.05:
                     await ws.send_json({'type':'grant','grant':dict(feedback)});last_feedback=t
                 if t-last_state>=.01:
                     await ws.send_json({'type':'state','state':self.states.get(arm),'joints':self.joints.get(arm)});last_state=t
@@ -382,8 +388,8 @@ class DashboardNode(BaseNode):
                         d=json.loads(m.data)
                         if not isinstance(d,dict):raise ValueError('Control frame must be a JSON object')
                         if d.get('arm_id')!=arm:raise ValueError('Arm mismatch')
-                        if semantics=='persistent_target' and control_owner is None:
-                            raise ValueError('Persistent control ownership is not ready')
+                        if bind_lifetime and control_owner is None:
+                            raise ValueError('Persistent control ownership is not ready' if not browser_leader else 'Leader control ownership is not ready')
                         for key in ('runtime_boot_id','controller_session','operation_id','window_id'):
                             if not isinstance(d.get(key),str) or not 1<=len(d[key])<=64:raise ValueError('Invalid '+key)
                         for key in ('operation_epoch','sequence'):
