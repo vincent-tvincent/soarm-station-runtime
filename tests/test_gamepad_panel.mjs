@@ -459,3 +459,26 @@ test('contact locks exactly one trigger pickup and leaves the stick and later un
   f.panel.applyGripFeedback(feedback);
   assert.equal(f.panel.engine.gripperState,'following');
 });
+
+test('focus keeps a grasp but a new gamepad run starts with a fresh trigger pickup', async t => {
+  const f = fixture(t, {admitted:0, measured:.82});
+  f.manual.descriptor.native_jog = true;
+  f.manual.client.currentOperation.operationId = 'first';
+  f.poll(raw({lt:1}));
+  const previous = {operation_id:'first', frozen_grasp_attempt:f.panel.nativeIntent().grasp_attempt,
+                    grasp_freeze_reason:'FULLY_CLOSED', jog_gripper_percent:0};
+  f.panel.applyGripFeedback(previous);
+  f.focus(false); f.poll(raw({lt:0}));
+  f.focus(true); f.poll(raw({lt:0}));
+  assert.equal(f.panel.engine.gripperState, 'locked');
+
+  await f.manual.stop();
+  await f.manual.start();
+  f.manual.client.currentOperation.operationId = 'second';
+  assert.equal(f.panel.engine.gripperState, 'pickup');
+  f.poll(raw({lt:1}));
+  assert.notEqual(f.panel.nativeIntent().grasp_attempt, previous.frozen_grasp_attempt);
+  f.panel.applyGripFeedback(previous);
+  f.poll(raw({lt:.5}));
+  assert.ok(f.panel.nativeIntent().gripper_target > 45);
+});

@@ -61,3 +61,26 @@ def test_motion_partial_goal_reversal_and_missing_samples_do_not_mimic_contact()
     assert attempt.update(3.51, 0, .5, .7, lambda:False) is None
     assert attempt.update(3.52, 0, 0, .2, lambda:False) == 0
     assert attempt.reason == 'FULLY_CLOSED'
+
+
+@pytest.mark.parametrize('initial_goal,measured', [(0.,0.), (.82,.82), (0.,1.4), (0.,3.2)])
+def test_closed_pickup_waits_for_a_new_closing_stroke(initial_goal, measured):
+    attempt = GraspAttempt(1)
+    def no_poll():
+        pytest.fail('A held closed target must not start contact detection')
+    # The full squeeze picks up the trigger at the existing closed pose. Even
+    # sustained tracking error at the old goal is not a fresh closing stroke.
+    for i in range(80):
+        goal = initial_goal if i == 0 else 0.
+        assert attempt.update(i/100, 0., goal, measured, no_poll) is None
+    assert attempt.reason == ''
+    # Releasing the trigger opens the jaw. A genuine reclose in this same
+    # pickup still locks when it reaches the endpoint.
+    for i in range(81, 104):
+        opening = float(i-80)
+        assert attempt.update(i/100, 25., opening, opening, no_poll) is None
+    for i in range(104, 127):
+        opening = float(127-i)
+        assert attempt.update(i/100, 0., opening, opening, no_poll) is None
+    assert attempt.update(1.27, 0., 0., .82, no_poll) == 0.
+    assert attempt.reason == 'FULLY_CLOSED'

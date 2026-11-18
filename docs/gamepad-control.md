@@ -68,8 +68,10 @@ precedence over X in the same sample; Stop/Home take precedence over both.
 While **Following**, squeeze the trigger to grasp. When the jaw stops closing
 against an object, the panel shows **Auto-locked**. You can release the trigger
 and carry the object with the sticks. Press **X / Square** to unlock, then cross
-the displayed pickup marker to take control of the jaw again. A full squeeze
-that reaches the calibrated closed position also locks. Each pickup can lock once.
+the displayed pickup marker to take control of the jaw again. If you start with
+the jaw already closed, squeeze to pick up the trigger, then release it to open
+the jaw. Auto-lock becomes available on the next closing stroke. A full squeeze
+from an open position can lock at the closed endpoint. Each pickup can lock once.
 
 The Pi reads the gripper servo's overload flag while a closing goal leads the
 measured jaw. An ordinary grasp can stop the jaw before overload protection

@@ -155,17 +155,21 @@ export class GamepadPanel {
     if (active) this.poll();
   }
   resetForArm() { this.sourceEpoch++; this.pendingMotion = null; this.output = null; this.needsNeutral = true; this.engine.reset(this.heldOpening(), this.raw); }
-  suspend() {
+  suspend({keepAutomaticLock = true} = {}) {
     this.sourceEpoch++; this.lastSolveAt = null; this.pendingMotion = null; this.needsNeutral = true; this.output = null;
-    const locked = this.engine.gripperState === 'locked';
     const reason = this.engine.lockReason;
+    const locked = this.engine.gripperState === 'locked' && (keepAutomaticLock || !reason);
     const opening = locked && this.engine.heldClosing !== null
       ? 100 * (1 - this.engine.heldClosing) : this.heldOpening();
     this.engine.reset(opening, this.raw);
     if (locked && this.engine.toggleGripper(opening, this.engine.liveGrip))
       this.engine.lockReason = reason;
   }
-  operationStarted() { this.disconnected = false; this.suspend(); this.render(); }
+  operationStarted() {
+    this.disconnected = false;
+    this.suspend({keepAutomaticLock:false});
+    this.render();
+  }
   operationEnded() { this.suspend(); this.engine.resume_required = true; this.render(); }
   async chooseDevice(key) {
     if (key === this.selectedKey) return;

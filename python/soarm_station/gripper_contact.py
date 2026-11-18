@@ -9,6 +9,7 @@ class GraspAttempt:
     DWELL_S = 0.30
     MAX_SAMPLE_GAP_S = 0.10
     MAX_HOLD_BIAS = 2.0
+    CLOSED_OPENING = 1.0
 
     def __init__(self, number):
         self.number = number
@@ -16,6 +17,7 @@ class GraspAttempt:
         self.reason = ''
         self.direction_reference = None
         self.opening = False
+        self.peak_opening = 0.0
         self.next_status_read = 0.0
         self.last_tick = None
         self.progress_at = None
@@ -33,16 +35,22 @@ class GraspAttempt:
         if self.last_tick is None or now - self.last_tick > self.MAX_SAMPLE_GAP_S:
             self.progress_at = None
         self.last_tick = now
+        # Picking up the trigger with the jaw already closed can request 0% on
+        # the very first tick. Arm only from an opening that the jaw and its
+        # issued goal both reached, with a margin for closed-stop encoder noise.
+        confirmed_opening = min(measured, previous_goal)
+        if confirmed_opening > self.CLOSED_OPENING + self.PROGRESS:
+            self.peak_opening = max(self.peak_opening, confirmed_opening)
         if self.direction_reference is None:
             self.direction_reference = requested
         elif abs(requested - self.direction_reference) >= self.PROGRESS:
             self.opening = requested > self.direction_reference
             self.direction_reference = requested
 
-        if self.opening:
+        if self.opening or self.peak_opening - requested < self.PROGRESS:
             self.progress_at = None
             return None
-        if requested <= 0.5 and previous_goal <= requested + 0.1 and measured <= 1.0:
+        if requested <= 0.5 and previous_goal <= requested + 0.1 and measured <= self.CLOSED_OPENING:
             self.reason = 'FULLY_CLOSED'
         elif measured - max(previous_goal, requested) >= self.PROGRESS:
             if read_overload is not None and now >= self.next_status_read:
