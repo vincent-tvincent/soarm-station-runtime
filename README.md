@@ -6,27 +6,25 @@ The robot host serves the operator interface. Keyboard, gamepad, camera and poli
 
 ## Live demos
 
-Recorded from a running SO-101 station with live camera feeds and ROS telemetry.
-New recordings captured and encoded at **native 4K (3840×2160), 16:9**.
-Open an original below to view all panels at full resolution.
+Select a preview to watch the full recording in 1080p. Each demo was captured on the live station at 3840×2160. The original 4K GIFs are linked below.
 
 **Live cameras — Equal, Primary and Floating layouts**
 
-![Three live camera feeds, switching layouts and promoting the primary view](docs/demos/01-live-cameras-4k.gif)
+[![Three live camera feeds, switching layouts and promoting the primary view](docs/demos/posters/01-live-cameras.webp)](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/playback/01-live-cameras.webp)
 
-[Open 4K original](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/01-live-cameras-4k.gif)
+[Watch · 13 s](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/playback/01-live-cameras.webp) · [Original 4K GIF](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/01-live-cameras-4k.gif)
 
 **Control modes — keyboard IK, Gamepad, and persistent 3D FK**
 
-![Switching from keyboard IK to Gamepad with Start, Stop, Home and Fold visible, plus interactive FK](docs/demos/02-control-and-fk-4k.gif)
+[![Switching from keyboard IK to Gamepad with Start, Stop, Home and Fold visible, plus interactive FK](docs/demos/posters/02-control-and-fk.webp)](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/playback/02-control-and-fk.webp)
 
-[Open 4K original](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/02-control-and-fk-4k.gif)
+[Watch · 14 s](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/playback/02-control-and-fk.webp) · [Original 4K GIF](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/02-control-and-fk-4k.gif)
 
 **ROS graph — focused connections and live message counts**
 
-![Live ROS publisher and subscriber connections with measured traffic animation](docs/demos/03-ros-data-flow-4k.gif)
+[![Live ROS publisher and subscriber connections with measured traffic animation](docs/demos/posters/03-ros-data-flow.webp)](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/playback/03-ros-data-flow.webp)
 
-[Open 4K original](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/03-ros-data-flow-4k.gif)
+[Watch · 12 s](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/playback/03-ros-data-flow.webp) · [Original 4K GIF](https://raw.githubusercontent.com/vincent-tvincent/soarm-station-runtime/main/docs/demos/03-ros-data-flow-4k.gif)
 
 The runtime owns devices and dispatches commands. Demonstration collection, dataset review and model training belong to the separate SO-Arm Station training repository. Other robot families require an adapter. Coordinated multi-arm planning is not implemented.
 
